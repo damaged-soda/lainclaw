@@ -1,0 +1,24 @@
+node_modules/
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env
+.env
+.env.local
+
+# OS/Editor artifacts
+.DS_Store
+Thumbs.db
+
+# TypeScript
+*.tsbuildinfo
+
+# Package manager lockfiles (optional for lightweight docs repo mode)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
