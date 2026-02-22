@@ -10,9 +10,11 @@
   },
   "scripts": {
     "start": "node dist/index.js",
-    "build": "printf '#!/usr/bin/env node\\n' > dist/index.js && cat src/index.ts >> dist/index.js && chmod +x dist/index.js"
+    "build": "rm -rf dist && tsc && chmod +x dist/index.js",
+    "bootstrap": "npm run build && npm link"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
   }
 }
