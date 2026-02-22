@@ -146,8 +146,15 @@ export async function sendFeishuTextMessage(rawConfig: Partial<FeishuGatewayConf
   openId: string;
   text: string;
 }): Promise<void> {
+  const DEFAULT_PROVIDER = "openai-codex";
+  const DEFAULT_WITH_TOOLS = true;
+  const DEFAULT_MEMORY = false;
+  const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
   const config: FeishuGatewayConfig = {
-    requestTimeoutMs: rawConfig.requestTimeoutMs ?? 10000,
+    requestTimeoutMs: rawConfig.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    provider: typeof rawConfig.provider === "string" && rawConfig.provider.trim() ? rawConfig.provider.trim() : DEFAULT_PROVIDER,
+    withTools: rawConfig.withTools ?? DEFAULT_WITH_TOOLS,
+    memory: rawConfig.memory ?? DEFAULT_MEMORY,
     ...(typeof rawConfig.appId === "string" && rawConfig.appId.trim() ? { appId: rawConfig.appId.trim() } : {}),
     ...(typeof rawConfig.appSecret === "string" && rawConfig.appSecret.trim() ? { appSecret: rawConfig.appSecret.trim() } : {}),
   };

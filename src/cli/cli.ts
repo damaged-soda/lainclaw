@@ -22,7 +22,9 @@ export function printUsage(): string {
     '  lainclaw --version',
     '  lainclaw ask <input>',
     '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
-    '  lainclaw feishu [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+    '  lainclaw gateway --channel feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+    '  lainclaw feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+    '  lainclaw feishu（兼容命令，等价于 lainclaw gateway --channel feishu）',
     '  lainclaw feishu（未传入参数时，优先使用上次启动写入的 ~/.lainclaw/feishu-gateway.json）',
     '  lainclaw tools list',
     '  lainclaw tools info <name>',
@@ -43,7 +45,7 @@ export function printUsage(): string {
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '',
-    'Notes: model is currently stubbed for MVP and runs fully offline.'
+    'Notes: model defaults to openai-codex when `provider` is set; other providers still return stub result.'
   ].join('\n');
 }
 
@@ -91,6 +93,31 @@ function parseBooleanFlag(raw: string, index: number): boolean {
   }
 
   throw new Error(`Invalid boolean flag: ${raw}`);
+}
+
+function isAuthError(rawMessage: string): boolean {
+  return (
+    rawMessage.includes("No openai-codex profile found") ||
+    rawMessage.includes("No openai-codex profile found. Run: lainclaw auth login openai-codex") ||
+    rawMessage.includes("Failed to read OAuth credentials for openai-codex")
+  );
+}
+
+function isProviderNotSupportedError(rawMessage: string): boolean {
+  return rawMessage.includes("Unsupported provider");
+}
+
+function makeFeishuFailureHint(rawMessage: string): string {
+  if (rawMessage.includes("ask timeout")) {
+    return "模型处理超时，请稍后重试；若持续超时请检查网络或加长 timeout 配置。";
+  }
+  if (isAuthError(rawMessage)) {
+    return "未检测到可用 openai-codex 登录，请先执行：`lainclaw auth login openai-codex`。";
+  }
+  if (isProviderNotSupportedError(rawMessage)) {
+    return "当前仅支持 provider=openai-codex，请使用 `--provider openai-codex`。";
+  }
+  return "模型调用失败，请联系管理员查看服务日志；或使用 `--provider openai-codex --profile <profileId>` 重试。";
 }
 
 function parsePositiveIntValue(raw: string, index: number, label: string): number {
@@ -258,10 +285,22 @@ function parseFeishuServerArgs(argv: string[]): {
   appId?: string;
   appSecret?: string;
   requestTimeoutMs?: number;
+  provider?: string;
+  profileId?: string;
+  withTools?: boolean;
+  memory?: boolean;
+  toolAllow?: string[];
+  toolMaxSteps?: number;
 } {
   let appId: string | undefined;
   let appSecret: string | undefined;
   let requestTimeoutMs: number | undefined;
+  let provider: string | undefined;
+  let profileId: string | undefined;
+  let withTools: boolean | undefined;
+  let memory: boolean | undefined;
+  let toolAllow: string[] | undefined;
+  let toolMaxSteps: number | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -297,8 +336,71 @@ function parseFeishuServerArgs(argv: string[]): {
       continue;
     }
 
+    if (arg === '--provider') {
+      throwIfMissingValue('provider', i + 1, argv);
+      provider = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--provider=')) {
+      provider = arg.slice('--provider='.length);
+      continue;
+    }
+
+    if (arg === '--profile') {
+      throwIfMissingValue('profile', i + 1, argv);
+      profileId = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--profile=')) {
+      profileId = arg.slice('--profile='.length);
+      continue;
+    }
+
+    if (arg === '--with-tools' || arg === '--no-with-tools' || arg.startsWith('--with-tools=')) {
+      withTools = parseBooleanFlag(arg, i);
+      continue;
+    }
+
+    if (arg === '--memory' || arg === '--no-memory' || arg.startsWith('--memory=')) {
+      memory = parseMemoryFlag(arg, i);
+      continue;
+    }
+
+    if (arg === '--tool-allow') {
+      throwIfMissingValue('tool-allow', i + 1, argv);
+      toolAllow = parseCsvOption(argv[i + 1]);
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--tool-allow=')) {
+      toolAllow = parseCsvOption(arg.slice('--tool-allow='.length));
+      continue;
+    }
+
+    if (arg === '--tool-max-steps') {
+      throwIfMissingValue('tool-max-steps', i + 1, argv);
+      toolMaxSteps = parsePositiveIntValue(argv[i + 1], i + 1, '--tool-max-steps');
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--tool-max-steps=')) {
+      toolMaxSteps = parsePositiveIntValue(arg.slice('--tool-max-steps='.length), i + 1, '--tool-max-steps');
+      continue;
+    }
+
     if (arg.startsWith('--')) {
       throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+
+  if (provider) {
+    const normalizedProvider = provider.trim().toLowerCase();
+    if (normalizedProvider.length > 0 && normalizedProvider !== "openai-codex") {
+      throw new Error(`Unsupported feishu provider: ${provider}`);
     }
   }
 
@@ -306,6 +408,72 @@ function parseFeishuServerArgs(argv: string[]): {
     appId,
     appSecret,
     requestTimeoutMs,
+    provider,
+    profileId,
+    withTools,
+    memory,
+    toolAllow,
+    toolMaxSteps,
+  };
+}
+
+function parseGatewayArgs(argv: string[]): {
+  channel: "feishu";
+  appId?: string;
+  appSecret?: string;
+  requestTimeoutMs?: number;
+  provider?: string;
+  profileId?: string;
+  withTools?: boolean;
+  memory?: boolean;
+  toolAllow?: string[];
+  toolMaxSteps?: number;
+} {
+  let channel: "feishu" | undefined;
+  const channelAwareArgs: string[] = [];
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+
+    if (arg === '--channel') {
+      throwIfMissingValue('channel', i + 1, argv);
+      const next = argv[i + 1].trim().toLowerCase();
+      if (next !== "feishu") {
+        throw new Error(`Unsupported channel: ${argv[i + 1]}`);
+      }
+      channel = "feishu";
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--channel=')) {
+      const next = arg.slice('--channel='.length).trim().toLowerCase();
+      if (next !== "feishu") {
+        throw new Error(`Unsupported channel: ${arg.slice('--channel='.length)}`);
+      }
+      channel = "feishu";
+      continue;
+    }
+
+    if (arg.startsWith('--')) {
+      if (!arg.includes("=") && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
+        channelAwareArgs.push(arg, argv[i + 1]);
+        i += 1;
+        continue;
+      }
+      channelAwareArgs.push(arg);
+      continue;
+    }
+  }
+
+  if (!channel) {
+    throw new Error("Missing --channel for gateway command");
+  }
+
+  const feishuConfig = parseFeishuServerArgs(channelAwareArgs);
+  return {
+    channel,
+    ...feishuConfig,
   };
 }
 
@@ -540,10 +708,16 @@ export async function runCli(argv: string[]): Promise<number> {
     }
   }
 
-  if (command === 'feishu') {
+  if (command === 'gateway') {
     try {
-      const options = parseFeishuServerArgs(argv.slice(1));
-      await runFeishuGatewayServer(options);
+      const options = parseGatewayArgs(argv.slice(1));
+      const { channel, ...feishuOptions } = options;
+      if (channel !== "feishu") {
+        throw new Error(`Unsupported channel: ${channel}`);
+      }
+      await runFeishuGatewayServer(feishuOptions, {
+        onFailureHint: makeFeishuFailureHint,
+      });
       return 0;
     } catch (error) {
       if (error instanceof ValidationError) {
@@ -551,7 +725,29 @@ export async function runCli(argv: string[]): Promise<number> {
       } else {
         console.error("ERROR:", String(error instanceof Error ? error.message : error));
       }
-      console.error('Usage: lainclaw feishu [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]');
+      console.error(
+        'Usage: lainclaw gateway --channel feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+      );
+      return 1;
+    }
+  }
+
+  if (command === 'feishu') {
+    try {
+      const options = parseFeishuServerArgs(argv.slice(1));
+      await runFeishuGatewayServer(options, {
+        onFailureHint: makeFeishuFailureHint,
+      });
+      return 0;
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        console.error(`[${error.code}] ${error.message}`);
+      } else {
+        console.error("ERROR:", String(error instanceof Error ? error.message : error));
+      }
+      console.error(
+        'Usage: lainclaw feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+      );
       return 1;
     }
   }

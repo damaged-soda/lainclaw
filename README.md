@@ -81,7 +81,8 @@ lainclaw ask 你好，帮我总结一下
 
 ## 飞书（Feishu）网关接入（WS-only）
 
-当前的 `feishu` 通道仅支持 **WebSocket 长连接模式**（不使用 Webhook）。
+当前的 `feishu` 通道仅支持 **WebSocket 长连接模式**（不使用 Webhook）。统一入口为 `gateway` 命令，  
+`feishu` 命令保留为兼容入口，等价于 `gateway --channel feishu`。
 
 ### 启动方式
 
@@ -89,20 +90,44 @@ lainclaw ask 你好，帮我总结一下
 cd <repo_root>/src/lainclaw
 npm install
 npm run build
+npm start -- gateway --channel feishu --app-id <AppID> --app-secret <AppSecret>
+```
+
+兼容启动：
+
+```bash
 npm start -- feishu --app-id <AppID> --app-secret <AppSecret>
 ```
 
 可选参数：
 
 - `--request-timeout-ms <ms>`：飞书 API 请求超时（默认 10000）
+- `--provider <provider>`：模型提供商，当前支持 `openai-codex`（默认） 
+- `--profile <profileId>`：使用指定 openai-codex 登录 Profile（默认走当前 active profile）
+- `--with-tools` / `--no-with-tools`：是否允许模型发起 tool-call（默认打开）
+- `--memory` / `--no-memory`：是否启用会话记忆摘要合并（默认关闭）
+- `--tool-allow <tool1,tool2>`：限制允许的工具白名单（默认允许全部）
+- `--tool-max-steps <N>`：限制模型自动 tool-call 循环次数（建议值 4~8）
 
 示例（10秒超时）：
 
 ```bash
-npm start -- feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
+npm start -- gateway --channel feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
+```
+
+或使用模型配置启动（会让飞书消息走模型）：
+
+```bash
+npm start -- gateway --channel feishu --provider openai-codex --with-tools --app-id <AppID> --app-secret <AppSecret>
 ```
 
 也可以直接使用全局命令（安装过 `npm link` 后）：
+
+```bash
+lainclaw gateway --channel feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
+```
+
+兼容方式：
 
 ```bash
 lainclaw feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
@@ -113,6 +138,12 @@ lainclaw feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 1
 - `LAINCLAW_FEISHU_APP_ID` / `FEISHU_APP_ID`
 - `LAINCLAW_FEISHU_APP_SECRET` / `FEISHU_APP_SECRET`
 - `LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS` / `FEISHU_REQUEST_TIMEOUT_MS`
+- `LAINCLAW_FEISHU_PROVIDER` / `FEISHU_PROVIDER`：`openai-codex`
+- `LAINCLAW_FEISHU_PROFILE_ID` / `FEISHU_PROFILE_ID`
+- `LAINCLAW_FEISHU_TOOL_ALLOW` / `FEISHU_TOOL_ALLOW`（逗号分隔）
+- `LAINCLAW_FEISHU_TOOL_MAX_STEPS` / `FEISHU_TOOL_MAX_STEPS`
+- `LAINCLAW_FEISHU_WITH_TOOLS` / `FEISHU_WITH_TOOLS`：`true|false`
+- `LAINCLAW_FEISHU_MEMORY` / `FEISHU_MEMORY`：`true|false`
 
 ### 启动日志说明（你可以按这个判断是否成功）
 
@@ -121,6 +152,11 @@ lainclaw feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 1
 - `[ws] ws client ready`：长连接建立成功
 - `[feishu] websocket connection started`：`feishu` 命令的处理循环已启动
 - `answered dm for open_id=...`：说明收到 DM 并成功回包（表示端到端链路通了）
+
+常见错误提示：
+
+- 未登录 openai-codex：`No openai-codex profile found...` 会返回「请先执行 `lainclaw auth login openai-codex`」。
+- 模型超时：会返回超时提示，建议检查网络与 openclaw 上下游状态。
 
 ### 当前限制（MVP）
 

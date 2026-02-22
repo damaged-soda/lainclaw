@@ -205,10 +205,15 @@ function parseFeishuInbound(raw: unknown, requestId: string): FeishuInboundMessa
   };
 }
 
-async function handleWsPayload(data: unknown, config: FeishuGatewayConfig): Promise<void> {
+async function handleWsPayload(
+  data: unknown,
+  config: FeishuGatewayConfig,
+  onFailureHint?: (rawMessage: string) => string,
+): Promise<void> {
   const requestId = createRequestId();
+  let inbound: FeishuInboundMessage | undefined;
   try {
-    const inbound = parseFeishuInbound(data, requestId);
+    inbound = parseFeishuInbound(data, requestId);
     if (inbound.kind !== "dm-text" || !inbound.openId || !inbound.input) {
       return;
     }
@@ -220,6 +225,12 @@ async function handleWsPayload(data: unknown, config: FeishuGatewayConfig): Prom
     const runResult = await Promise.race([
       runAsk(inbound.input, {
         sessionKey: `feishu:dm:${inbound.openId}`,
+        provider: config.provider,
+        ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
+        withTools: config.withTools,
+        ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
+        ...(typeof config.toolMaxSteps === "number" ? { toolMaxSteps: config.toolMaxSteps } : {}),
+        memory: config.memory,
       }),
       new Promise<never>((_, reject) => {
         setTimeout(() => {
@@ -232,14 +243,36 @@ async function handleWsPayload(data: unknown, config: FeishuGatewayConfig): Prom
       openId: inbound.openId,
       text: runResult.result,
     });
-    console.log(`[feishu] ${requestId} answered dm for open_id=${inbound.openId}`);
+    console.log(
+      `[feishu] ${requestId} answered dm for open_id=${inbound.openId} session=${runResult.sessionKey}/${runResult.sessionId}`,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[feishu] ${requestId} error: ${message}`);
+    if (inbound?.openId) {
+      const reason =
+        typeof onFailureHint === "function" ? onFailureHint(message) : "模型调用失败，请联系管理员查看服务日志。";
+      const reply = `[Lainclaw] ${reason}（requestId: ${requestId}）`;
+      await sendFeishuTextMessage(config, {
+        openId: inbound.openId,
+        text: reply,
+      }).catch((sendError) => {
+        console.error(`[feishu] ${requestId} failed to send fallback error: ${String(sendError)}`);
+      });
+    }
   }
 }
 
-export async function runFeishuGatewayServer(overrides: Partial<FeishuGatewayConfig> = {}): Promise<void> {
+export type FeishuFailureHintResolver = (rawMessage: string) => string;
+
+interface FeishuGatewayServerOptions {
+  onFailureHint?: FeishuFailureHintResolver;
+}
+
+export async function runFeishuGatewayServer(
+  overrides: Partial<FeishuGatewayConfig> = {},
+  options: FeishuGatewayServerOptions = {},
+): Promise<void> {
   const config = await resolveFeishuGatewayConfig(overrides);
   await persistFeishuGatewayConfig(overrides);
 
@@ -250,7 +283,7 @@ export async function runFeishuGatewayServer(overrides: Partial<FeishuGatewayCon
   const eventDispatcher = new Lark.EventDispatcher({});
   eventDispatcher.register({
     "im.message.receive_v1": async (data) => {
-      await handleWsPayload(data, config);
+      await handleWsPayload(data, config, options.onFailureHint);
     },
   });
 
