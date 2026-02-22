@@ -1,6 +1,16 @@
 import { ValidationError } from '../shared/types.js';
 import { runAsk } from '../gateway/askGateway.js';
+import { runHeartbeatOnce, startHeartbeatLoop } from '../heartbeat/runner.js';
+import type { HeartbeatRunSummary } from '../heartbeat/runner.js';
+import {
+  addHeartbeatRule,
+  listHeartbeatRules,
+  removeHeartbeatRule,
+  setHeartbeatRuleEnabled,
+} from '../heartbeat/store.js';
 import { runFeishuGatewayServer } from '../channels/feishu/server.js';
+import { sendFeishuTextMessage } from '../channels/feishu/outbound.js';
+import { type FeishuGatewayConfig, resolveFeishuGatewayConfig } from '../channels/feishu/config.js';
 import { getToolInfo, invokeToolByCli, listToolsCatalog } from '../tools/gateway.js';
 import {
   clearProfiles,
@@ -23,12 +33,20 @@ export function printUsage(): string {
     '  lainclaw ask <input>',
     '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
     '  lainclaw gateway --channel feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+    '  lainclaw gateway --channel feishu [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>]',
     '  lainclaw feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+    '  lainclaw feishu [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>]',
     '  lainclaw feishu（兼容命令，等价于 lainclaw gateway --channel feishu）',
     '  lainclaw feishu（未传入参数时，优先使用上次启动写入的 ~/.lainclaw/feishu-gateway.json）',
     '  lainclaw tools list',
     '  lainclaw tools info <name>',
     '  lainclaw tools invoke <name> --args <json>',
+    '  lainclaw heartbeat add "<ruleText>" [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>]',
+    '  lainclaw heartbeat list',
+    '  lainclaw heartbeat remove <ruleId>',
+    '  lainclaw heartbeat enable <ruleId>',
+    '  lainclaw heartbeat disable <ruleId>',
+    '  lainclaw heartbeat run [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory]',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '  lainclaw auth use <profile>',
@@ -72,24 +90,27 @@ function parseMemoryFlag(raw: string, index: number): boolean {
   return false;
 }
 
-function parseBooleanFlag(raw: string, index: number): boolean {
-  if (raw === '--with-tools') {
+function parseBooleanFlag(raw: string, index: number, name: 'with-tools' | 'heartbeat-enabled' = 'with-tools'): boolean {
+  const normalizedName = name;
+  const enabled = `--${normalizedName}`;
+  const disabled = `--no-${normalizedName}`;
+  if (raw === enabled) {
     return true;
   }
 
-  if (raw === '--no-with-tools') {
+  if (raw === disabled) {
     return false;
   }
 
-  if (raw.startsWith('--with-tools=')) {
-    const value = raw.slice('--with-tools='.length).toLowerCase();
+  if (raw.startsWith(`${enabled}=`)) {
+    const value = raw.slice(`${enabled}=`.length).toLowerCase();
     if (value === 'on' || value === 'true' || value === '1') {
       return true;
     }
     if (value === 'off' || value === 'false' || value === '0') {
       return false;
     }
-    throw new Error(`Invalid value for --with-tools at arg ${index + 1}: ${value}`);
+    throw new Error(`Invalid value for ${enabled} at arg ${index + 1}: ${value}`);
   }
 
   throw new Error(`Invalid boolean flag: ${raw}`);
@@ -107,6 +128,46 @@ function isProviderNotSupportedError(rawMessage: string): boolean {
   return rawMessage.includes("Unsupported provider");
 }
 
+interface HeartbeatTargetDiagnostic {
+  kind: "open-user-id" | "chat-id" | "legacy-user-id" | "unknown";
+  warning?: string;
+}
+
+function inspectHeartbeatTargetOpenId(raw: string): HeartbeatTargetDiagnostic {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return {
+      kind: "unknown",
+      warning: "heartbeat target open id is empty, heartbeat is effectively disabled",
+    };
+  }
+
+  if (trimmed.startsWith("ou_") || trimmed.startsWith("on_")) {
+    return {
+      kind: "open-user-id",
+    };
+  }
+
+  if (trimmed.startsWith("oc_")) {
+    return {
+      kind: "chat-id",
+      warning: "检测到 oc_ 前缀，通常为会话ID/群ID；当前会尝试按会话消息发送，若期望私聊提醒请改为用户 open_id（ou_/on_）。",
+    };
+  }
+
+  if (trimmed.startsWith("u_") || trimmed.startsWith("user_")) {
+    return {
+      kind: "legacy-user-id",
+      warning: "检测到疑似旧 user_id，飞书发送可能需要换用 open_id（ou_/on_）；系统会继续尝试兜底发送。",
+    };
+  }
+
+  return {
+    kind: "unknown",
+    warning: "heartbeat target open id 前缀不在已识别范围内（ou_/on_/oc_）。系统会继续尝试发送，但建议你确认是否为有效接收人 open_id。",
+  };
+}
+
 function makeFeishuFailureHint(rawMessage: string): string {
   if (rawMessage.includes("ask timeout")) {
     return "模型处理超时，请稍后重试；若持续超时请检查网络或加长 timeout 配置。";
@@ -118,6 +179,16 @@ function makeFeishuFailureHint(rawMessage: string): string {
     return "当前仅支持 provider=openai-codex，请使用 `--provider openai-codex`。";
   }
   return "模型调用失败，请联系管理员查看服务日志；或使用 `--provider openai-codex --profile <profileId>` 重试。";
+}
+
+function formatHeartbeatErrorHint(rawMessage: string): string {
+  if (rawMessage.includes("contact:user.employee_id:readonly")) {
+    return `${rawMessage}。请在飞书应用后台为应用补充 “联系人-查看员工个人资料-只读（contact:user.employee_id:readonly）” 权限，并重装应用后重试。`;
+  }
+  if (rawMessage.includes("not a valid") && rawMessage.includes("Invalid ids: [oc_")) {
+    return `${rawMessage}。检测到目标 ID 为 oc_ 前缀，通常需要传入用户 open_id（ou_）或可用的 user_id；请确认你配置的是接收人个人 open_id。`;
+  }
+  return rawMessage;
 }
 
 function parsePositiveIntValue(raw: string, index: number, label: string): number {
@@ -137,6 +208,98 @@ function parseCsvOption(raw: string): string[] {
     .split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+interface HeartbeatCommandOptions {
+  provider?: string;
+  profileId?: string;
+  withTools?: boolean;
+  toolAllow?: string[];
+  toolMaxSteps?: number;
+  memory?: boolean;
+  positional: string[];
+}
+
+function parseHeartbeatModelArgs(argv: string[], allowMemory = false): HeartbeatCommandOptions {
+  let provider: string | undefined;
+  let profileId: string | undefined;
+  let withTools: boolean | undefined;
+  let toolAllow: string[] | undefined;
+  let toolMaxSteps: number | undefined;
+  let memory: boolean | undefined;
+  const positional: string[] = [];
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+
+    if (arg === "--provider") {
+      throwIfMissingValue("provider", i + 1, argv);
+      provider = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--provider=")) {
+      provider = arg.slice("--provider=".length);
+      continue;
+    }
+    if (arg === "--profile") {
+      throwIfMissingValue("profile", i + 1, argv);
+      profileId = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--profile=")) {
+      profileId = arg.slice("--profile=".length);
+      continue;
+    }
+
+    if (arg === "--with-tools" || arg === "--no-with-tools" || arg.startsWith("--with-tools=")) {
+      withTools = parseBooleanFlag(arg, i);
+      continue;
+    }
+
+    if (arg === "--tool-allow") {
+      throwIfMissingValue("tool-allow", i + 1, argv);
+      toolAllow = parseCsvOption(argv[i + 1]);
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--tool-allow=")) {
+      toolAllow = parseCsvOption(arg.slice("--tool-allow=".length));
+      continue;
+    }
+
+    if (arg === "--tool-max-steps") {
+      throwIfMissingValue("tool-max-steps", i + 1, argv);
+      toolMaxSteps = parsePositiveIntValue(argv[i + 1], i + 1, "--tool-max-steps");
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--tool-max-steps=")) {
+      toolMaxSteps = parsePositiveIntValue(arg.slice("--tool-max-steps=".length), i + 1, "--tool-max-steps");
+      continue;
+    }
+
+    if (allowMemory && (arg === "--memory" || arg === "--no-memory" || arg.startsWith("--memory="))) {
+      memory = parseMemoryFlag(arg, i);
+      continue;
+    }
+
+    if (arg.startsWith("--")) {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+    positional.push(arg);
+  }
+
+  return {
+    provider,
+    profileId,
+    withTools,
+    ...(toolAllow ? { toolAllow } : {}),
+    ...(typeof toolMaxSteps === "number" ? { toolMaxSteps } : {}),
+    ...(typeof memory === "boolean" ? { memory } : {}),
+    positional,
+  };
 }
 
 function printResult(payload: {
@@ -291,6 +454,10 @@ function parseFeishuServerArgs(argv: string[]): {
   memory?: boolean;
   toolAllow?: string[];
   toolMaxSteps?: number;
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMs?: number;
+  heartbeatTargetOpenId?: string;
+  heartbeatSessionKey?: string;
 } {
   let appId: string | undefined;
   let appSecret: string | undefined;
@@ -301,6 +468,10 @@ function parseFeishuServerArgs(argv: string[]): {
   let memory: boolean | undefined;
   let toolAllow: string[] | undefined;
   let toolMaxSteps: number | undefined;
+  let heartbeatEnabled: boolean | undefined;
+  let heartbeatIntervalMs: number | undefined;
+  let heartbeatTargetOpenId: string | undefined;
+  let heartbeatSessionKey: string | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -392,6 +563,48 @@ function parseFeishuServerArgs(argv: string[]): {
       continue;
     }
 
+    if (arg === '--heartbeat-enabled' || arg === '--no-heartbeat-enabled' || arg.startsWith('--heartbeat-enabled=')) {
+      heartbeatEnabled = parseBooleanFlag(arg, i, 'heartbeat-enabled');
+      continue;
+    }
+
+    if (arg === '--heartbeat-interval-ms') {
+      throwIfMissingValue('heartbeat-interval-ms', i + 1, argv);
+      heartbeatIntervalMs = parsePositiveIntValue(argv[i + 1], i + 1, '--heartbeat-interval-ms');
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--heartbeat-interval-ms=')) {
+      heartbeatIntervalMs = parsePositiveIntValue(
+        arg.slice('--heartbeat-interval-ms='.length),
+        i + 1,
+        '--heartbeat-interval-ms',
+      );
+      continue;
+    }
+
+    if (arg === '--heartbeat-target-open-id') {
+      throwIfMissingValue('heartbeat-target-open-id', i + 1, argv);
+      heartbeatTargetOpenId = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--heartbeat-target-open-id=')) {
+      heartbeatTargetOpenId = arg.slice('--heartbeat-target-open-id='.length);
+      continue;
+    }
+
+    if (arg === '--heartbeat-session-key') {
+      throwIfMissingValue('heartbeat-session-key', i + 1, argv);
+      heartbeatSessionKey = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--heartbeat-session-key=')) {
+      heartbeatSessionKey = arg.slice('--heartbeat-session-key='.length);
+      continue;
+    }
+
     if (arg.startsWith('--')) {
       throw new Error(`Unknown option: ${arg}`);
     }
@@ -414,6 +627,10 @@ function parseFeishuServerArgs(argv: string[]): {
     memory,
     toolAllow,
     toolMaxSteps,
+    heartbeatEnabled,
+    heartbeatIntervalMs,
+    heartbeatTargetOpenId: heartbeatTargetOpenId?.trim(),
+    heartbeatSessionKey: heartbeatSessionKey?.trim(),
   };
 }
 
@@ -428,6 +645,10 @@ function parseGatewayArgs(argv: string[]): {
   memory?: boolean;
   toolAllow?: string[];
   toolMaxSteps?: number;
+  heartbeatEnabled?: boolean;
+  heartbeatIntervalMs?: number;
+  heartbeatTargetOpenId?: string;
+  heartbeatSessionKey?: string;
 } {
   let channel: "feishu" | undefined;
   const channelAwareArgs: string[] = [];
@@ -644,6 +865,240 @@ async function runToolsCommand(argv: string[]): Promise<number> {
   return 1;
 }
 
+function parseHeartbeatAddArgs(argv: string[]): {
+  ruleText: string;
+  provider?: string;
+  profileId?: string;
+  withTools?: boolean;
+  toolAllow?: string[];
+  toolMaxSteps?: number;
+} {
+  const parsed = parseHeartbeatModelArgs(argv, false);
+  const ruleText = parsed.positional.join(" ").trim();
+  if (!ruleText) {
+    throw new Error("Missing rule text.");
+  }
+  return {
+    ruleText,
+    ...(parsed.provider ? { provider: parsed.provider } : {}),
+    ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
+    ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
+    ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
+    ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
+  };
+}
+
+function parseHeartbeatRunArgs(argv: string[]): {
+  provider?: string;
+  profileId?: string;
+  withTools?: boolean;
+  toolAllow?: string[];
+  toolMaxSteps?: number;
+  memory?: boolean;
+} {
+  const parsed = parseHeartbeatModelArgs(argv, true);
+  if (parsed.positional.length > 0) {
+    throw new Error(`Unknown argument for heartbeat run: ${parsed.positional[0]}`);
+  }
+  return {
+    ...(parsed.provider ? { provider: parsed.provider } : {}),
+    ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
+    ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
+    ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
+    ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
+    ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
+  };
+}
+
+async function runHeartbeatCommand(argv: string[]): Promise<number> {
+  const [, subcommand, ...rest] = argv;
+
+  if (!subcommand) {
+    console.error("Usage: lainclaw heartbeat <add|list|remove|enable|disable|run>");
+    return 1;
+  }
+
+  if (subcommand === "add") {
+    const parsed = parseHeartbeatAddArgs(rest);
+    if (parsed.provider && parsed.provider !== "openai-codex") {
+      throw new Error(`Unsupported provider: ${parsed.provider}`);
+    }
+    const rule = await addHeartbeatRule({
+      ruleText: parsed.ruleText,
+      ...(parsed.provider ? { provider: parsed.provider } : {}),
+      ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
+      ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
+      ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
+      ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
+    });
+    console.log(`Added heartbeat rule: ${rule.id}`);
+    console.log(JSON.stringify(rule, null, 2));
+    return 0;
+  }
+
+  if (subcommand === "list") {
+    const rules = await listHeartbeatRules();
+    console.log(JSON.stringify(rules, null, 2));
+    return 0;
+  }
+
+  if (subcommand === "remove") {
+    const ruleId = rest[0];
+    if (!ruleId) {
+      console.error("Usage: lainclaw heartbeat remove <ruleId>");
+      return 1;
+    }
+    const removed = await removeHeartbeatRule(ruleId);
+    if (!removed) {
+      console.error(`Heartbeat rule not found: ${ruleId}`);
+      return 1;
+    }
+    console.log(`Removed heartbeat rule: ${ruleId}`);
+    return 0;
+  }
+
+  if (subcommand === "enable" || subcommand === "disable") {
+    const ruleId = rest[0];
+    if (!ruleId) {
+      console.error(`Usage: lainclaw heartbeat ${subcommand} <ruleId>`);
+      return 1;
+    }
+    const enabled = subcommand === "enable";
+    const updated = await setHeartbeatRuleEnabled(ruleId, enabled);
+    if (!updated) {
+      console.error(`Heartbeat rule not found: ${ruleId}`);
+      return 1;
+    }
+    console.log(`Updated heartbeat rule ${ruleId}: ${enabled ? "enabled" : "disabled"}`);
+    return 0;
+  }
+
+  if (subcommand === "run") {
+    const parsed = parseHeartbeatRunArgs(rest);
+    if (parsed.provider && parsed.provider !== "openai-codex") {
+      throw new Error(`Unsupported provider: ${parsed.provider}`);
+    }
+    const summary = await runHeartbeatOnce({
+      ...(parsed.provider ? { provider: parsed.provider } : {}),
+      ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
+      ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
+      ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
+      ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
+      ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
+    });
+    console.log(JSON.stringify(summary, null, 2));
+    return summary.errors > 0 ? 1 : 0;
+  }
+
+  console.error(`Unknown heartbeat subcommand: ${subcommand}`);
+  console.error('Usage: lainclaw heartbeat <add|list|remove|enable|disable|run>');
+  return 1;
+}
+
+function formatHeartbeatSummary(summary: HeartbeatRunSummary): string {
+  return `[heartbeat] ranAt=${summary.ranAt} total=${summary.total} evaluated=${summary.evaluated} triggered=${summary.triggered} skipped=${summary.skipped} errors=${summary.errors}`;
+}
+
+function buildHeartbeatMessage(ruleText: string, triggerMessage: string): string {
+  const body = triggerMessage.trim() || "已触发";
+  const lines = ["【Lainclaw 心跳提醒】", `规则：${ruleText}`, `内容：${body}`];
+  return lines.join("\n");
+}
+
+async function runFeishuGatewayWithHeartbeat(
+  overrides: Partial<FeishuGatewayConfig>,
+  onFailureHint: (rawMessage: string) => string,
+): Promise<void> {
+  const config = await resolveFeishuGatewayConfig(overrides);
+  if (config.heartbeatEnabled && !config.heartbeatTargetOpenId) {
+    throw new Error("Missing value for heartbeat-target-open-id");
+  }
+  if (config.heartbeatEnabled && config.heartbeatTargetOpenId) {
+    const targetDiagnostic = inspectHeartbeatTargetOpenId(config.heartbeatTargetOpenId);
+    if (typeof targetDiagnostic.warning === "string" && targetDiagnostic.warning.length > 0) {
+      if (targetDiagnostic.kind === "unknown") {
+        console.warn(`[heartbeat] ${targetDiagnostic.warning}`);
+      } else {
+        console.info(`[heartbeat] ${targetDiagnostic.warning}`);
+      }
+    }
+  }
+
+  const heartbeatHandle =
+    config.heartbeatEnabled
+      ? startHeartbeatLoop(config.heartbeatIntervalMs, {
+          provider: config.provider,
+          ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
+          withTools: config.withTools,
+          ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
+          ...(typeof config.toolMaxSteps === "number" ? { toolMaxSteps: config.toolMaxSteps } : {}),
+          memory: config.memory,
+          sessionKey: config.heartbeatSessionKey,
+          onSummary: (summary) => {
+            console.log(formatHeartbeatSummary(summary));
+          },
+          onResult: (result) => {
+            if (result.status === "triggered") {
+              console.log(
+                `[heartbeat] rule=${result.ruleId} triggered message=${result.message || "(no message)"}`,
+              );
+              return;
+            }
+            if (result.status === "skipped") {
+              console.log(
+                `[heartbeat] rule=${result.ruleId} skipped reason=${result.reason || result.message || "disabled/condition not met"}`,
+              );
+              return;
+            }
+            console.error(
+              `[heartbeat] rule=${result.ruleId} errored reason=${formatHeartbeatErrorHint(
+                result.reason || result.decisionRaw || "unknown error",
+              )}`,
+            );
+          },
+          send: async ({ rule, triggerMessage }) => {
+            if (!config.heartbeatTargetOpenId) {
+              throw new Error("heartbeat is enabled but heartbeatTargetOpenId is not configured");
+            }
+            await sendFeishuTextMessage(config, {
+              openId: config.heartbeatTargetOpenId,
+              text: buildHeartbeatMessage(rule.ruleText, triggerMessage),
+            });
+          },
+        })
+      : undefined;
+
+  if (heartbeatHandle) {
+    heartbeatHandle
+      .runOnce()
+      .then((summary) => {
+        console.log(`[heartbeat] startup runAt=${summary.ranAt} triggered=${summary.triggered} skipped=${summary.skipped} errors=${summary.errors}`);
+        if (summary.errors > 0) {
+          for (const result of summary.results) {
+            if (result.status === "errored") {
+              console.error(
+                `[heartbeat] startup rule=${result.ruleId} error=${formatHeartbeatErrorHint(
+                  result.reason || result.decisionRaw || "unknown error",
+                )}`,
+              );
+            }
+          }
+        }
+      })
+      .catch((error) => {
+        console.error(`[heartbeat] startup run failed: ${String(error instanceof Error ? error.message : error)}`);
+      });
+  }
+
+  try {
+    await runFeishuGatewayServer(overrides, {
+      onFailureHint,
+    });
+  } finally {
+    heartbeatHandle?.stop();
+  }
+}
+
 export async function runCli(argv: string[]): Promise<number> {
   const command = argv[0];
 
@@ -708,6 +1163,15 @@ export async function runCli(argv: string[]): Promise<number> {
     }
   }
 
+  if (command === 'heartbeat') {
+    try {
+      return await runHeartbeatCommand(argv);
+    } catch (error) {
+      console.error("ERROR:", String(error instanceof Error ? error.message : error));
+      return 1;
+    }
+  }
+
   if (command === 'gateway') {
     try {
       const options = parseGatewayArgs(argv.slice(1));
@@ -715,9 +1179,7 @@ export async function runCli(argv: string[]): Promise<number> {
       if (channel !== "feishu") {
         throw new Error(`Unsupported channel: ${channel}`);
       }
-      await runFeishuGatewayServer(feishuOptions, {
-        onFailureHint: makeFeishuFailureHint,
-      });
+      await runFeishuGatewayWithHeartbeat(feishuOptions, makeFeishuFailureHint);
       return 0;
     } catch (error) {
       if (error instanceof ValidationError) {
@@ -726,7 +1188,7 @@ export async function runCli(argv: string[]): Promise<number> {
         console.error("ERROR:", String(error instanceof Error ? error.message : error));
       }
       console.error(
-        'Usage: lainclaw gateway --channel feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+        'Usage: lainclaw gateway --channel feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
       );
       return 1;
     }
@@ -735,9 +1197,7 @@ export async function runCli(argv: string[]): Promise<number> {
   if (command === 'feishu') {
     try {
       const options = parseFeishuServerArgs(argv.slice(1));
-      await runFeishuGatewayServer(options, {
-        onFailureHint: makeFeishuFailureHint,
-      });
+      await runFeishuGatewayWithHeartbeat(options, makeFeishuFailureHint);
       return 0;
     } catch (error) {
       if (error instanceof ValidationError) {
@@ -746,7 +1206,7 @@ export async function runCli(argv: string[]): Promise<number> {
         console.error("ERROR:", String(error instanceof Error ? error.message : error));
       }
       console.error(
-        'Usage: lainclaw feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+        'Usage: lainclaw feishu [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
       );
       return 1;
     }

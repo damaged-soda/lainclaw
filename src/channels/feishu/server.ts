@@ -297,11 +297,21 @@ export async function runFeishuGatewayServer(
   console.log("[feishu] websocket connection started");
 
   await new Promise<void>((resolve) => {
-    const shutdown = (signal: string) => () => {
+    const shutdown = (signal: string) => {
       console.log(`[feishu] ${signal} received, shutting down`);
       resolve();
     };
-    process.once("SIGINT", shutdown("SIGINT"));
-    process.once("SIGTERM", shutdown("SIGTERM"));
+    const onSigInt = () => {
+      shutdown("SIGINT");
+      process.off("SIGINT", onSigInt);
+      process.off("SIGTERM", onSigTerm);
+    };
+    const onSigTerm = () => {
+      shutdown("SIGTERM");
+      process.off("SIGINT", onSigInt);
+      process.off("SIGTERM", onSigTerm);
+    };
+    process.once("SIGINT", onSigInt);
+    process.once("SIGTERM", onSigTerm);
   });
 }

@@ -22,11 +22,16 @@ interface FeishuTokenState {
   expiredAt: number;
 }
 
+type FeishuReceiveIdType = "open_id" | "user_id" | "chat_id";
+
 const APP_ACCESS_TOKEN_ENDPOINT = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal";
 const SEND_MESSAGE_ENDPOINT = "https://open.feishu.cn/open-apis/im/v1/messages";
 const DEFAULT_EXPIRE_BUFFER_SECONDS = 300;
 const FALLBACK_TOKEN_CACHE_SECONDS = 3600;
 const FEISHU_TEXT_MESSAGE_TYPE = "text";
+const DEFAULT_HEARTBEAT_ENABLED = false;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 
 function toNumber(raw: unknown): number | undefined {
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
@@ -61,11 +66,64 @@ function parseFeishuMessage(payload: unknown): string {
   return "";
 }
 
-function resolveReceiveIdType(rawOpenId: string): "open_id" | "user_id" {
+function resolveReceiveIdType(rawOpenId: string): FeishuReceiveIdType {
   if (rawOpenId.startsWith("ou_")) {
     return "open_id";
   }
-  return "user_id";
+  if (rawOpenId.startsWith("oc_")) {
+    return "chat_id";
+  }
+  if (rawOpenId.startsWith("on_")) {
+    return "open_id";
+  }
+  return "open_id";
+}
+
+function resolveReceiveIdTypeCandidates(rawOpenId: string): FeishuReceiveIdType[] {
+  const primary = resolveReceiveIdType(rawOpenId);
+  const allTypes: FeishuReceiveIdType[] = ["open_id", "user_id", "chat_id"];
+  return [primary, ...allTypes.filter((type) => type !== primary)];
+}
+
+function buildFeishuSendFailure(errorMessage: string, receiveId: string, attempts: FeishuReceiveIdType[]): string {
+  const attemptText = attempts.length > 0 ? ` tried_types=[${attempts.join(",")}]` : "";
+  return `Feishu send message failed for receive_id=${receiveId}:${attemptText} ${errorMessage}`;
+}
+
+async function sendFeishuTextMessageWithType(
+  config: FeishuGatewayConfig,
+  input: {
+    openId: string;
+    text: string;
+    receiveIdType: FeishuReceiveIdType;
+  },
+): Promise<void> {
+  const sendMessageUrl = new URL(SEND_MESSAGE_ENDPOINT);
+  sendMessageUrl.searchParams.set("receive_id_type", input.receiveIdType);
+  const response = await requestJson(
+    sendMessageUrl.toString(),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await resolveAccessToken(config)}`,
+      },
+      body: JSON.stringify({
+        receive_id: input.openId,
+        msg_type: FEISHU_TEXT_MESSAGE_TYPE,
+        content: JSON.stringify({
+          text: input.text,
+        }),
+      }),
+    },
+    config.requestTimeoutMs,
+  );
+  const parsed = (response || null) as FeishuMessageResponse | null;
+  const code = parseFeishuCode(parsed);
+  if (code !== 0) {
+    const message = parseFeishuMessage(response);
+    throw new Error(`(code=${code || "unknown"}) ${message || "empty message"}`);
+  }
 }
 
 function nowUnixSeconds() {
@@ -155,6 +213,11 @@ export async function sendFeishuTextMessage(rawConfig: Partial<FeishuGatewayConf
     provider: typeof rawConfig.provider === "string" && rawConfig.provider.trim() ? rawConfig.provider.trim() : DEFAULT_PROVIDER,
     withTools: rawConfig.withTools ?? DEFAULT_WITH_TOOLS,
     memory: rawConfig.memory ?? DEFAULT_MEMORY,
+    heartbeatEnabled: rawConfig.heartbeatEnabled ?? DEFAULT_HEARTBEAT_ENABLED,
+    heartbeatIntervalMs: rawConfig.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
+    heartbeatSessionKey: typeof rawConfig.heartbeatSessionKey === "string" && rawConfig.heartbeatSessionKey.trim()
+      ? rawConfig.heartbeatSessionKey.trim()
+      : DEFAULT_HEARTBEAT_SESSION_KEY,
     ...(typeof rawConfig.appId === "string" && rawConfig.appId.trim() ? { appId: rawConfig.appId.trim() } : {}),
     ...(typeof rawConfig.appSecret === "string" && rawConfig.appSecret.trim() ? { appSecret: rawConfig.appSecret.trim() } : {}),
   };
@@ -162,34 +225,26 @@ export async function sendFeishuTextMessage(rawConfig: Partial<FeishuGatewayConf
     return;
   }
 
-  const token = await resolveAccessToken(config);
-  const receiveIdType = resolveReceiveIdType(input.openId);
-  const sendMessageUrl = new URL(SEND_MESSAGE_ENDPOINT);
-  sendMessageUrl.searchParams.set("receive_id_type", receiveIdType);
-  const response = await requestJson(
-    sendMessageUrl.toString(),
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        receive_id: input.openId,
-        msg_type: FEISHU_TEXT_MESSAGE_TYPE,
-        content: JSON.stringify({
-          text: input.text,
-        }),
-      }),
-    },
-    config.requestTimeoutMs,
-  );
-  const parsed = (response || null) as FeishuMessageResponse | null;
-  const code = parseFeishuCode(parsed);
-  if (code !== 0) {
-    const message = parseFeishuMessage(response);
-    throw new Error(`Feishu send message failed (${code || "unknown"}): ${message || "empty message"}`);
+  const candidates = resolveReceiveIdTypeCandidates(input.openId);
+  const attempts: FeishuReceiveIdType[] = [];
+  let lastErrorMessage = "unknown error";
+
+  for (const receiveIdType of candidates) {
+    attempts.push(receiveIdType);
+    try {
+      await sendFeishuTextMessageWithType(config, {
+        openId: input.openId,
+        text: input.text,
+        receiveIdType,
+      });
+      return;
+    } catch (error) {
+      lastErrorMessage = error instanceof Error ? error.message : String(error);
+      continue;
+    }
   }
+
+  throw new Error(buildFeishuSendFailure(lastErrorMessage, input.openId, attempts));
 }
 
 export function resetFeishuTokenCache(): void {

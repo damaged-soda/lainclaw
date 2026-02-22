@@ -127,6 +127,13 @@ npm start -- gateway --channel feishu --provider openai-codex --with-tools --app
 lainclaw gateway --channel feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
 ```
 
+也可同时启动心跳：
+
+```bash
+lainclaw gateway --channel feishu --app-id <AppID> --app-secret <AppSecret> \
+  --heartbeat-enabled --heartbeat-target-open-id <openId> --heartbeat-interval-ms 300000
+```
+
 兼容方式：
 
 ```bash
@@ -144,6 +151,29 @@ lainclaw feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 1
 - `LAINCLAW_FEISHU_TOOL_MAX_STEPS` / `FEISHU_TOOL_MAX_STEPS`
 - `LAINCLAW_FEISHU_WITH_TOOLS` / `FEISHU_WITH_TOOLS`：`true|false`
 - `LAINCLAW_FEISHU_MEMORY` / `FEISHU_MEMORY`：`true|false`
+- `LAINCLAW_FEISHU_HEARTBEAT_ENABLED` / `FEISHU_HEARTBEAT_ENABLED`：`true|false`
+- `LAINCLAW_FEISHU_HEARTBEAT_INTERVAL_MS` / `FEISHU_HEARTBEAT_INTERVAL_MS`
+- `LAINCLAW_FEISHU_HEARTBEAT_TARGET_OPEN_ID` / `FEISHU_HEARTBEAT_TARGET_OPEN_ID`
+- `LAINCLAW_FEISHU_HEARTBEAT_SESSION_KEY` / `FEISHU_HEARTBEAT_SESSION_KEY`
+
+## 心跳（Heartbeat）规则命令
+
+```bash
+lainclaw heartbeat add "提醒我：每天中午检查邮件"
+lainclaw heartbeat list
+lainclaw heartbeat enable <ruleId>
+lainclaw heartbeat disable <ruleId>
+lainclaw heartbeat run
+lainclaw heartbeat remove <ruleId>
+```
+
+说明：
+
+- `add`：写入自然语言规则（按模型语义判断是否触发）  
+- `list`：查看持久化规则  
+- `run`：手动触发一次执行（不启动网关）  
+- `enable / disable`：单独控制规则开关  
+- `remove`：删除规则
 
 ### 启动日志说明（你可以按这个判断是否成功）
 

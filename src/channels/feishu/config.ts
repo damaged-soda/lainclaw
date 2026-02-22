@@ -10,6 +10,10 @@ export interface FeishuGatewayConfig {
   profileId?: string;
   withTools: boolean;
   memory: boolean;
+  heartbeatEnabled: boolean;
+  heartbeatIntervalMs: number;
+  heartbeatTargetOpenId?: string;
+  heartbeatSessionKey?: string;
   toolAllow?: string[];
   toolMaxSteps?: number;
 }
@@ -24,6 +28,10 @@ interface FeishuGatewayStorage {
     profileId?: string;
     withTools?: boolean;
     memory?: boolean;
+    heartbeatEnabled?: boolean;
+    heartbeatIntervalMs?: number;
+    heartbeatTargetOpenId?: string;
+    heartbeatSessionKey?: string;
     toolAllow?: string[];
     toolMaxSteps?: number;
   };
@@ -33,6 +41,9 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_PROVIDER = "openai-codex";
 const DEFAULT_WITH_TOOLS = true;
 const DEFAULT_MEMORY = false;
+const DEFAULT_HEARTBEAT_ENABLED = false;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 const FEISHU_GATEWAY_CONFIG_FILE = "feishu-gateway.json";
 const CURRENT_VERSION = 1 as const;
 
@@ -149,7 +160,25 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
         ? true
         : source.memory === "false"
           ? false
-        : undefined;
+          : undefined;
+  const heartbeatEnabled =
+    typeof source.heartbeatEnabled === "boolean"
+      ? source.heartbeatEnabled
+      : source.heartbeatEnabled === "true"
+        ? true
+        : source.heartbeatEnabled === "false"
+          ? false
+          : undefined;
+  const heartbeatIntervalMs =
+    typeof source.heartbeatIntervalMs === "number" && Number.isFinite(source.heartbeatIntervalMs)
+      ? source.heartbeatIntervalMs
+      : undefined;
+  const heartbeatTargetOpenId =
+    typeof source.heartbeatTargetOpenId === "string"
+      ? resolveText(source.heartbeatTargetOpenId)
+      : undefined;
+  const heartbeatSessionKey =
+    typeof source.heartbeatSessionKey === "string" ? resolveText(source.heartbeatSessionKey) : undefined;
   const toolAllow = normalizeToolAllow(source.toolAllow as unknown);
   const toolMaxSteps = parseToolMaxStepsRaw(source.toolMaxSteps as unknown);
 
@@ -171,6 +200,18 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
   }
   if (typeof memory === "boolean") {
     normalized.memory = memory;
+  }
+  if (typeof heartbeatEnabled === "boolean") {
+    normalized.heartbeatEnabled = heartbeatEnabled;
+  }
+  if (typeof heartbeatIntervalMs === "number" && heartbeatIntervalMs > 0) {
+    normalized.heartbeatIntervalMs = heartbeatIntervalMs;
+  }
+  if (heartbeatTargetOpenId) {
+    normalized.heartbeatTargetOpenId = heartbeatTargetOpenId;
+  }
+  if (heartbeatSessionKey) {
+    normalized.heartbeatSessionKey = heartbeatSessionKey;
   }
   if (Array.isArray(toolAllow)) {
     normalized.toolAllow = toolAllow;
@@ -257,6 +298,16 @@ function filterPersistable(updates: Partial<FeishuGatewayConfig>): Partial<Feish
     ...(typeof updates.toolMaxSteps === "number" && Number.isFinite(updates.toolMaxSteps) && updates.toolMaxSteps > 0
       ? { toolMaxSteps: updates.toolMaxSteps }
       : {}),
+    ...(typeof updates.heartbeatEnabled === "boolean" ? { heartbeatEnabled: updates.heartbeatEnabled } : {}),
+    ...(typeof updates.heartbeatIntervalMs === "number" && Number.isFinite(updates.heartbeatIntervalMs)
+      ? { heartbeatIntervalMs: updates.heartbeatIntervalMs }
+      : {}),
+    ...(typeof updates.heartbeatTargetOpenId === "string" && updates.heartbeatTargetOpenId.trim()
+      ? { heartbeatTargetOpenId: updates.heartbeatTargetOpenId.trim() }
+      : {}),
+    ...(typeof updates.heartbeatSessionKey === "string" && updates.heartbeatSessionKey.trim()
+      ? { heartbeatSessionKey: updates.heartbeatSessionKey.trim() }
+      : {}),
   };
 }
 
@@ -298,6 +349,18 @@ export async function resolveFeishuGatewayConfig(
   const envToolMaxSteps = resolveText(
     process.env.LAINCLAW_FEISHU_TOOL_MAX_STEPS || process.env.FEISHU_TOOL_MAX_STEPS,
   );
+  const envHeartbeatEnabled = resolveText(
+    process.env.LAINCLAW_FEISHU_HEARTBEAT_ENABLED || process.env.FEISHU_HEARTBEAT_ENABLED,
+  );
+  const envHeartbeatIntervalMs = resolveText(
+    process.env.LAINCLAW_FEISHU_HEARTBEAT_INTERVAL_MS || process.env.FEISHU_HEARTBEAT_INTERVAL_MS,
+  );
+  const envHeartbeatTargetOpenId = resolveText(
+    process.env.LAINCLAW_FEISHU_HEARTBEAT_TARGET_OPEN_ID || process.env.FEISHU_HEARTBEAT_TARGET_OPEN_ID,
+  );
+  const envHeartbeatSessionKey = resolveText(
+    process.env.LAINCLAW_FEISHU_HEARTBEAT_SESSION_KEY || process.env.FEISHU_HEARTBEAT_SESSION_KEY,
+  );
 
   return {
     appId: firstString(overrides.appId, cached.appId, envAppId),
@@ -311,7 +374,7 @@ export async function resolveFeishuGatewayConfig(
       envProvider,
       DEFAULT_PROVIDER,
     )!,
-    profileId: firstString(overrides.profileId, cached.profileId, envProfileId),
+      profileId: firstString(overrides.profileId, cached.profileId, envProfileId),
     withTools: firstBoolean(
       overrides.withTools,
       cached.withTools,
@@ -323,6 +386,26 @@ export async function resolveFeishuGatewayConfig(
       cached.memory,
       envMemory,
       DEFAULT_MEMORY,
+    ),
+    heartbeatEnabled: firstBoolean(
+      overrides.heartbeatEnabled,
+      cached.heartbeatEnabled,
+      resolveBoolean(envHeartbeatEnabled),
+      DEFAULT_HEARTBEAT_ENABLED,
+    ),
+    heartbeatIntervalMs:
+      firstNumber(overrides.heartbeatIntervalMs, cached.heartbeatIntervalMs, envHeartbeatIntervalMs)
+      || DEFAULT_HEARTBEAT_INTERVAL_MS,
+    heartbeatTargetOpenId: firstString(
+      overrides.heartbeatTargetOpenId,
+      cached.heartbeatTargetOpenId,
+      envHeartbeatTargetOpenId,
+    ),
+    heartbeatSessionKey: firstString(
+      overrides.heartbeatSessionKey,
+      cached.heartbeatSessionKey,
+      envHeartbeatSessionKey,
+      DEFAULT_HEARTBEAT_SESSION_KEY,
     ),
     toolAllow: firstToolAllow(overrides.toolAllow, cached.toolAllow, envToolAllow),
     toolMaxSteps: firstNumber(overrides.toolMaxSteps, cached.toolMaxSteps, envToolMaxSteps) || undefined,
