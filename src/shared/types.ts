@@ -1,4 +1,18 @@
 import type { ToolCall, ToolError, ToolExecutionLog } from "../tools/types.js";
+import type { Message } from "@mariozechner/pi-ai";
+
+export interface ContextToolSpec {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: "object";
+    required?: string[];
+    properties: Record<string, {
+      type: "string" | "number" | "boolean" | "object" | "array";
+      description?: string;
+    }>;
+  };
+}
 
 export interface RequestContext {
   requestId: string;
@@ -6,7 +20,8 @@ export interface RequestContext {
   input: string;
   sessionKey: string;
   sessionId: string;
-  messages: SessionHistoryMessage[];
+  messages: Message[];
+  tools?: ContextToolSpec[];
   provider?: string;
   profileId?: string;
   memoryEnabled?: boolean;
@@ -18,6 +33,9 @@ export interface PipelineResult {
   route: string;
   stage: string;
   result: string;
+  toolCalls?: ToolCall[];
+  assistantMessage?: Message;
+  stopReason?: string;
   provider?: string;
   profileId?: string;
 }

@@ -20,7 +20,7 @@ export function printUsage(): string {
     '  lainclaw --help',
     '  lainclaw --version',
     '  lainclaw ask <input>',
-    '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] <input>',
+    '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
     '  lainclaw tools list',
     '  lainclaw tools info <name>',
     '  lainclaw tools invoke <name> --args <json>',
@@ -35,6 +35,7 @@ export function printUsage(): string {
     '  lainclaw ask --session work --memory 这是一个长期记忆测试',
     '  lainclaw ask --session work --memory=off 这是一条不写入记忆的消息',
     '  lainclaw ask --tool-allow time.now,shell.pwd "tool:time.now"',
+    '  lainclaw ask --tool-max-steps 2 --provider openai-codex "请帮我看下时间"',
     '  lainclaw tools invoke fs.read_file --args "{\\"path\\":\\"README.md\\"}"',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
@@ -89,6 +90,18 @@ function parseBooleanFlag(raw: string, index: number): boolean {
   throw new Error(`Invalid boolean flag: ${raw}`);
 }
 
+function parsePositiveIntValue(raw: string, index: number, label: string): number {
+  const normalized = raw.trim();
+  if (!/^\d+$/.test(normalized) || normalized.length === 0) {
+    throw new Error(`Invalid value for ${label} at arg ${index}: ${raw}`);
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`Invalid value for ${label} at arg ${index}: ${raw}`);
+  }
+  return parsed;
+}
+
 function parseCsvOption(raw: string): string[] {
   return raw
     .split(',')
@@ -138,6 +151,7 @@ function parseAskArgs(argv: string[]): {
   memory?: boolean;
   withTools?: boolean;
   toolAllow?: string[];
+  toolMaxSteps?: number;
 } {
   let provider: string | undefined;
   let profile: string | undefined;
@@ -146,6 +160,7 @@ function parseAskArgs(argv: string[]): {
   let memory: boolean | undefined;
   let withTools: boolean | undefined;
   let toolAllow: string[] | undefined;
+  let toolMaxSteps: number | undefined;
   const inputParts: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -209,6 +224,18 @@ function parseAskArgs(argv: string[]): {
       continue;
     }
 
+    if (arg === '--tool-max-steps') {
+      throwIfMissingValue('tool-max-steps', i + 1, argv);
+      toolMaxSteps = parsePositiveIntValue(argv[i + 1], i + 1, '--tool-max-steps');
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--tool-max-steps=')) {
+      toolMaxSteps = parsePositiveIntValue(arg.slice('--tool-max-steps='.length), i + 1, '--tool-max-steps');
+      continue;
+    }
+
     if (arg.startsWith("--profile=")) {
       profile = arg.slice("--profile=".length);
       continue;
@@ -221,7 +248,7 @@ function parseAskArgs(argv: string[]): {
     inputParts.push(arg);
   }
 
-  return { input: inputParts.join(" "), provider, profile, sessionKey, newSession, memory, withTools, toolAllow };
+  return { input: inputParts.join(" "), provider, profile, sessionKey, newSession, memory, withTools, toolAllow, toolMaxSteps };
 }
 
 async function runAuthCommand(argv: string[]): Promise<number> {
@@ -406,7 +433,9 @@ export async function runCli(argv: string[]): Promise<number> {
 
   if (command === 'ask') {
     try {
-      const { input, provider, profile, sessionKey, newSession, memory, withTools, toolAllow } = parseAskArgs(argv.slice(1));
+      const { input, provider, profile, sessionKey, newSession, memory, withTools, toolAllow, toolMaxSteps } = parseAskArgs(
+        argv.slice(1),
+      );
       if (provider && provider !== "openai-codex") {
         throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
       }
@@ -421,6 +450,7 @@ export async function runCli(argv: string[]): Promise<number> {
         ...(typeof memory === 'boolean' ? { memory } : {}),
         ...(typeof withTools === 'boolean' ? { withTools } : {}),
         ...(toolAllow ? { toolAllow } : {}),
+        ...(typeof toolMaxSteps === 'number' ? { toolMaxSteps } : {}),
       });
       return printResult(response);
     } catch (error) {
