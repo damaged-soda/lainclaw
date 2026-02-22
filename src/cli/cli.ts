@@ -18,7 +18,7 @@ export function printUsage(): string {
     '  lainclaw --help',
     '  lainclaw --version',
     '  lainclaw ask <input>',
-    '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] <input>',
+    '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] <input>',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '  lainclaw auth use <profile>',
@@ -27,11 +27,36 @@ export function printUsage(): string {
     'Examples:',
     '  lainclaw ask 这是一段测试文本',
     '  lainclaw ask --session work --provider openai-codex --profile default 这是一段测试文本',
+    '  lainclaw ask --session work --memory 这是一个长期记忆测试',
+    '  lainclaw ask --session work --memory=off 这是一条不写入记忆的消息',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '',
     'Notes: model is currently stubbed for MVP and runs fully offline.'
   ].join('\n');
+}
+
+function parseMemoryFlag(raw: string, index: number): boolean {
+  if (raw === '--memory') {
+    return true;
+  }
+
+  if (raw === '--no-memory') {
+    return false;
+  }
+
+  if (raw.startsWith('--memory=')) {
+    const value = raw.slice('--memory='.length).toLowerCase();
+    if (value === 'on' || value === 'true' || value === '1') {
+      return true;
+    }
+    if (value === 'off' || value === 'false' || value === '0') {
+      return false;
+    }
+    throw new Error(`Invalid value for --memory at arg ${index + 1}: ${value}`);
+  }
+
+  return false;
 }
 
 function printResult(payload: {
@@ -43,6 +68,9 @@ function printResult(payload: {
   result: string;
   sessionKey: string;
   sessionId: string;
+  memoryEnabled: boolean;
+  memoryUpdated: boolean;
+  memoryFile?: string;
   provider?: string;
   profileId?: string;
 }) {
@@ -66,11 +94,13 @@ function parseAskArgs(argv: string[]): {
   profile?: string;
   sessionKey?: string;
   newSession?: boolean;
+  memory?: boolean;
 } {
   let provider: string | undefined;
   let profile: string | undefined;
   let sessionKey: string | undefined;
   let newSession = false;
+  let memory: boolean | undefined;
   const inputParts: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -112,6 +142,11 @@ function parseAskArgs(argv: string[]): {
       continue;
     }
 
+    if (arg === "--memory" || arg === "--no-memory" || arg.startsWith("--memory=")) {
+      memory = parseMemoryFlag(arg, i);
+      continue;
+    }
+
     if (arg.startsWith("--profile=")) {
       profile = arg.slice("--profile=".length);
       continue;
@@ -124,7 +159,7 @@ function parseAskArgs(argv: string[]): {
     inputParts.push(arg);
   }
 
-  return { input: inputParts.join(" "), provider, profile, sessionKey, newSession };
+  return { input: inputParts.join(" "), provider, profile, sessionKey, newSession, memory };
 }
 
 async function runAuthCommand(argv: string[]): Promise<number> {
@@ -223,7 +258,7 @@ export async function runCli(argv: string[]): Promise<number> {
 
   if (command === 'ask') {
     try {
-      const { input, provider, profile, sessionKey, newSession } = parseAskArgs(argv.slice(1));
+      const { input, provider, profile, sessionKey, newSession, memory } = parseAskArgs(argv.slice(1));
       if (provider && provider !== "openai-codex") {
         throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
       }
@@ -235,6 +270,7 @@ export async function runCli(argv: string[]): Promise<number> {
         ...(profile ? { profileId: profile } : {}),
         ...(sessionKey ? { sessionKey } : {}),
         ...(newSession ? { newSession } : {}),
+        ...(typeof memory === 'boolean' ? { memory } : {}),
       });
       return printResult(response);
     } catch (error) {
@@ -258,6 +294,5 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 
   console.error(`Unknown command: ${command}`);
-  console.error('Try: lainclaw --help');
   return 1;
 }

@@ -30,7 +30,22 @@ lainclaw ask --new-session 重新开始新会话
 
 每次成功调用会在 `~/.lainclaw/sessions/<sessionId>.jsonl` 中追加会话转写，并在输出中返回 `sessionKey` 与 `sessionId`。
 
-### 直接运行编译产物（排错）
+### 长期记忆与压缩（第二阶段）
+
+- 开启记忆：`--memory`
+- 关闭记忆：`--no-memory` 或 `--memory=off`
+- 记忆摘要写入：`~/.lainclaw/memory/<sessionKey>.md`
+- compaction：当会话条目较多后自动把较早历史压缩到记忆文件，保留最近 12 条用于上下文重放。
+
+```bash
+lainclaw ask --session work --memory 这是我希望长期记住的偏好
+lainclaw ask --session work --memory 今天我想复盘一下这个项目的背景
+lainclaw ask --session work --no-memory 这条消息不写记忆
+```
+
+当触发 compaction 后，`ask` 输出会包含 `memoryEnabled: true` 与 `memoryUpdated: true/false`，便于确认是否写入记忆。
+
+## 直接运行编译产物（排错）
 
 ```bash
 cd <repo_root>/src/lainclaw

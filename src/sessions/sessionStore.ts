@@ -5,7 +5,10 @@ import type { SessionHistoryMessage } from "../shared/types.js";
 
 const SESSION_DIR_NAME = "sessions";
 const SESSION_INDEX_FILE = "sessions.json";
+const MEMORY_DIR_NAME = "memory";
+const MEMORY_FILE_EXTENSION = ".md";
 const CONTEXT_MESSAGE_LIMIT = 12;
+const MEMORY_SNIPPET_MAX_CHARS = 2000;
 
 interface SessionStoreCatalog {
   version: 1;
@@ -20,6 +23,8 @@ export interface SessionRecord {
   provider?: string;
   profileId?: string;
   route?: string;
+  memoryEnabled?: boolean;
+  compactedMessageCount?: number;
 }
 
 interface StoredSessionMessage {
@@ -46,6 +51,25 @@ function resolveSessionIndexPath() {
 
 function resolveSessionTranscriptPath(sessionId: string) {
   return path.join(resolveSessionDirectory(), `${sessionId}.jsonl`);
+}
+
+function resolveMemoryDirectory() {
+  return path.join(resolveAuthDirectory(), MEMORY_DIR_NAME);
+}
+
+function resolveSessionMemoryPath(sessionKey: string) {
+  const safeSessionKey = sessionKey
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .slice(0, 120)
+    .replace(/^_+|_+$/g, "");
+  const fileName = `${safeSessionKey || "session"}${MEMORY_FILE_EXTENSION}`;
+  return path.join(resolveMemoryDirectory(), fileName);
+}
+
+export function getSessionMemoryPath(sessionKey: string): string {
+  return resolveSessionMemoryPath(sessionKey);
 }
 
 function isFiniteString(value: unknown): value is string {
@@ -89,6 +113,12 @@ function sanitizeCatalog(raw: unknown): SessionStoreCatalog {
       }
       if (isFiniteString(data.route)) {
         record.route = data.route;
+      }
+      if (data.memoryEnabled === true) {
+        record.memoryEnabled = true;
+      }
+      if (typeof data.compactedMessageCount === "number" && Number.isFinite(data.compactedMessageCount)) {
+        record.compactedMessageCount = Math.max(0, Math.floor(data.compactedMessageCount));
       }
       output.sessions[sessionKey] = record;
     }
@@ -144,7 +174,7 @@ function normalizeSessionMessage(message: unknown): SessionHistoryMessage | null
   };
 }
 
-async function loadRecentMessages(sessionId: string): Promise<SessionHistoryMessage[]> {
+async function loadMessages(sessionId: string, limit?: number): Promise<SessionHistoryMessage[]> {
   const transcript = resolveSessionTranscriptPath(sessionId);
   try {
     const raw = await fs.readFile(transcript, "utf-8");
@@ -172,7 +202,11 @@ async function loadRecentMessages(sessionId: string): Promise<SessionHistoryMess
       }
     }
 
-    return normalized.slice(-CONTEXT_MESSAGE_LIMIT);
+    if (typeof limit === "number" && limit > 0) {
+      return normalized.slice(-limit);
+    }
+
+    return normalized;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
@@ -186,6 +220,7 @@ export interface SessionLoadOptions {
   provider?: string;
   profileId?: string;
   forceNew?: boolean;
+  memory?: boolean;
 }
 
 export interface SessionLoadResult {
@@ -194,6 +229,8 @@ export interface SessionLoadResult {
   createdAt: string;
   updatedAt: string;
   isNewSession: boolean;
+  memoryEnabled: boolean;
+  compactedMessageCount: number;
 }
 
 export async function getOrCreateSession({
@@ -201,6 +238,7 @@ export async function getOrCreateSession({
   provider,
   profileId,
   forceNew,
+  memory,
 }: SessionLoadOptions): Promise<SessionLoadResult> {
   const catalog = await loadSessionCatalog();
   const now = nowIso();
@@ -217,6 +255,9 @@ export async function getOrCreateSession({
     if (profileId) {
       next.profileId = profileId;
     }
+    if (typeof memory === "boolean") {
+      next.memoryEnabled = memory;
+    }
     catalog.sessions[sessionKey] = next;
     await saveSessionCatalog(catalog);
     return {
@@ -225,18 +266,23 @@ export async function getOrCreateSession({
       createdAt: existing.createdAt,
       updatedAt: now,
       isNewSession: false,
+      memoryEnabled: !!next.memoryEnabled,
+      compactedMessageCount: typeof next.compactedMessageCount === "number" ? next.compactedMessageCount : 0,
     };
   }
 
   const sessionId = createSessionId();
-  catalog.sessions[sessionKey] = {
+  const next: SessionRecord = {
     sessionKey,
     sessionId,
     createdAt: now,
     updatedAt: now,
     ...(provider ? { provider } : {}),
     ...(profileId ? { profileId } : {}),
+    ...(typeof memory === "boolean" ? { memoryEnabled: memory } : {}),
+    compactedMessageCount: 0,
   };
+  catalog.sessions[sessionKey] = next;
   await saveSessionCatalog(catalog);
 
   return {
@@ -245,7 +291,38 @@ export async function getOrCreateSession({
     createdAt: now,
     updatedAt: now,
     isNewSession: true,
+    memoryEnabled: !!next.memoryEnabled,
+    compactedMessageCount: 0,
   };
+}
+
+export interface SessionMemoryPatch {
+  memoryEnabled?: boolean;
+  compactedMessageCount?: number;
+}
+
+export async function updateSessionRecord(sessionKey: string, patch: SessionMemoryPatch): Promise<void> {
+  const catalog = await loadSessionCatalog();
+  const existing = catalog.sessions[sessionKey];
+  if (!existing) {
+    return;
+  }
+
+  let changed = false;
+  if (typeof patch.memoryEnabled === "boolean") {
+    existing.memoryEnabled = patch.memoryEnabled;
+    changed = true;
+  }
+  if (typeof patch.compactedMessageCount === "number" && Number.isFinite(patch.compactedMessageCount)) {
+    existing.compactedMessageCount = Math.max(0, Math.floor(patch.compactedMessageCount));
+    changed = true;
+  }
+
+  if (changed) {
+    existing.updatedAt = nowIso();
+    catalog.sessions[sessionKey] = existing;
+    await saveSessionCatalog(catalog);
+  }
 }
 
 export async function appendSessionMessage(
@@ -294,5 +371,43 @@ export async function recordSessionRoute(
 }
 
 export function getRecentSessionMessages(sessionId: string): Promise<SessionHistoryMessage[]> {
-  return loadRecentMessages(sessionId);
+  return loadMessages(sessionId, CONTEXT_MESSAGE_LIMIT);
+}
+
+export function getAllSessionMessages(sessionId: string): Promise<SessionHistoryMessage[]> {
+  return loadMessages(sessionId);
+}
+
+export async function loadSessionMemorySnippet(sessionKey: string): Promise<string> {
+  const memoryPath = getSessionMemoryPath(sessionKey);
+  try {
+    const raw = await fs.readFile(memoryPath, "utf-8");
+    const normalized = raw.trim();
+    if (!normalized) {
+      return "";
+    }
+    if (normalized.length <= MEMORY_SNIPPET_MAX_CHARS) {
+      return normalized;
+    }
+    return `...${normalized.slice(-MEMORY_SNIPPET_MAX_CHARS)}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+export async function appendSessionMemory(sessionKey: string, sessionId: string, summary: string): Promise<void> {
+  const memoryPath = getSessionMemoryPath(sessionKey);
+  const normalized = summary.trim();
+  if (!normalized) {
+    return;
+  }
+
+  const block = `\n## ${nowIso()} (${sessionId})\n${normalized}\n`;
+  await fs.mkdir(resolveMemoryDirectory(), { recursive: true });
+  await fs.appendFile(memoryPath, block, {
+    encoding: "utf-8",
+  });
 }

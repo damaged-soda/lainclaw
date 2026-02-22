@@ -7,6 +7,7 @@ export interface RequestContext {
   messages: SessionHistoryMessage[];
   provider?: string;
   profileId?: string;
+  memoryEnabled?: boolean;
 }
 
 export interface PipelineResult {
@@ -37,6 +38,9 @@ export interface GatewayResult {
   sessionId: string;
   provider?: string;
   profileId?: string;
+  memoryEnabled: boolean;
+  memoryUpdated: boolean;
+  memoryFile?: string;
 }
 
 export class ValidationError extends Error {
