@@ -7,6 +7,7 @@ A tiny TypeScript playground entry for the Lainclaw project.
 ### 使用全局命令（推荐）
 
 ```bash
+git clone <repo_root>
 cd <repo_root>/src/lainclaw
 npm install
 npm run bootstrap
@@ -14,6 +15,20 @@ npm run bootstrap
 lainclaw --help
 lainclaw ask 这是一个测试输入
 ```
+
+### 会话模式（第一阶段）
+
+- 默认会话：`main`
+- 指定会话：`--session <name>`
+- 强制新会话：`--new-session`
+
+```bash
+lainclaw ask --session work 这是我的第一个任务
+lainclaw ask --session work 我接着说一件事
+lainclaw ask --new-session 重新开始新会话
+```
+
+每次成功调用会在 `~/.lainclaw/sessions/<sessionId>.jsonl` 中追加会话转写，并在输出中返回 `sessionKey` 与 `sessionId`。
 
 ### 直接运行编译产物（排错）
 

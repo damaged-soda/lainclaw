@@ -2,6 +2,9 @@ export interface RequestContext {
   requestId: string;
   createdAt: string;
   input: string;
+  sessionKey: string;
+  sessionId: string;
+  messages: SessionHistoryMessage[];
   provider?: string;
   profileId?: string;
 }
@@ -16,6 +19,13 @@ export interface PipelineResult {
   profileId?: string;
 }
 
+export interface SessionHistoryMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  timestamp: string;
+  content: string;
+}
+
 export interface GatewayResult {
   success: boolean;
   requestId: string;
@@ -23,6 +33,8 @@ export interface GatewayResult {
   route: string;
   stage: string;
   result: string;
+  sessionKey: string;
+  sessionId: string;
   provider?: string;
   profileId?: string;
 }

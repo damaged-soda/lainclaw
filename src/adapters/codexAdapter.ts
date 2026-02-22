@@ -1,4 +1,5 @@
 import { complete, getModel } from "@mariozechner/pi-ai";
+import type { Message } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext, OPENAI_CODEX_MODEL } from "../auth/authManager.js";
 import { RequestContext } from "../shared/types.js";
 import type { AdapterResult } from "./stubAdapter.js";
@@ -6,6 +7,27 @@ import type { AdapterResult } from "./stubAdapter.js";
 // 该系统提示词是 MVP 阶段的临时兜底：用于让 openai-codex responses 在最小路径下可直接返回结果。
 // 这是可替换配置，不是对外契约；后续接手时可按体验目标调整文案、风格或完全替换。
 const OPENAI_CODEX_SYSTEM_PROMPT = "You are a concise and reliable coding assistant.";
+
+function normalizeMessages(context: RequestContext): Message[] {
+  if (!Array.isArray(context.messages) || context.messages.length === 0) {
+    const fallback: Message = {
+      role: "user",
+      content: context.input,
+      timestamp: Date.now(),
+    };
+    return [fallback];
+  }
+
+  const historyContext = context.messages
+    .map((message) => `${message.role}: ${message.content}`)
+    .join("\n");
+  const userPrompt: Message = {
+    role: "user",
+    content: `历史上下文：\n${historyContext}\n\n当前输入：${context.input}`,
+    timestamp: Date.now(),
+  };
+  return [userPrompt];
+}
 
 function extractTextFromResponse(response: { content?: unknown[] }): string {
   const content = response.content;
@@ -43,7 +65,7 @@ export async function runCodexAdapter(
 
   const response = await complete(model, {
     systemPrompt: OPENAI_CODEX_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: context.input, timestamp: Date.now() }],
+    messages: normalizeMessages(context),
   }, { apiKey });
   const result = extractTextFromResponse(response);
   return {

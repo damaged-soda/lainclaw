@@ -18,7 +18,7 @@ export function printUsage(): string {
     '  lainclaw --help',
     '  lainclaw --version',
     '  lainclaw ask <input>',
-    '  lainclaw ask [--provider <provider>] [--profile <profile>] <input>',
+    '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] <input>',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '  lainclaw auth use <profile>',
@@ -26,6 +26,7 @@ export function printUsage(): string {
     '',
     'Examples:',
     '  lainclaw ask 这是一段测试文本',
+    '  lainclaw ask --session work --provider openai-codex --profile default 这是一段测试文本',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '',
@@ -40,6 +41,8 @@ function printResult(payload: {
   route: string;
   stage: string;
   result: string;
+  sessionKey: string;
+  sessionId: string;
   provider?: string;
   profileId?: string;
 }) {
@@ -57,9 +60,17 @@ function throwIfMissingValue(label: string, index: number, args: string[]) {
   }
 }
 
-function parseAskArgs(argv: string[]): { input: string; provider?: string; profile?: string } {
+function parseAskArgs(argv: string[]): {
+  input: string;
+  provider?: string;
+  profile?: string;
+  sessionKey?: string;
+  newSession?: boolean;
+} {
   let provider: string | undefined;
   let profile: string | undefined;
+  let sessionKey: string | undefined;
+  let newSession = false;
   const inputParts: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -84,6 +95,23 @@ function parseAskArgs(argv: string[]): { input: string; provider?: string; profi
       continue;
     }
 
+    if (arg === "--session") {
+      throwIfMissingValue("session", i + 1, argv);
+      sessionKey = argv[i + 1];
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--session=")) {
+      sessionKey = arg.slice("--session=".length);
+      continue;
+    }
+
+    if (arg === "--new-session") {
+      newSession = true;
+      continue;
+    }
+
     if (arg.startsWith("--profile=")) {
       profile = arg.slice("--profile=".length);
       continue;
@@ -96,7 +124,7 @@ function parseAskArgs(argv: string[]): { input: string; provider?: string; profi
     inputParts.push(arg);
   }
 
-  return { input: inputParts.join(" "), provider, profile };
+  return { input: inputParts.join(" "), provider, profile, sessionKey, newSession };
 }
 
 async function runAuthCommand(argv: string[]): Promise<number> {
@@ -195,7 +223,7 @@ export async function runCli(argv: string[]): Promise<number> {
 
   if (command === 'ask') {
     try {
-      const { input, provider, profile } = parseAskArgs(argv.slice(1));
+      const { input, provider, profile, sessionKey, newSession } = parseAskArgs(argv.slice(1));
       if (provider && provider !== "openai-codex") {
         throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
       }
@@ -205,6 +233,8 @@ export async function runCli(argv: string[]): Promise<number> {
       const response = await runAsk(input, {
         ...(provider ? { provider } : {}),
         ...(profile ? { profileId: profile } : {}),
+        ...(sessionKey ? { sessionKey } : {}),
+        ...(newSession ? { newSession } : {}),
       });
       return printResult(response);
     } catch (error) {
