@@ -1,5 +1,6 @@
 import { ValidationError } from '../shared/types.js';
 import { runAsk } from '../gateway/askGateway.js';
+import { runFeishuGatewayServer } from '../channels/feishu/server.js';
 import { getToolInfo, invokeToolByCli, listToolsCatalog } from '../tools/gateway.js';
 import {
   clearProfiles,
@@ -21,6 +22,8 @@ export function printUsage(): string {
     '  lainclaw --version',
     '  lainclaw ask <input>',
     '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
+    '  lainclaw feishu [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]',
+    '  lainclaw feishu（未传入参数时，优先使用上次启动写入的 ~/.lainclaw/feishu-gateway.json）',
     '  lainclaw tools list',
     '  lainclaw tools info <name>',
     '  lainclaw tools invoke <name> --args <json>',
@@ -251,6 +254,61 @@ function parseAskArgs(argv: string[]): {
   return { input: inputParts.join(" "), provider, profile, sessionKey, newSession, memory, withTools, toolAllow, toolMaxSteps };
 }
 
+function parseFeishuServerArgs(argv: string[]): {
+  appId?: string;
+  appSecret?: string;
+  requestTimeoutMs?: number;
+} {
+  let appId: string | undefined;
+  let appSecret: string | undefined;
+  let requestTimeoutMs: number | undefined;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+
+    if (arg === '--app-id') {
+      throwIfMissingValue('app-id', i + 1, argv);
+      appId = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--app-id=')) {
+      appId = arg.slice('--app-id='.length);
+      continue;
+    }
+    if (arg === '--app-secret') {
+      throwIfMissingValue('app-secret', i + 1, argv);
+      appSecret = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--app-secret=')) {
+      appSecret = arg.slice('--app-secret='.length);
+      continue;
+    }
+    if (arg === '--request-timeout-ms') {
+      throwIfMissingValue('request-timeout-ms', i + 1, argv);
+      requestTimeoutMs = parsePositiveIntValue(argv[i + 1], i + 1, '--request-timeout-ms');
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--request-timeout-ms=')) {
+      requestTimeoutMs = parsePositiveIntValue(arg.slice('--request-timeout-ms='.length), i + 1, '--request-timeout-ms');
+      continue;
+    }
+
+    if (arg.startsWith('--')) {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+
+  return {
+    appId,
+    appSecret,
+    requestTimeoutMs,
+  };
+}
+
 async function runAuthCommand(argv: string[]): Promise<number> {
   const [, ...rest] = argv;
   const subcommand = rest[0];
@@ -478,6 +536,22 @@ export async function runCli(argv: string[]): Promise<number> {
       return await runToolsCommand(argv);
     } catch (error) {
       console.error("ERROR:", String(error instanceof Error ? error.message : error));
+      return 1;
+    }
+  }
+
+  if (command === 'feishu') {
+    try {
+      const options = parseFeishuServerArgs(argv.slice(1));
+      await runFeishuGatewayServer(options);
+      return 0;
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        console.error(`[${error.code}] ${error.message}`);
+      } else {
+        console.error("ERROR:", String(error instanceof Error ? error.message : error));
+      }
+      console.error('Usage: lainclaw feishu [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>]');
       return 1;
     }
   }

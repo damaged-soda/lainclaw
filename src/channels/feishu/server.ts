@@ -1,0 +1,274 @@
+import * as Lark from "@larksuiteoapi/node-sdk";
+import { runAsk } from "../../gateway/askGateway.js";
+import { sendFeishuTextMessage } from "./outbound.js";
+import {
+  resolveFeishuGatewayConfig,
+  type FeishuGatewayConfig,
+  persistFeishuGatewayConfig,
+} from "./config.js";
+
+interface FeishuWsMessageEvent {
+  message?: {
+    message_id?: string;
+    chat_type?: string;
+    chat_id?: string;
+    content?: string;
+    message_type?: string;
+  };
+  sender?: {
+    sender_id?: {
+      open_id?: string;
+      user_id?: string;
+      union_id?: string;
+    };
+  };
+}
+
+interface FeishuInboundMessage {
+  kind: "ignored" | "unsupported" | "dm-text";
+  eventId?: string;
+  messageId?: string;
+  openId?: string;
+  chatId?: string;
+  chatType?: string;
+  messageType?: string;
+  input?: string;
+  reason?: string;
+  requestId: string;
+}
+
+const FEISHU_DM_CHAT_TYPES = new Set(["p2p", "private", "direct"]);
+const EVENT_ID_TTL_MS = 10 * 60 * 1000;
+const FEISHU_TEXT_MESSAGE_TYPE = "text";
+
+const EVENT_HISTORY = new Map<string, number>();
+const REPLY_TIMEOUT_MS = 10000;
+
+function createRequestId() {
+  const now = Date.now();
+  return `feishu-${now}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
+}
+
+function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function parseTextContent(raw: unknown): string {
+  if (typeof raw !== "string") {
+    return "";
+  }
+  const rawTrimmed = raw.trim();
+  if (!rawTrimmed) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(rawTrimmed);
+    if (typeof parsed === "string") {
+      return parsed;
+    }
+    if (parsed && typeof parsed === "object") {
+      const candidate = parsed as Record<string, unknown>;
+      if (typeof candidate.text === "string") {
+        return candidate.text;
+      }
+    }
+  } catch {
+    return rawTrimmed;
+  }
+  return rawTrimmed;
+}
+
+function normalizeChatType(raw?: string): string {
+  return (raw || "").trim().toLowerCase();
+}
+
+function inferChatType(chatId?: string): string {
+  const normalized = (chatId || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.startsWith("ou_") || normalized.startsWith("on_")) {
+    return "p2p";
+  }
+  return "group";
+}
+
+function isReplay(eventId: string, ttlMs: number): boolean {
+  const now = Date.now();
+  for (const [key, expireAt] of EVENT_HISTORY.entries()) {
+    if (expireAt <= now) {
+      EVENT_HISTORY.delete(key);
+    }
+  }
+  const existing = EVENT_HISTORY.get(eventId);
+  if (existing && existing > now) {
+    return true;
+  }
+  EVENT_HISTORY.set(eventId, now + ttlMs);
+  return false;
+}
+
+function parseFeishuInbound(raw: unknown, requestId: string): FeishuInboundMessage {
+  if (!raw || typeof raw !== "object") {
+    return {
+      kind: "ignored",
+      requestId,
+      reason: "invalid-payload",
+    };
+  }
+
+  const event = raw as FeishuWsMessageEvent;
+  const message = event.message ?? {};
+  const messageId = firstNonEmpty(message.message_id, event.message?.message_id);
+  const eventId = firstNonEmpty(messageId);
+  const chatType = normalizeChatType(
+    firstNonEmpty(message.chat_type, inferChatType(message.chat_id)) || inferChatType(message.chat_id),
+  );
+  const messageType = normalizeChatType(message.message_type);
+  const openId = firstNonEmpty(
+    event.sender?.sender_id?.open_id,
+    event.sender?.sender_id?.user_id,
+  );
+  const chatId = firstNonEmpty(message.chat_id);
+  const content = parseTextContent(message.content ?? "");
+
+  if (!chatType) {
+    return {
+      kind: "ignored",
+      reason: "missing-chat-type",
+      requestId,
+      eventId,
+      messageId,
+      openId,
+      chatId,
+      messageType,
+    };
+  }
+
+  if (!FEISHU_DM_CHAT_TYPES.has(chatType)) {
+    return {
+      kind: "unsupported",
+      reason: "non-direct-chat",
+      requestId,
+      eventId,
+      messageId,
+      openId,
+      chatId,
+      chatType,
+      messageType,
+    };
+  }
+
+  if (messageType && messageType !== FEISHU_TEXT_MESSAGE_TYPE) {
+    return {
+      kind: "unsupported",
+      reason: "non-text-message",
+      requestId,
+      eventId,
+      messageId,
+      openId,
+      chatId,
+      chatType,
+      messageType,
+    };
+  }
+
+  if (!openId || !content) {
+    return {
+      kind: "ignored",
+      reason: "missing-open-id-or-content",
+      requestId,
+      eventId,
+      messageId,
+      openId,
+      chatId,
+      chatType,
+      messageType,
+    };
+  }
+
+  return {
+    kind: "dm-text",
+    requestId,
+    eventId,
+    messageId,
+    openId,
+    chatId,
+    chatType,
+    messageType,
+    input: content,
+  };
+}
+
+async function handleWsPayload(data: unknown, config: FeishuGatewayConfig): Promise<void> {
+  const requestId = createRequestId();
+  try {
+    const inbound = parseFeishuInbound(data, requestId);
+    if (inbound.kind !== "dm-text" || !inbound.openId || !inbound.input) {
+      return;
+    }
+
+    if (inbound.eventId && isReplay(inbound.eventId, EVENT_ID_TTL_MS)) {
+      return;
+    }
+
+    const runResult = await Promise.race([
+      runAsk(inbound.input, {
+        sessionKey: `feishu:dm:${inbound.openId}`,
+      }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`ask timeout after ${REPLY_TIMEOUT_MS}ms`));
+        }, REPLY_TIMEOUT_MS);
+      }),
+    ]);
+
+    await sendFeishuTextMessage(config, {
+      openId: inbound.openId,
+      text: runResult.result,
+    });
+    console.log(`[feishu] ${requestId} answered dm for open_id=${inbound.openId}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[feishu] ${requestId} error: ${message}`);
+  }
+}
+
+export async function runFeishuGatewayServer(overrides: Partial<FeishuGatewayConfig> = {}): Promise<void> {
+  const config = await resolveFeishuGatewayConfig(overrides);
+  await persistFeishuGatewayConfig(overrides);
+
+  if (!config.appId || !config.appSecret) {
+    throw new Error("Missing FEISHU_APP_ID or FEISHU_APP_SECRET for websocket mode");
+  }
+
+  const eventDispatcher = new Lark.EventDispatcher({});
+  eventDispatcher.register({
+    "im.message.receive_v1": async (data) => {
+      await handleWsPayload(data, config);
+    },
+  });
+
+  const wsClient = new Lark.WSClient({
+    appId: config.appId,
+    appSecret: config.appSecret,
+    loggerLevel: Lark.LoggerLevel.info,
+  });
+
+  wsClient.start({ eventDispatcher });
+  console.log("[feishu] websocket connection started");
+
+  await new Promise<void>((resolve) => {
+    const shutdown = (signal: string) => () => {
+      console.log(`[feishu] ${signal} received, shutting down`);
+      resolve();
+    };
+    process.once("SIGINT", shutdown("SIGINT"));
+    process.once("SIGTERM", shutdown("SIGTERM"));
+  });
+}

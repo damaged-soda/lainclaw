@@ -79,6 +79,54 @@ lainclaw
 lainclaw ask 你好，帮我总结一下
 ```
 
+## 飞书（Feishu）网关接入（WS-only）
+
+当前的 `feishu` 通道仅支持 **WebSocket 长连接模式**（不使用 Webhook）。
+
+### 启动方式
+
+```bash
+cd <repo_root>/src/lainclaw
+npm install
+npm run build
+npm start -- feishu --app-id <AppID> --app-secret <AppSecret>
+```
+
+可选参数：
+
+- `--request-timeout-ms <ms>`：飞书 API 请求超时（默认 10000）
+
+示例（10秒超时）：
+
+```bash
+npm start -- feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
+```
+
+也可以直接使用全局命令（安装过 `npm link` 后）：
+
+```bash
+lainclaw feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
+```
+
+参数会优先来自命令行，未传入时会从环境变量回退，最后从 `~/.lainclaw/feishu-gateway.json` 读取上次配置（如存在）。
+
+- `LAINCLAW_FEISHU_APP_ID` / `FEISHU_APP_ID`
+- `LAINCLAW_FEISHU_APP_SECRET` / `FEISHU_APP_SECRET`
+- `LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS` / `FEISHU_REQUEST_TIMEOUT_MS`
+
+### 启动日志说明（你可以按这个判断是否成功）
+
+- `event-dispatch is ready`：SDK event dispatcher 已就绪
+- `receive events or callbacks through persistent connection ...`：表示飞书控制台已配置为长连接回调模式
+- `[ws] ws client ready`：长连接建立成功
+- `[feishu] websocket connection started`：`feishu` 命令的处理循环已启动
+- `answered dm for open_id=...`：说明收到 DM 并成功回包（表示端到端链路通了）
+
+### 当前限制（MVP）
+
+- 默认只处理 DM 文本消息（非 DM 或非文本不会响应）
+- 依赖 `@larksuiteoapi/node-sdk` 的 WebSocket 能力（`app_id`/`app_secret` 必须有权限）
+
 ## 仅给某个工程引用（可选）
 
 ```bash
