@@ -1,5 +1,6 @@
 import { ValidationError } from '../shared/types.js';
 import { runAsk } from '../gateway/askGateway.js';
+import { getToolInfo, invokeToolByCli, listToolsCatalog } from '../tools/gateway.js';
 import {
   clearProfiles,
   formatProfileExpiry,
@@ -9,6 +10,7 @@ import {
   setActiveProfile,
   logoutProfile,
 } from '../auth/authManager.js';
+import type { ToolExecutionLog } from '../tools/types.js';
 
 const VERSION = '0.1.0';
 
@@ -18,7 +20,10 @@ export function printUsage(): string {
     '  lainclaw --help',
     '  lainclaw --version',
     '  lainclaw ask <input>',
-    '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] <input>',
+    '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] <input>',
+    '  lainclaw tools list',
+    '  lainclaw tools info <name>',
+    '  lainclaw tools invoke <name> --args <json>',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '  lainclaw auth use <profile>',
@@ -29,6 +34,8 @@ export function printUsage(): string {
     '  lainclaw ask --session work --provider openai-codex --profile default 这是一段测试文本',
     '  lainclaw ask --session work --memory 这是一个长期记忆测试',
     '  lainclaw ask --session work --memory=off 这是一条不写入记忆的消息',
+    '  lainclaw ask --tool-allow time.now,shell.pwd "tool:time.now"',
+    '  lainclaw tools invoke fs.read_file --args "{\\"path\\":\\"README.md\\"}"',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '',
@@ -59,6 +66,36 @@ function parseMemoryFlag(raw: string, index: number): boolean {
   return false;
 }
 
+function parseBooleanFlag(raw: string, index: number): boolean {
+  if (raw === '--with-tools') {
+    return true;
+  }
+
+  if (raw === '--no-with-tools') {
+    return false;
+  }
+
+  if (raw.startsWith('--with-tools=')) {
+    const value = raw.slice('--with-tools='.length).toLowerCase();
+    if (value === 'on' || value === 'true' || value === '1') {
+      return true;
+    }
+    if (value === 'off' || value === 'false' || value === '0') {
+      return false;
+    }
+    throw new Error(`Invalid value for --with-tools at arg ${index + 1}: ${value}`);
+  }
+
+  throw new Error(`Invalid boolean flag: ${raw}`);
+}
+
+function parseCsvOption(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 function printResult(payload: {
   success: boolean;
   requestId: string;
@@ -73,6 +110,10 @@ function printResult(payload: {
   memoryFile?: string;
   provider?: string;
   profileId?: string;
+  toolCalls?: { id: string; name: string; args?: unknown; source?: string }[];
+  toolResults?: ToolExecutionLog[];
+  toolError?: { tool: string; code: string; message: string };
+  sessionContextUpdated?: boolean;
 }) {
   if (payload.success) {
     console.log(JSON.stringify(payload, null, 2));
@@ -95,12 +136,16 @@ function parseAskArgs(argv: string[]): {
   sessionKey?: string;
   newSession?: boolean;
   memory?: boolean;
+  withTools?: boolean;
+  toolAllow?: string[];
 } {
   let provider: string | undefined;
   let profile: string | undefined;
   let sessionKey: string | undefined;
   let newSession = false;
   let memory: boolean | undefined;
+  let withTools: boolean | undefined;
+  let toolAllow: string[] | undefined;
   const inputParts: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -147,6 +192,23 @@ function parseAskArgs(argv: string[]): {
       continue;
     }
 
+    if (arg === '--with-tools' || arg === '--no-with-tools' || arg.startsWith('--with-tools=')) {
+      withTools = parseBooleanFlag(arg, i);
+      continue;
+    }
+
+    if (arg === '--tool-allow') {
+      throwIfMissingValue('tool-allow', i + 1, argv);
+      toolAllow = parseCsvOption(argv[i + 1]);
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--tool-allow=')) {
+      toolAllow = parseCsvOption(arg.slice('--tool-allow='.length));
+      continue;
+    }
+
     if (arg.startsWith("--profile=")) {
       profile = arg.slice("--profile=".length);
       continue;
@@ -159,7 +221,7 @@ function parseAskArgs(argv: string[]): {
     inputParts.push(arg);
   }
 
-  return { input: inputParts.join(" "), provider, profile, sessionKey, newSession, memory };
+  return { input: inputParts.join(" "), provider, profile, sessionKey, newSession, memory, withTools, toolAllow };
 }
 
 async function runAuthCommand(argv: string[]): Promise<number> {
@@ -243,6 +305,92 @@ async function runAuthCommand(argv: string[]): Promise<number> {
   return 1;
 }
 
+async function runToolsCommand(argv: string[]): Promise<number> {
+  const [, ...rest] = argv;
+  const subcommand = rest[0];
+  const args = rest.slice(1);
+
+  if (!subcommand) {
+    console.error('Usage: lainclaw tools <list|info|invoke>');
+    return 1;
+  }
+
+  if (subcommand === 'list') {
+    console.log(JSON.stringify(listToolsCatalog(), null, 2));
+    return 0;
+  }
+
+  if (subcommand === 'info') {
+    const name = args[0];
+    if (!name) {
+      console.error('Usage: lainclaw tools info <name>');
+      return 1;
+    }
+
+    const tool = getToolInfo(name);
+    if (!tool) {
+      console.error(`Tool not found: ${name}`);
+      return 1;
+    }
+
+    console.log(JSON.stringify(tool, null, 2));
+    return 0;
+  }
+
+  if (subcommand === 'invoke') {
+    const targetName = args[0];
+    if (!targetName) {
+      console.error('Usage: lainclaw tools invoke <name> --args <json>');
+      return 1;
+    }
+
+    let rawArgs: string | undefined;
+    for (let i = 1; i < args.length; i += 1) {
+      const arg = args[i];
+      if (arg === '--args') {
+        throwIfMissingValue('args', i + 1, args);
+        rawArgs = args[i + 1];
+        i += 1;
+        continue;
+      }
+
+      if (arg.startsWith('--args=')) {
+        rawArgs = arg.slice('--args='.length);
+        continue;
+      }
+
+      if (arg.startsWith('--')) {
+        console.error(`Unknown option: ${arg}`);
+        return 1;
+      }
+    }
+
+    let parsedArgs: unknown = {};
+    try {
+      if (typeof rawArgs === 'string' && rawArgs.length > 0) {
+        parsedArgs = JSON.parse(rawArgs);
+      }
+    } catch (error) {
+      console.error(`Invalid --args json: ${error instanceof Error ? error.message : String(error)}`);
+      return 1;
+    }
+
+    const execResult = await invokeToolByCli(targetName, parsedArgs, {
+      requestId: `cli-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, '0')}`,
+      sessionId: 'tools-cli',
+      sessionKey: 'tools',
+      cwd: process.cwd(),
+    });
+
+    console.log(JSON.stringify(execResult, null, 2));
+    return execResult.result.ok ? 0 : 1;
+  }
+
+  console.error(`Unknown tools subcommand: ${subcommand}`);
+  console.error('Usage: lainclaw tools <list|info|invoke>');
+  return 1;
+}
+
 export async function runCli(argv: string[]): Promise<number> {
   const command = argv[0];
 
@@ -258,7 +406,7 @@ export async function runCli(argv: string[]): Promise<number> {
 
   if (command === 'ask') {
     try {
-      const { input, provider, profile, sessionKey, newSession, memory } = parseAskArgs(argv.slice(1));
+      const { input, provider, profile, sessionKey, newSession, memory, withTools, toolAllow } = parseAskArgs(argv.slice(1));
       if (provider && provider !== "openai-codex") {
         throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
       }
@@ -271,6 +419,8 @@ export async function runCli(argv: string[]): Promise<number> {
         ...(sessionKey ? { sessionKey } : {}),
         ...(newSession ? { newSession } : {}),
         ...(typeof memory === 'boolean' ? { memory } : {}),
+        ...(typeof withTools === 'boolean' ? { withTools } : {}),
+        ...(toolAllow ? { toolAllow } : {}),
       });
       return printResult(response);
     } catch (error) {
@@ -287,6 +437,15 @@ export async function runCli(argv: string[]): Promise<number> {
   if (command === 'auth') {
     try {
       return await runAuthCommand(argv);
+    } catch (error) {
+      console.error("ERROR:", String(error instanceof Error ? error.message : error));
+      return 1;
+    }
+  }
+
+  if (command === 'tools') {
+    try {
+      return await runToolsCommand(argv);
     } catch (error) {
       console.error("ERROR:", String(error instanceof Error ? error.message : error));
       return 1;

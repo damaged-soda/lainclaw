@@ -1,3 +1,5 @@
+import type { ToolCall, ToolError, ToolExecutionLog } from "../tools/types.js";
+
 export interface RequestContext {
   requestId: string;
   createdAt: string;
@@ -34,6 +36,10 @@ export interface GatewayResult {
   route: string;
   stage: string;
   result: string;
+  toolCalls?: ToolCall[];
+  toolResults?: ToolExecutionLog[];
+  toolError?: ToolError;
+  sessionContextUpdated?: boolean;
   sessionKey: string;
   sessionId: string;
   provider?: string;

@@ -11,6 +11,9 @@ import {
   recordSessionRoute,
   updateSessionRecord,
 } from '../sessions/sessionStore.js';
+import type { ToolCall, ToolContext, ToolExecutionLog, ToolError } from '../tools/types.js';
+import { invokeToolsForAsk } from '../tools/gateway.js';
+import { isToolAllowed } from '../tools/registry.js';
 
 const DEFAULT_SESSION_KEY = 'main';
 const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;
@@ -19,6 +22,7 @@ const MEMORY_KEEP_RECENT_MESSAGES = 12;
 const MEMORY_MIN_COMPACT_WINDOW = 6;
 const MEMORY_SUMMARY_MESSAGE_LIMIT = 16;
 const MEMORY_SUMMARY_LINE_LIMIT = 120;
+const TOOL_PARSE_PREFIX = 'tool:';
 
 function createRequestId() {
   const now = Date.now();
@@ -80,9 +84,181 @@ function buildCompactionSummary(
   return `## Memory Summary\n${lines.map((line) => `- ${line}`).join('\n')}`;
 }
 
+function normalizeToolAllow(raw: string[] | undefined): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [];
+  }
+  return raw
+    .map((entry) => (typeof entry === 'string' ? entry.trim().toLowerCase() : ''))
+    .filter((entry) => entry.length > 0);
+}
+
+function makeToolExecutionError(call: ToolCall, message: string, code: ToolError["code"]): ToolExecutionLog {
+  return {
+    call: {
+      ...call,
+      id: call.id || `tool-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, '0')}`,
+    },
+    result: {
+      ok: false,
+      content: undefined,
+      error: {
+        tool: call.name,
+        code,
+        message,
+      },
+      meta: {
+        tool: call.name,
+        durationMs: 0,
+      },
+    },
+  };
+}
+
+interface ParsedToolInput {
+  toolCalls: ToolCall[];
+  residualInput: string;
+  parseError?: string;
+}
+
+function parseToolCallsFromPrompt(rawInput: string): ParsedToolInput {
+  const trimmed = rawInput.trim();
+  if (!trimmed.startsWith(TOOL_PARSE_PREFIX)) {
+    return {
+      toolCalls: [],
+      residualInput: rawInput,
+    };
+  }
+
+  const payload = trimmed.slice(TOOL_PARSE_PREFIX.length).trim();
+  if (!payload) {
+    return {
+      toolCalls: [],
+      residualInput: '',
+      parseError: 'tool invocation missing content',
+    };
+  }
+
+  let command = payload;
+  let residual = '';
+  const separator = payload.indexOf('\n');
+  if (separator >= 0) {
+    command = payload.slice(0, separator).trim();
+    residual = payload.slice(separator + 1).trim();
+  }
+
+  if (!command) {
+    return {
+      toolCalls: [],
+      residualInput: residual,
+      parseError: 'tool invocation missing call payload',
+    };
+  }
+
+  try {
+    let calls: unknown[] = [];
+
+    if (command.startsWith('[') || command.startsWith('{')) {
+      const parsed = JSON.parse(command);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+      if (list.length === 0) {
+        return {
+          toolCalls: [],
+          residualInput: residual,
+          parseError: 'tool invocation array is empty',
+        };
+      }
+      calls = list;
+    } else {
+      const rawName = command.trim();
+      const firstSpace = rawName.search(/\s/);
+      const name = firstSpace >= 0 ? rawName.slice(0, firstSpace).trim() : rawName;
+      const argsText = firstSpace >= 0 ? rawName.slice(firstSpace + 1).trim() : '';
+
+      const args = argsText ? JSON.parse(argsText) : {};
+      calls = [
+        {
+          name,
+          args,
+        },
+      ];
+    }
+
+    const toolCalls: ToolCall[] = calls.map((entry, index) => {
+        if (!entry || typeof entry !== 'object') {
+          throw new Error(`tool invocation #${index + 1} is invalid`);
+        }
+
+        const normalized = entry as Partial<ToolCall>;
+        const name = typeof normalized.name === 'string' ? normalized.name.trim() : '';
+        if (!name) {
+          throw new Error(`tool invocation #${index + 1} missing name`);
+        }
+
+        return {
+          id: typeof normalized.id === 'string' && normalized.id.trim().length > 0
+            ? normalized.id.trim()
+            : `tool-${Date.now()}-${index + 1}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, '0')}`,
+          name,
+          args: normalized.args,
+          source: 'ask',
+        };
+      });
+
+    return {
+      toolCalls,
+      residualInput: residual,
+    };
+  } catch (error) {
+    return {
+      toolCalls: [],
+      residualInput: residual,
+      parseError: error instanceof Error ? error.message : 'invalid tool payload',
+    };
+  }
+}
+
+function buildToolMessages(
+  calls: ToolCall[],
+  results: ToolExecutionLog[],
+): string {
+  const normalized = calls.map((call) => {
+    const matched = results.find((result) => result.call.id === call.id || result.call.name === call.name);
+    if (!matched) {
+      return {
+        call,
+        result: {
+          ok: false,
+          error: {
+            code: 'execution_error',
+            tool: call.name,
+            message: 'tool result missing',
+          },
+          meta: {
+            tool: call.name,
+            durationMs: 0,
+          },
+        },
+      };
+    }
+    return {
+      call: matched.call,
+      result: {
+        ok: matched.result.ok,
+        content: matched.result.content,
+        data: matched.result.data,
+        error: matched.result.error,
+        meta: matched.result.meta,
+      },
+    };
+  });
+
+  return JSON.stringify(normalized, null, 2);
+}
+
 export async function runAsk(
   rawInput: string,
-  opts: { provider?: string; profileId?: string; sessionKey?: string; newSession?: boolean; memory?: boolean } = {},
+  opts: { provider?: string; profileId?: string; sessionKey?: string; newSession?: boolean; memory?: boolean; withTools?: boolean; toolAllow?: string[] } = {},
 ): Promise<GatewayResult> {
   if (!rawInput || !rawInput.trim()) {
     throw new ValidationError('ask command requires non-empty input', 'ASK_INPUT_REQUIRED');
@@ -93,6 +269,8 @@ export async function runAsk(
   const provider = opts.provider?.trim();
   const profileId = opts.profileId?.trim();
   const memoryEnabled = clampMemoryFlag(opts.memory);
+  const withTools = typeof opts.withTools === 'boolean' ? opts.withTools : true;
+  const toolAllow = normalizeToolAllow(opts.toolAllow);
   const session = await getOrCreateSession({
     sessionKey,
     provider,
@@ -125,11 +303,105 @@ export async function runAsk(
 
   const requestId = createRequestId();
   const createdAt = nowIso();
+  const parsedTools = withTools ? parseToolCallsFromPrompt(input) : {
+    toolCalls: [],
+    residualInput: input,
+  };
+
+  let toolCalls = parsedTools.toolCalls;
+  const toolResults: ToolExecutionLog[] = [];
+  let toolError: ToolError | undefined;
+
+  if (toolCalls.length > 0) {
+    if (toolAllow.length > 0) {
+      const [allowed, denied] = toolCalls.reduce(
+        ([include, exclude], call) => {
+          if (isToolAllowed(call.name, toolAllow)) {
+            include.push(call);
+          } else {
+            exclude.push(call);
+          }
+          return [include, exclude];
+        },
+        [[], []] as [ToolCall[], ToolCall[]],
+      );
+      toolCalls = allowed;
+      denied.forEach((call) => {
+        const deniedResult = makeToolExecutionError(call, `tool not allowed: ${call.name}`, 'tool_not_found');
+        toolError = deniedResult.result.error;
+        toolResults.push(deniedResult);
+      });
+    }
+
+    if (toolCalls.length > 0) {
+      const toolContext: ToolContext = {
+        requestId,
+        sessionId: session.sessionId,
+        sessionKey,
+        cwd: process.cwd(),
+      };
+
+      if (parsedTools.parseError) {
+        const parseError = makeToolExecutionError(
+          {
+            id: `tool-parse-${Date.now()}`,
+            name: 'ask',
+            args: {
+              raw: parsedTools.residualInput,
+              reason: parsedTools.parseError,
+            },
+          },
+          parsedTools.parseError,
+          'invalid_args',
+        );
+        toolError = parseError.result.error;
+        toolResults.push(parseError);
+      }
+
+      const executionLogs = await invokeToolsForAsk(toolCalls, toolContext);
+      executionLogs.forEach((entry) => {
+        if (!entry.result.ok && !toolError) {
+          toolError = entry.result.error;
+        }
+      });
+      toolResults.push(...executionLogs);
+
+      const toolSummaryContent = buildToolMessages(toolCalls, toolResults);
+      contextMessages.push({
+        id: createMessageId('msg-tool'),
+        role: 'system',
+        timestamp: nowIso(),
+        content: `[tool_results]\n${toolSummaryContent}`,
+      });
+    }
+  }
+
+  if (parsedTools.parseError && parsedTools.toolCalls.length === 0) {
+    const parseError = makeToolExecutionError(
+      {
+        id: `tool-parse-${Date.now()}`,
+        name: 'ask',
+        args: {
+          raw: parsedTools.residualInput,
+          reason: parsedTools.parseError,
+        },
+      },
+      parsedTools.parseError,
+      'invalid_args',
+    );
+    toolError = parseError.result.error;
+    toolResults.push(parseError);
+  }
+
+  const residualInput = parsedTools.residualInput || input;
+  const pipelineInput = withTools && toolCalls.length > 0
+    ? `${residualInput}\n\n请基于上述工具结果回答问题。`
+    : input;
 
   const context: RequestContext = {
     requestId,
     createdAt,
-    input,
+    input: pipelineInput,
     sessionKey,
     sessionId: session.sessionId,
     messages: contextMessages,
@@ -149,6 +421,21 @@ export async function runAsk(
     ...(adapter.provider ? { provider: adapter.provider } : {}),
     ...(adapter.profileId ? { profileId: adapter.profileId } : {}),
   };
+
+  const shouldAppendToolContext = withTools && toolCalls.length > 0;
+  if (shouldAppendToolContext) {
+    const toolResultContent = buildToolMessages(toolCalls, toolResults);
+    await appendSessionMessage(session.sessionId, {
+      id: createMessageId('msg-tool-context'),
+      role: 'system',
+      timestamp: nowIso(),
+      content: `toolResults:\n${toolResultContent}`,
+      route: adapter.route,
+      stage: adapter.stage,
+      ...(result.provider ? { provider: result.provider } : {}),
+      ...(result.profileId ? { profileId: result.profileId } : {}),
+    });
+  }
 
   await appendSessionMessage(session.sessionId, {
     ...userMessage,
@@ -201,5 +488,9 @@ export async function runAsk(
     memoryEnabled: session.memoryEnabled,
     memoryUpdated,
     memoryFile: session.memoryEnabled ? getSessionMemoryPath(session.sessionKey) : undefined,
+    toolCalls,
+    toolResults: toolResults.length > 0 ? toolResults : undefined,
+    toolError,
+    sessionContextUpdated: shouldAppendToolContext,
   };
 }
