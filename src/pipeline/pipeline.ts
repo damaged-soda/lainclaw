@@ -1,6 +1,7 @@
-import { RequestContext } from '../shared/types.js';
-import { AdapterResult } from '../adapters/stubAdapter.js';
-import { runStubAdapter } from '../adapters/stubAdapter.js';
+import { RequestContext } from "../shared/types.js";
+import { AdapterResult } from "../adapters/stubAdapter.js";
+import { runStubAdapter } from "../adapters/stubAdapter.js";
+import { runCodexAdapter } from "../adapters/codexAdapter.js";
 
 interface RouteDecision {
   route: string;
@@ -14,8 +15,18 @@ function resolveRoute(input: string): RouteDecision {
   return { route: 'echo' };
 }
 
-export function runPipeline(context: RequestContext): { adapter: AdapterResult } {
-  const decision = resolveRoute(context.input);
-  const adapter = runStubAdapter(context, decision.route);
+function resolveRouteForContext(context: RequestContext): RouteDecision {
+  if (context.provider === "openai-codex") {
+    return { route: "codex" };
+  }
+  return resolveRoute(context.input);
+}
+
+export async function runPipeline(context: RequestContext): Promise<{ adapter: AdapterResult }> {
+  const decision = resolveRouteForContext(context);
+  const adapter =
+    decision.route === "codex"
+      ? await runCodexAdapter(context, decision.route)
+      : runStubAdapter(context, decision.route);
   return { adapter };
 }

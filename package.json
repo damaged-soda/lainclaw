@@ -13,6 +13,9 @@
     "build": "rm -rf dist && tsc && chmod +x dist/index.js",
     "bootstrap": "npm run build && npm link"
   },
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.54.0"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"

@@ -2,6 +2,8 @@ export interface RequestContext {
   requestId: string;
   createdAt: string;
   input: string;
+  provider?: string;
+  profileId?: string;
 }
 
 export interface PipelineResult {
@@ -10,6 +12,8 @@ export interface PipelineResult {
   route: string;
   stage: string;
   result: string;
+  provider?: string;
+  profileId?: string;
 }
 
 export interface GatewayResult {
@@ -19,6 +23,8 @@ export interface GatewayResult {
   route: string;
   stage: string;
   result: string;
+  provider?: string;
+  profileId?: string;
 }
 
 export class ValidationError extends Error {
@@ -29,4 +35,3 @@ export class ValidationError extends Error {
     this.code = code;
   }
 }
-

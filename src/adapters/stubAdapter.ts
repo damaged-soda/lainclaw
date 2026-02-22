@@ -4,6 +4,8 @@ export interface AdapterResult {
   route: string;
   stage: string;
   result: string;
+  provider?: string;
+  profileId?: string;
 }
 
 export function runStubAdapter(context: RequestContext, route: string): AdapterResult {
@@ -22,4 +24,3 @@ export function runStubAdapter(context: RequestContext, route: string): AdapterR
     result: `[stub-echo] 已接收到输入：${normalizedInput}`
   };
 }
-
