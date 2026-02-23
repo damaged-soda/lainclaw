@@ -13,12 +13,14 @@ import { runLocalGatewayServer, type LocalGatewayOverrides } from '../channels/l
 import { sendFeishuTextMessage } from '../channels/feishu/outbound.js';
 import { runPairingCommand } from '../pairing/cli.js';
 import {
+  buildFeishuGatewayConfigMigrationDraft,
   clearFeishuGatewayConfig,
-  loadCachedFeishuGatewayConfig,
+  loadCachedFeishuGatewayConfigWithSources,
   persistFeishuGatewayConfig,
   resolveFeishuGatewayConfigPath,
   resolveFeishuGatewayConfig,
   type FeishuGatewayConfig,
+  type FeishuGatewayConfigSources,
 } from '../channels/feishu/config.js';
 import { getToolInfo, invokeToolByCli, listToolsCatalog } from '../tools/gateway.js';
 import {
@@ -73,6 +75,7 @@ export function printUsage(): string {
     '  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]',
     '  lainclaw gateway config show [--channel <channel>]',
     '  lainclaw gateway config clear [--channel <channel>]',
+    '  lainclaw gateway config migrate [--channel <channel>] --dry-run',
     '  lainclaw pairing list [--channel <channel>] [--account <accountId>] [--json]',
     '  lainclaw pairing approve [--channel <channel>] [--account <accountId>] <code>',
     '  lainclaw pairing revoke [--channel <channel>] [--account <accountId>] <entry>',
@@ -763,24 +766,36 @@ function parseFeishuServerArgs(argv: string[]): {
     }
   }
 
+  const normalizedPairingPolicy = normalizePairingPolicy(pairingPolicy);
+
   return {
-    appId,
-    appSecret,
-    requestTimeoutMs,
-    provider,
-    profileId,
-    withTools,
-    memory,
-    toolAllow,
-    toolMaxSteps,
-    heartbeatEnabled,
-    heartbeatIntervalMs,
-    heartbeatTargetOpenId: heartbeatTargetOpenId?.trim(),
-    heartbeatSessionKey: heartbeatSessionKey?.trim(),
-    pairingPolicy: normalizePairingPolicy(pairingPolicy),
-    pairingPendingTtlMs,
-    pairingPendingMax,
-    pairingAllowFrom,
+    ...(appId ? { appId } : {}),
+    ...(appSecret ? { appSecret } : {}),
+    ...(typeof requestTimeoutMs === "number" && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
+      ? { requestTimeoutMs }
+      : {}),
+    ...(provider ? { provider } : {}),
+    ...(profileId ? { profileId } : {}),
+    ...(typeof withTools === "boolean" ? { withTools } : {}),
+    ...(typeof memory === "boolean" ? { memory } : {}),
+    ...(Array.isArray(toolAllow) ? { toolAllow } : {}),
+    ...(typeof toolMaxSteps === "number" && Number.isFinite(toolMaxSteps) && toolMaxSteps > 0
+      ? { toolMaxSteps }
+      : {}),
+    ...(typeof heartbeatEnabled === "boolean" ? { heartbeatEnabled } : {}),
+    ...(typeof heartbeatIntervalMs === "number" && Number.isFinite(heartbeatIntervalMs) && heartbeatIntervalMs > 0
+      ? { heartbeatIntervalMs }
+      : {}),
+    ...(heartbeatTargetOpenId?.trim() ? { heartbeatTargetOpenId: heartbeatTargetOpenId.trim() } : {}),
+    ...(heartbeatSessionKey?.trim() ? { heartbeatSessionKey: heartbeatSessionKey.trim() } : {}),
+    ...(normalizedPairingPolicy ? { pairingPolicy: normalizedPairingPolicy } : {}),
+    ...(typeof pairingPendingTtlMs === "number" && Number.isFinite(pairingPendingTtlMs) && pairingPendingTtlMs > 0
+      ? { pairingPendingTtlMs }
+      : {}),
+    ...(typeof pairingPendingMax === "number" && Number.isFinite(pairingPendingMax) && pairingPendingMax > 0
+      ? { pairingPendingMax }
+      : {}),
+    ...(Array.isArray(pairingAllowFrom) ? { pairingAllowFrom } : {}),
   };
 }
 
@@ -1039,14 +1054,17 @@ function parseGatewayArgs(argv: string[]): {
 
 function parseGatewayConfigArgs(argv: string[]): {
   channel: string;
-  action: "set" | "show" | "clear";
+  channelProvided: boolean;
+  action: "set" | "show" | "clear" | "migrate";
+  dryRun?: boolean;
   config: Partial<FeishuGatewayConfig>;
 } {
   const subcommand = argv[0];
   if (!subcommand) {
     throw new Error("Missing gateway config subcommand");
   }
-  let channel = "feishu";
+  let channel = "default";
+  let channelProvided = false;
   const configArgv: string[] = [];
 
   if (subcommand === "set") {
@@ -1057,6 +1075,7 @@ function parseGatewayConfigArgs(argv: string[]): {
           throw new Error("Invalid value for --channel");
         }
         channel = argv[i + 1].trim().toLowerCase();
+        channelProvided = true;
         i += 1;
         continue;
       }
@@ -1065,6 +1084,7 @@ function parseGatewayConfigArgs(argv: string[]): {
         if (!channel) {
           throw new Error("Invalid value for --channel");
         }
+        channelProvided = true;
         continue;
       }
       if (arg.startsWith("--")) {
@@ -1075,7 +1095,19 @@ function parseGatewayConfigArgs(argv: string[]): {
     }
 
     const config = parseFeishuServerArgs(configArgv);
-    return { channel, action: "set", config };
+    if (Object.keys(config).length === 0) {
+      throw new Error("No gateway config fields provided");
+    }
+    if (
+      (channel === "default" || !channelProvided) &&
+      (typeof config.appId === "string" || typeof config.appSecret === "string")
+    ) {
+      throw new Error("appId/appSecret must be scoped with --channel, e.g. --channel feishu");
+    }
+    if (channel !== "default" && typeof config.provider === "string") {
+      throw new Error("provider is a gateway-level field and cannot be set with --channel; set it at default scope");
+    }
+    return { channel, channelProvided, action: "set", config };
   }
 
   if (subcommand === "show" || subcommand === "clear") {
@@ -1086,6 +1118,7 @@ function parseGatewayConfigArgs(argv: string[]): {
           throw new Error("Invalid value for --channel");
         }
         channel = argv[i + 1].trim().toLowerCase();
+        channelProvided = true;
         i += 1;
         continue;
       }
@@ -1094,6 +1127,7 @@ function parseGatewayConfigArgs(argv: string[]): {
         if (!channel) {
           throw new Error("Invalid value for --channel");
         }
+        channelProvided = true;
         continue;
       }
       if (arg.startsWith("--")) {
@@ -1101,7 +1135,46 @@ function parseGatewayConfigArgs(argv: string[]): {
       }
       throw new Error(`Unexpected argument for gateway config ${subcommand}: ${arg}`);
     }
-    return { channel, action: subcommand, config: {} };
+    return { channel, channelProvided, action: subcommand, config: {} };
+  }
+
+  if (subcommand === "migrate") {
+    let dryRun = false;
+    for (let i = 1; i < argv.length; i += 1) {
+      const arg = argv[i];
+      if (arg === "--channel") {
+        if (i + 1 >= argv.length) {
+          throw new Error("Invalid value for --channel");
+        }
+        channel = argv[i + 1].trim().toLowerCase();
+        if (!channel) {
+          throw new Error("Invalid value for --channel");
+        }
+        channelProvided = true;
+        i += 1;
+        continue;
+      }
+      if (arg.startsWith("--channel=")) {
+        channel = arg.slice("--channel=".length).trim().toLowerCase();
+        if (!channel) {
+          throw new Error("Invalid value for --channel");
+        }
+        channelProvided = true;
+        continue;
+      }
+      if (arg === "--dry-run") {
+        dryRun = true;
+        continue;
+      }
+      if (arg.startsWith("--")) {
+        throw new Error(`Unknown option for gateway config ${subcommand}: ${arg}`);
+      }
+      throw new Error(`Unexpected argument for gateway config ${subcommand}: ${arg}`);
+    }
+    if (!dryRun) {
+      throw new Error("gateway config migrate currently only supports --dry-run");
+    }
+    return { channel, channelProvided, action: "migrate", dryRun, config: {} };
   }
 
   throw new Error(`Unknown gateway config subcommand: ${subcommand}`);
@@ -1136,14 +1209,36 @@ async function runGatewayConfigCommand(argv: string[]): Promise<void> {
     return;
   }
 
-  const cached = await loadCachedFeishuGatewayConfig(parsed.channel);
+  if (parsed.action === "migrate") {
+    const draft = await buildFeishuGatewayConfigMigrationDraft(
+      parsed.channelProvided ? parsed.channel : undefined,
+    );
+    console.log(JSON.stringify(draft, null, 2));
+    return;
+  }
+
+  const { config: cached, sources } = await loadCachedFeishuGatewayConfigWithSources(parsed.channel);
   const configPath = resolveFeishuGatewayConfigPath(parsed.channel);
+  const config = Object.fromEntries(
+    Object.entries(cached).map((entry) => {
+      const key = entry[0];
+      const value = entry[1];
+      if (typeof value === "string" && (key === "appId" || key === "appSecret")) {
+        return [key, {
+          value: maskConfigValue(value),
+          source: sources[key as keyof FeishuGatewayConfigSources],
+        }];
+      }
+      return [key, {
+        value,
+        source: sources[key as keyof FeishuGatewayConfigSources],
+      }];
+    }),
+  );
   const masked = {
     channel: parsed.channel,
     configPath,
-    ...cached,
-    ...(cached.appId ? { appId: maskConfigValue(cached.appId) } : {}),
-    ...(cached.appSecret ? { appSecret: maskConfigValue(cached.appSecret) } : {}),
+    config,
   };
   console.log(JSON.stringify(masked, null, 2));
 }
@@ -2071,6 +2166,7 @@ export async function runCli(argv: string[]): Promise<number> {
         "  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]",
         "  lainclaw gateway config show [--channel <channel>]",
         "  lainclaw gateway config clear [--channel <channel>]",
+        "  lainclaw gateway config migrate [--channel <channel>] --dry-run",
       );
       return 1;
     }

@@ -7,8 +7,7 @@ import { DEFAULT_PAIRING_PENDING_MAX, DEFAULT_PAIRING_PENDING_TTL_MS } from "../
 export interface FeishuGatewayConfig {
   /**
    * Gateway-level runtime config for Feishu channel invocation.
-   * `channel` is only used to select which cache file stores this config;
-   * it is not a nested field inside FeishuGatewayConfig.
+   * `channel` is only used to select runtime config scope.
    */
   appId?: string;
   appSecret?: string;
@@ -29,9 +28,31 @@ export interface FeishuGatewayConfig {
   pairingAllowFrom?: string[];
 }
 
-interface FeishuGatewayStorage {
+export interface FeishuGatewayConfigSources {
+  appId?: "default" | "override";
+  appSecret?: "default" | "override";
+  requestTimeoutMs?: "default" | "override";
+  provider?: "default" | "override";
+  profileId?: "default" | "override";
+  withTools?: "default" | "override";
+  memory?: "default" | "override";
+  heartbeatEnabled?: "default" | "override";
+  heartbeatIntervalMs?: "default" | "override";
+  heartbeatTargetOpenId?: "default" | "override";
+  heartbeatSessionKey?: "default" | "override";
+  toolAllow?: "default" | "override";
+  toolMaxSteps?: "default" | "override";
+  pairingPolicy?: "default" | "override";
+  pairingPendingTtlMs?: "default" | "override";
+  pairingPendingMax?: "default" | "override";
+  pairingAllowFrom?: "default" | "override";
+}
+
+export interface FeishuGatewayStorage {
   version: 1;
-  config: {
+  default?: Partial<FeishuGatewayConfig>;
+  channels?: Record<string, Partial<FeishuGatewayConfig>>;
+  config?: {
     appId?: string;
     appSecret?: string;
     requestTimeoutMs?: number;
@@ -60,13 +81,35 @@ const DEFAULT_HEARTBEAT_ENABLED = false;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 const DEFAULT_PAIRING_POLICY = "open" as PairingPolicy;
-// Channel name is only a namespace for persisted configuration storage.
-// Default namespace `feishu` resolves to `feishu-gateway.json`.
-const FEISHU_GATEWAY_CONFIG_FILE = "feishu-gateway.json";
+const FEISHU_GATEWAY_CONFIG_FILE = "gateway.json";
+const LEGACY_FEISHU_GATEWAY_CONFIG_SUFFIX = "-gateway.json";
 const CURRENT_VERSION = 1 as const;
-const DEFAULT_CHANNEL = "feishu";
+const DEFAULT_CHANNEL = "default";
+const DEFAULT_RUNTIME_CHANNEL = "feishu";
+const GLOBAL_SCOPE_KEYS: Array<keyof FeishuGatewayConfig> = ["provider"];
+const FEISHU_GATEWAY_CONFIG_KEYS: Array<keyof FeishuGatewayConfig> = [
+  "appId",
+  "appSecret",
+  "requestTimeoutMs",
+  "provider",
+  "profileId",
+  "withTools",
+  "memory",
+  "heartbeatEnabled",
+  "heartbeatIntervalMs",
+  "heartbeatTargetOpenId",
+  "heartbeatSessionKey",
+  "toolAllow",
+  "toolMaxSteps",
+  "pairingPolicy",
+  "pairingPendingTtlMs",
+  "pairingPendingMax",
+  "pairingAllowFrom",
+];
 
-const CONFIG_FILE_SUFFIX = "-gateway.json";
+function hasOwn<T extends object>(value: T, key: keyof T): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
 
 function resolveText(raw: string | undefined): string {
   if (typeof raw !== "string") {
@@ -183,11 +226,22 @@ function normalizeGatewayChannel(rawChannel: string | undefined): string {
   return trimmed.replace(/[^a-z0-9._-]+/g, "-");
 }
 
+function normalizeChannelOverrides(raw: Partial<FeishuGatewayConfig>): Partial<FeishuGatewayConfig> {
+  const output: Partial<FeishuGatewayConfig> = { ...raw };
+  for (const key of GLOBAL_SCOPE_KEYS) {
+    delete output[key];
+  }
+  return output;
+}
+
 function resolveConfigPath(rawChannel: string = DEFAULT_CHANNEL): string {
+  void rawChannel;
+  return path.join(resolveAuthDirectory(), FEISHU_GATEWAY_CONFIG_FILE);
+}
+
+function resolveLegacyConfigPath(rawChannel: string = DEFAULT_RUNTIME_CHANNEL): string {
   const channel = normalizeGatewayChannel(rawChannel);
-  const fileName =
-    channel === DEFAULT_CHANNEL ? FEISHU_GATEWAY_CONFIG_FILE : `${channel}${CONFIG_FILE_SUFFIX}`;
-  return path.join(resolveAuthDirectory(), fileName);
+  return path.join(resolveAuthDirectory(), `${channel}${LEGACY_FEISHU_GATEWAY_CONFIG_SUFFIX}`);
 }
 
 export function resolveFeishuGatewayConfigPath(rawChannel: string = DEFAULT_CHANNEL): string {
@@ -312,6 +366,165 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
   return normalized;
 }
 
+function normalizeStorageLayer(raw: unknown): Partial<FeishuGatewayConfig> {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+  return normalizeStoredConfig(raw);
+}
+
+function isFeishuGatewayStorage(raw: unknown): raw is FeishuGatewayStorage {
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  const candidate = raw as Partial<FeishuGatewayStorage>;
+  if (candidate.version !== CURRENT_VERSION) {
+    return false;
+  }
+  if (candidate.default !== undefined && (candidate.default === null || typeof candidate.default !== "object")) {
+    return false;
+  }
+  if (candidate.channels !== undefined) {
+    if (!candidate.channels || typeof candidate.channels !== "object") {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function loadFeishuGatewayStore(): Promise<FeishuGatewayStorage | null> {
+  try {
+    const file = await fs.readFile(resolveConfigPath(), "utf-8");
+    const parsed = JSON.parse(file);
+    if (!isFeishuGatewayStorage(parsed)) {
+      return null;
+    }
+    const normalizedChannels: Record<string, Partial<FeishuGatewayConfig>> = {};
+    if (parsed.channels && typeof parsed.channels === "object") {
+      for (const [rawName, rawScope] of Object.entries(parsed.channels)) {
+        const normalizedName = normalizeGatewayChannel(rawName);
+        const normalizedScope = normalizeStorageLayer(rawScope);
+        if (Object.keys(normalizedScope).length > 0) {
+          normalizedChannels[normalizedName] = normalizedScope;
+        }
+      }
+    }
+    const normalizedDefault = normalizeStorageLayer(parsed.default);
+    const normalizedLegacyConfig = normalizeStorageLayer(
+      Object.prototype.hasOwnProperty.call(parsed, "config") ? parsed.config : undefined,
+    );
+
+    return {
+      version: CURRENT_VERSION,
+      ...(Object.keys(normalizedDefault).length > 0 ? { default: normalizedDefault } : {}),
+      ...(Object.keys(normalizedChannels).length > 0 ? { channels: normalizedChannels } : {}),
+      ...(Object.keys(normalizedLegacyConfig).length > 0 ? { config: normalizedLegacyConfig } : {}),
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    return null;
+  }
+}
+
+export async function listLegacyFeishuGatewayConfigChannels(): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(resolveAuthDirectory(), { withFileTypes: true });
+    const legacyChannels = new Set<string>();
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+      if (!entry.name.endsWith(LEGACY_FEISHU_GATEWAY_CONFIG_SUFFIX)) {
+        continue;
+      }
+      if (entry.name === FEISHU_GATEWAY_CONFIG_FILE) {
+        continue;
+      }
+      const channel = entry.name.slice(
+        0,
+        entry.name.length - LEGACY_FEISHU_GATEWAY_CONFIG_SUFFIX.length,
+      );
+      if (!channel) {
+        continue;
+      }
+      legacyChannels.add(normalizeGatewayChannel(channel));
+    }
+    return [...legacyChannels];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return [];
+    }
+    return [];
+  }
+}
+
+function deriveScopeFromLegacyChannel(rawChannel: string): string {
+  return normalizeGatewayChannel(rawChannel);
+}
+
+function extractConfigSources(
+  defaultScope: Partial<FeishuGatewayConfig>,
+  channelScope: Partial<FeishuGatewayConfig>,
+): FeishuGatewayConfigSources {
+  const sources: FeishuGatewayConfigSources = {};
+  for (const key of FEISHU_GATEWAY_CONFIG_KEYS) {
+    if (hasOwn(channelScope, key)) {
+      if (key === "provider") {
+        continue;
+      }
+      sources[key] = "override";
+    } else if (hasOwn(defaultScope, key)) {
+      sources[key] = "default";
+    }
+  }
+  return sources;
+}
+
+async function loadLegacyFeishuGatewayConfig(rawChannel: string): Promise<Partial<FeishuGatewayConfig>> {
+  try {
+    const file = await fs.readFile(resolveLegacyConfigPath(rawChannel), "utf-8");
+    const parsed = JSON.parse(file);
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+    if (isFeishuGatewayStorage(parsed)) {
+      if (parsed.config) {
+        return normalizeStorageLayer(parsed.config);
+      }
+    }
+    return normalizeStorageLayer(parsed);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {};
+    }
+    return {};
+  }
+}
+
+async function writeFeishuGatewayStore(store: FeishuGatewayStorage): Promise<void> {
+  const next: FeishuGatewayStorage = {
+    version: CURRENT_VERSION,
+    ...(store.default && { default: store.default }),
+    ...(store.channels && { channels: store.channels }),
+  };
+  await fs.mkdir(resolveAuthDirectory(), { recursive: true });
+  await fs.writeFile(resolveConfigPath(), JSON.stringify(next, null, 2), "utf-8");
+}
+
+async function clearOrDeleteFeishuGatewayStore(): Promise<void> {
+  try {
+    await fs.unlink(resolveConfigPath());
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+}
+
 function firstString(...values: Array<string | undefined>): string | undefined {
   for (const value of values) {
     const normalized = resolveText(value);
@@ -355,19 +568,115 @@ function firstNumber(...values: Array<number | string | undefined>): number | un
 export async function loadCachedFeishuGatewayConfig(
   channel: string = DEFAULT_CHANNEL,
 ): Promise<Partial<FeishuGatewayConfig>> {
-  try {
-    const file = await fs.readFile(resolveConfigPath(channel), "utf-8");
-    const parsed = JSON.parse(file) as Partial<FeishuGatewayStorage>;
-    if (!parsed || parsed.version !== CURRENT_VERSION || !parsed.config || typeof parsed.config !== "object") {
-      return {};
-    }
-    return normalizeStoredConfig(parsed.config);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {};
-    }
-    return {};
+  const normalizedChannel = normalizeGatewayChannel(channel);
+  const store = await loadFeishuGatewayStore();
+  if (store) {
+    const scopedConfig =
+      normalizedChannel === DEFAULT_CHANNEL
+        ? {}
+        : normalizeChannelOverrides(normalizeStorageLayer(store.channels?.[normalizedChannel]));
+    const merged = {
+      ...(store.default ? normalizeStorageLayer(store.default) : {}),
+      ...scopedConfig,
+    };
+    return merged;
   }
+
+  const legacyChannel =
+    normalizedChannel === DEFAULT_CHANNEL ? DEFAULT_RUNTIME_CHANNEL : normalizedChannel;
+  return loadLegacyFeishuGatewayConfig(legacyChannel);
+}
+
+export async function loadCachedFeishuGatewayConfigWithSources(
+  channel: string = DEFAULT_CHANNEL,
+): Promise<{ config: Partial<FeishuGatewayConfig>; sources: FeishuGatewayConfigSources }> {
+  const normalizedChannel = normalizeGatewayChannel(channel);
+  const store = await loadFeishuGatewayStore();
+  if (store) {
+    const scopedConfig = normalizeChannelOverrides(normalizeStorageLayer(
+      normalizedChannel === DEFAULT_CHANNEL ? {} : store.channels?.[normalizedChannel],
+    ));
+    const defaultConfig = normalizeStorageLayer(store.default);
+    return {
+      config: {
+        ...defaultConfig,
+        ...scopedConfig,
+      },
+      sources: extractConfigSources(defaultConfig, scopedConfig),
+    };
+  }
+
+  const legacyChannel =
+    normalizedChannel === DEFAULT_CHANNEL ? DEFAULT_RUNTIME_CHANNEL : normalizedChannel;
+  const loaded = await loadLegacyFeishuGatewayConfig(legacyChannel);
+  const sourceScope = normalizedChannel === DEFAULT_CHANNEL ? "default" : "override";
+  const sources: FeishuGatewayConfigSources = {};
+  for (const key of FEISHU_GATEWAY_CONFIG_KEYS) {
+    if (hasOwn(loaded, key)) {
+      if (key === "provider") {
+        sources[key] = "default";
+      } else {
+        sources[key] = sourceScope;
+      }
+    }
+  }
+  return { config: loaded, sources };
+}
+
+export async function buildFeishuGatewayConfigMigrationDraft(
+  channel?: string,
+): Promise<FeishuGatewayStorage> {
+  const rawChannel = channel ? normalizeGatewayChannel(channel) : undefined;
+  const store = await loadFeishuGatewayStore();
+  const draft: FeishuGatewayStorage = store
+    ? {
+        version: CURRENT_VERSION,
+        ...(store.default ? { default: normalizeStorageLayer(store.default) } : {}),
+        ...(store.channels ? { channels: store.channels } : {}),
+      }
+    : { version: CURRENT_VERSION };
+
+  const legacyChannels = await listLegacyFeishuGatewayConfigChannels();
+  for (const legacyChannel of legacyChannels) {
+    const scope = deriveScopeFromLegacyChannel(legacyChannel);
+    if (rawChannel && rawChannel !== scope) {
+      continue;
+    }
+    const legacyConfig = await loadLegacyFeishuGatewayConfig(legacyChannel);
+    if (Object.keys(legacyConfig).length === 0) {
+      continue;
+    }
+    const provider = legacyConfig.provider;
+    if (provider) {
+      const nextDefaultConfig = {
+        ...(draft.default ?? {}),
+        provider,
+      };
+      if (Object.keys(nextDefaultConfig).length > 0) {
+        draft.default = nextDefaultConfig;
+      }
+      delete legacyConfig.provider;
+    }
+
+    draft.channels = {
+      ...(draft.channels ?? {}),
+    };
+    const currentChannelConfig = normalizeStorageLayer(draft.channels[scope]);
+    const nextChannelConfig = {
+      ...legacyConfig,
+      ...currentChannelConfig,
+    };
+    if (Object.keys(nextChannelConfig).length > 0) {
+      draft.channels[scope] = nextChannelConfig;
+    }
+  }
+
+  if (!draft.default && (!draft.channels || Object.keys(draft.channels).length === 0)) {
+    delete draft.config;
+    return { version: CURRENT_VERSION };
+  }
+
+  return draft;
 }
 
 function filterPersistable(updates: Partial<FeishuGatewayConfig>): Partial<FeishuGatewayConfig> {
@@ -427,28 +736,94 @@ export async function persistFeishuGatewayConfig(
     return;
   }
 
-  const cached = await loadCachedFeishuGatewayConfig(channel);
-  const next: FeishuGatewayStorage = {
-    version: CURRENT_VERSION,
-    config: {
-      ...cached,
-      ...filtered,
-    },
-  };
-  await fs.mkdir(resolveAuthDirectory(), { recursive: true });
-  const filePath = resolveConfigPath(channel);
-  await fs.writeFile(filePath, JSON.stringify(next, null, 2), "utf-8");
+  const normalizedChannel = normalizeGatewayChannel(channel);
+  const persistedStore = await loadFeishuGatewayStore();
+  const store = persistedStore ?? { version: CURRENT_VERSION };
+  const hasStore = !!persistedStore;
+  const legacyBaseChannel =
+    normalizedChannel === DEFAULT_CHANNEL ? DEFAULT_RUNTIME_CHANNEL : normalizedChannel;
+  const legacy = hasStore ? {} : await loadLegacyFeishuGatewayConfig(legacyBaseChannel);
+  const provider = typeof filtered.provider === "string" ? filtered.provider : undefined;
+  const scopedUpdates = normalizeChannelOverrides(filtered);
+
+  if (normalizedChannel === DEFAULT_CHANNEL) {
+    const defaultConfig = {
+      ...(store.default ? normalizeStorageLayer(store.default) : legacy),
+      ...scopedUpdates,
+    };
+    if (provider) {
+      defaultConfig.provider = provider;
+    }
+    if (Object.keys(defaultConfig).length > 0) {
+      store.default = defaultConfig;
+    }
+  } else {
+    if (provider) {
+      const defaultConfig = {
+        ...(store.default ? normalizeStorageLayer(store.default) : legacy),
+        provider,
+      };
+      if (Object.keys(defaultConfig).length > 0) {
+        store.default = defaultConfig;
+      }
+    }
+
+    if (Object.keys(scopedUpdates).length > 0) {
+      const channelConfig = normalizeStorageLayer(store.channels?.[normalizedChannel]);
+      const baseChannelConfig = Object.keys(channelConfig).length > 0
+        ? channelConfig
+        : await loadLegacyFeishuGatewayConfig(legacyBaseChannel);
+      const nextConfig = {
+        ...baseChannelConfig,
+        ...scopedUpdates,
+      };
+      if (Object.keys(nextConfig).length > 0) {
+        store.channels = {
+          ...(store.channels ?? {}),
+          [normalizedChannel]: nextConfig,
+        };
+      } else {
+        if (store.channels) {
+          delete store.channels[normalizedChannel];
+          if (Object.keys(store.channels).length === 0) {
+            delete store.channels;
+          }
+        }
+      }
+    }
+  }
+
+  if (!store.default && Object.keys(store.channels ?? {}).length === 0) {
+    await clearOrDeleteFeishuGatewayStore();
+    return;
+  }
+  await writeFeishuGatewayStore(store);
 }
 
 export async function clearFeishuGatewayConfig(channel: string = DEFAULT_CHANNEL): Promise<void> {
-  try {
-    await fs.unlink(resolveConfigPath(channel));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    throw error;
+  const normalizedChannel = normalizeGatewayChannel(channel);
+  const store = await loadFeishuGatewayStore();
+  if (!store) {
+    return;
   }
+
+  if (normalizedChannel === DEFAULT_CHANNEL) {
+    if (store.default) {
+      delete store.default;
+    }
+  } else if (store.channels) {
+    delete store.channels[normalizedChannel];
+    if (Object.keys(store.channels).length === 0) {
+      delete store.channels;
+    }
+  }
+
+  if (!store.default && (!store.channels || Object.keys(store.channels).length === 0)) {
+    await clearOrDeleteFeishuGatewayStore();
+    return;
+  }
+
+  await writeFeishuGatewayStore(store);
 }
 
 export async function resolveFeishuGatewayConfig(
@@ -498,69 +873,81 @@ export async function resolveFeishuGatewayConfig(
   );
 
   return {
-    appId: firstString(overrides.appId, cached.appId, envAppId),
-    appSecret: firstString(overrides.appSecret, cached.appSecret, envAppSecret),
+    appId: firstString(overrides.appId, envAppId, cached.appId),
+    appSecret: firstString(overrides.appSecret, envAppSecret, cached.appSecret),
     requestTimeoutMs:
-      firstNumber(overrides.requestTimeoutMs, cached.requestTimeoutMs, envRequestTimeoutMs) ||
+      firstNumber(
+        overrides.requestTimeoutMs,
+        envRequestTimeoutMs,
+        cached.requestTimeoutMs,
+      ) ||
       DEFAULT_REQUEST_TIMEOUT_MS,
     provider: firstString(
       isValidProvider(overrides.provider),
-      cached.provider,
       envProvider,
+      cached.provider,
       DEFAULT_PROVIDER,
     )!,
-      profileId: firstString(overrides.profileId, cached.profileId, envProfileId),
+    profileId: firstString(overrides.profileId, envProfileId, cached.profileId),
     withTools: firstBoolean(
       overrides.withTools,
-      cached.withTools,
       envWithTools,
+      cached.withTools,
       DEFAULT_WITH_TOOLS,
     ) ?? DEFAULT_WITH_TOOLS,
     memory: firstBoolean(
       overrides.memory,
-      cached.memory,
       envMemory,
+      cached.memory,
       DEFAULT_MEMORY,
     ) ?? DEFAULT_MEMORY,
     heartbeatEnabled: firstBoolean(
       overrides.heartbeatEnabled,
-      cached.heartbeatEnabled,
       resolveBoolean(envHeartbeatEnabled),
+      cached.heartbeatEnabled,
       DEFAULT_HEARTBEAT_ENABLED,
     ) ?? DEFAULT_HEARTBEAT_ENABLED,
     heartbeatIntervalMs:
-      firstNumber(overrides.heartbeatIntervalMs, cached.heartbeatIntervalMs, envHeartbeatIntervalMs)
+      firstNumber(
+        overrides.heartbeatIntervalMs,
+        envHeartbeatIntervalMs,
+        cached.heartbeatIntervalMs,
+      )
       || DEFAULT_HEARTBEAT_INTERVAL_MS,
     heartbeatTargetOpenId: firstString(
       overrides.heartbeatTargetOpenId,
-      cached.heartbeatTargetOpenId,
       envHeartbeatTargetOpenId,
+      cached.heartbeatTargetOpenId,
     ),
     heartbeatSessionKey: firstString(
       overrides.heartbeatSessionKey,
-      cached.heartbeatSessionKey,
       envHeartbeatSessionKey,
+      cached.heartbeatSessionKey,
       DEFAULT_HEARTBEAT_SESSION_KEY,
     ),
-    toolAllow: firstToolAllow(overrides.toolAllow, cached.toolAllow, envToolAllow),
-    toolMaxSteps: firstNumber(overrides.toolMaxSteps, cached.toolMaxSteps, envToolMaxSteps) || undefined,
+    toolAllow: firstToolAllow(overrides.toolAllow, envToolAllow, cached.toolAllow),
+    toolMaxSteps: firstNumber(
+      overrides.toolMaxSteps,
+      envToolMaxSteps,
+      cached.toolMaxSteps,
+    ) || undefined,
     pairingPolicy:
       isValidPairingPolicy(overrides.pairingPolicy)
-      || isValidPairingPolicy(cached.pairingPolicy)
       || envPairingPolicy
+      || isValidPairingPolicy(cached.pairingPolicy)
       || DEFAULT_PAIRING_POLICY,
     pairingPendingTtlMs:
       firstNumber(
         overrides.pairingPendingTtlMs,
-        cached.pairingPendingTtlMs,
         envPairingPendingTtlMs,
+        cached.pairingPendingTtlMs,
       ) || DEFAULT_PAIRING_PENDING_TTL_MS,
     pairingPendingMax:
       firstNumber(
         overrides.pairingPendingMax,
-        cached.pairingPendingMax,
         envPairingPendingMax,
+        cached.pairingPendingMax,
       ) || DEFAULT_PAIRING_PENDING_MAX,
-    pairingAllowFrom: firstToolAllow(overrides.pairingAllowFrom, cached.pairingAllowFrom, envPairingAllowFrom),
+    pairingAllowFrom: firstToolAllow(overrides.pairingAllowFrom, envPairingAllowFrom, cached.pairingAllowFrom),
   };
 }

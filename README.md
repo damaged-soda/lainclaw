@@ -110,7 +110,10 @@ npm start -- gateway config show
 npm start -- gateway config clear
 ```
 
-`gateway config set` 会把参数持久化到 `~/.lainclaw/` 下的频道分片网关配置文件（当前默认命名空间 `feishu` 对应 `~/.lainclaw/feishu-gateway.json`，每个通道按 `~/.lainclaw/<channel>-gateway.json` 分片）；`provider` 与 `app-id/app-secret`、工具/配对/心跳配置同属于该文件内的网关级字段。后续 `gateway start` 可省略重复参数；`config show` 用于核对，`config clear` 用于重置。
+`gateway config set` 会把网关参数持久化到 `~/.lainclaw/gateway.json`：
+- 顶层 `default` 为全局默认配置；
+- `channels.<name>` 为某个频道的覆盖配置（当前运行时未显式指定频道时，默认使用 `default`）。
+`provider` 与 `app-id/app-secret`、工具/配对/心跳配置都写在网关级配置内。后续 `gateway start` 可省略重复参数；`config show` 用于核对，`config clear` 用于重置。
 
 如果你需要手动按频道持久化（当前只支持 `feishu` 运行时启动）：
 
@@ -118,7 +121,7 @@ npm start -- gateway config clear
 npm start -- gateway config set --channel feishu --app-id <AppID> --app-secret <AppSecret>
 ```
 
-默认会在 `~/.lainclaw/service/feishu-gateway-service.json` 记录运行状态（`pid/state/log` 文件路径会按该目录下 `feishu-gateway-service.*` 生成）。如果传入自定义 `--pid-file` / `--log-file`，服务状态与日志都会使用该路径。
+默认会在 `~/.lainclaw/service/gateway-service.json` 记录运行状态（`pid/state/log` 字段内带回放的 channel 元信息）。如果传入自定义 `--pid-file` / `--log-file`，服务状态与日志都会使用该路径。
 
 可选参数：
 
@@ -155,7 +158,16 @@ lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
   --heartbeat-enabled --heartbeat-target-open-id <openId> --heartbeat-interval-ms 300000
 ```
 
-参数会优先来自命令行，未传入时会从环境变量回退，最后从当前频道对应分片文件（默认 `~/.lainclaw/feishu-gateway.json`）读取上次配置（如存在）。
+参数会优先来自命令行，未传入时会从环境变量回退，最后从配置作用域文件（默认 `~/.lainclaw/gateway.json`）读取上次配置（如存在）。
+
+可选命令：
+- `gateway config migrate --channel <channel> --dry-run`：仅预览将历史 `<channel>-gateway.json` 映射到 `gateway.json` 的草稿，不写入文件。
+
+确认草稿无误后，可手动清理已不再需要的历史分片文件（本项目不会自动删除）：
+
+```bash
+rm ~/.lainclaw/<channel>-gateway.json
+```
 
 - `LAINCLAW_FEISHU_APP_ID` / `FEISHU_APP_ID`
 - `LAINCLAW_FEISHU_APP_SECRET` / `FEISHU_APP_SECRET`
