@@ -67,7 +67,7 @@ export function printUsage(): string {
     '  lainclaw --version',
     '  lainclaw ask <input>',
     '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
-    '  lainclaw gateway start [--channel <feishu|local>] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]',
+    '  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway status [--channel <channel>] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway stop [--channel <channel>] [--pid-file <path>]',
     '  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]',
@@ -805,8 +805,52 @@ function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
 }
 
 type GatewayChannel = "feishu" | "local";
+type GatewayStartOverrides = Partial<FeishuGatewayConfig> & Partial<LocalGatewayOverrides>;
+
+interface GatewayChannelPlugin {
+  name: GatewayChannel;
+  parseStartArgs: (argv: string[]) => GatewayStartOverrides;
+  run: (overrides: GatewayStartOverrides, context: GatewayServiceRunContext) => Promise<void>;
+}
+
+const GATEWAY_CHANNEL_PLUGINS: Record<GatewayChannel, GatewayChannelPlugin> = {
+  feishu: {
+    name: "feishu",
+    parseStartArgs: parseFeishuServerArgs,
+    run: (overrides, context) => runFeishuGatewayWithHeartbeat(
+      overrides,
+      makeFeishuFailureHint,
+      context,
+    ),
+  },
+  local: {
+    name: "local",
+    parseStartArgs: parseLocalGatewayArgs,
+    run: (overrides, context) => runLocalGatewayService(overrides, context),
+  },
+};
+
+function resolveGatewayChannelPlugin(rawChannel: string): GatewayChannelPlugin {
+  const channel = rawChannel.trim().toLowerCase();
+  const plugin = GATEWAY_CHANNEL_PLUGINS[channel as GatewayChannel];
+  if (!plugin) {
+    throw new Error(`Unsupported channel: ${rawChannel}`);
+  }
+  return plugin;
+}
+
+function normalizeGatewayChannels(rawChannels: GatewayChannel[]): GatewayChannel[] {
+  const output: GatewayChannel[] = [];
+  for (const channel of rawChannels) {
+    if (!output.includes(channel)) {
+      output.push(channel);
+    }
+  }
+  return output;
+}
 
 function parseGatewayArgs(argv: string[]): {
+  channels: GatewayChannel[];
   channel: GatewayChannel;
   action: "start" | "status" | "stop";
   appId?: string;
@@ -833,12 +877,14 @@ function parseGatewayArgs(argv: string[]): {
   serviceArgv: string[];
 } {
   let channel: GatewayChannel = "feishu";
+  const channels: GatewayChannel[] = [];
+  let hasChannel = false;
   let action: "start" | "status" | "stop" = "start";
   let daemon = false;
   let statePath: string | undefined;
   let logPath: string | undefined;
   let serviceChild = false;
-  const channelAwareArgs: string[] = [];
+  const startArgs: string[] = [];
   const serviceArgv: string[] = [];
   let actionParsed = false;
 
@@ -901,21 +947,17 @@ function parseGatewayArgs(argv: string[]): {
 
     if (arg === '--channel') {
       throwIfMissingValue('channel', i + 1, argv);
-      const next = argv[i + 1].trim().toLowerCase();
-      if (next !== "feishu" && next !== "local") {
-        throw new Error(`Unsupported channel: ${argv[i + 1]}`);
-      }
-      channel = next;
+      channel = resolveGatewayChannelPlugin(argv[i + 1]).name;
+      channels.push(channel);
+      hasChannel = true;
       serviceArgv.push(arg, argv[i + 1]);
       i += 1;
       continue;
     }
     if (arg.startsWith('--channel=')) {
-      const next = arg.slice('--channel='.length).trim().toLowerCase();
-      if (next !== "feishu" && next !== "local") {
-        throw new Error(`Unsupported channel: ${arg.slice('--channel='.length)}`);
-      }
-      channel = next;
+      channel = resolveGatewayChannelPlugin(arg.slice('--channel='.length)).name;
+      channels.push(channel);
+      hasChannel = true;
       serviceArgv.push(arg);
       continue;
     }
@@ -926,12 +968,12 @@ function parseGatewayArgs(argv: string[]): {
         throw new Error(`Unknown option for gateway ${action}: ${arg}`);
       }
       if (!arg.includes("=") && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
-        channelAwareArgs.push(arg, argv[i + 1]);
+        startArgs.push(arg, argv[i + 1]);
         serviceArgv.push(arg, argv[i + 1]);
         i += 1;
         continue;
       }
-      channelAwareArgs.push(arg);
+      startArgs.push(arg);
       serviceArgv.push(arg);
       continue;
     }
@@ -940,12 +982,23 @@ function parseGatewayArgs(argv: string[]): {
   }
 
   if (action === "start") {
-    if (channel === "local") {
-      const localConfig = parseLocalGatewayArgs(channelAwareArgs);
+    const normalizedChannels = normalizeGatewayChannels(channels);
+    if (!hasChannel && normalizedChannels.length === 0) {
+      normalizedChannels.push(channel);
+    }
+    if (normalizedChannels.length === 0) {
+      throw new Error("At least one gateway channel is required");
+    }
+
+    const normalizedChannel = normalizedChannels[0];
+    if (normalizedChannels.length === 1) {
+      const plugin = resolveGatewayChannelPlugin(normalizedChannel);
+      const startConfig = plugin.parseStartArgs(startArgs);
       return {
-        channel,
+        channel: normalizedChannel,
+        channels: normalizedChannels,
         action,
-        ...localConfig,
+        ...startConfig,
         daemon,
         statePath,
         logPath,
@@ -954,11 +1007,12 @@ function parseGatewayArgs(argv: string[]): {
       };
     }
 
-    const feishuConfig = parseFeishuServerArgs(channelAwareArgs);
+    const startConfig = parseLocalGatewayArgs(startArgs);
     return {
-      channel,
+      channel: normalizedChannel,
+      channels: normalizedChannels,
       action,
-      ...feishuConfig,
+      ...startConfig,
       daemon,
       statePath,
       logPath,
@@ -967,8 +1021,13 @@ function parseGatewayArgs(argv: string[]): {
     };
   }
 
+  const normalizedChannels = normalizeGatewayChannels(channels);
+  if (!hasChannel && normalizedChannels.length === 0) {
+    normalizedChannels.push(channel);
+  }
   return {
-    channel,
+    channel: normalizedChannels[0],
+    channels: normalizedChannels,
     action,
     daemon: false,
     statePath,
@@ -1396,14 +1455,37 @@ function buildHeartbeatMessage(ruleText: string, triggerMessage: string): string
   return lines.join("\n");
 }
 
+async function resolveFeishuGatewayRuntimeConfig(
+  overrides: Partial<FeishuGatewayConfig>,
+  channel: GatewayChannel,
+): Promise<FeishuGatewayConfig> {
+  const config = await resolveFeishuGatewayConfig(overrides, channel);
+  validateFeishuGatewayCredentials(config);
+  if (config.heartbeatEnabled && !config.heartbeatTargetOpenId) {
+    throw new Error("Missing value for heartbeat-target-open-id");
+  }
+  if (config.heartbeatEnabled && config.heartbeatTargetOpenId) {
+    const targetDiagnostic = inspectHeartbeatTargetOpenId(config.heartbeatTargetOpenId);
+    if (typeof targetDiagnostic.warning === "string" && targetDiagnostic.warning.length > 0) {
+      if (targetDiagnostic.kind === "unknown") {
+        console.warn(`[heartbeat] ${targetDiagnostic.warning}`);
+      } else {
+        console.info(`[heartbeat] ${targetDiagnostic.warning}`);
+      }
+    }
+  }
+  return config;
+}
+
 interface GatewayServiceRunContext {
-  channel: GatewayChannel;
+  channel: GatewayChannel | "gateway";
   action?: "start" | "status" | "stop";
   daemon?: boolean;
   statePath?: string;
   logPath?: string;
   serviceChild?: boolean;
   serviceArgv: string[];
+  channels?: GatewayChannel[];
 }
 
 async function stopGatewayServiceIfRunning(paths: GatewayServicePaths, state: GatewayServiceState): Promise<void> {
@@ -1431,9 +1513,16 @@ async function resolveGatewayServiceState(
   return { state, running: true, stale: false };
 }
 
+function getGatewayStateChannels(state: GatewayServiceState): string[] {
+  if (Array.isArray(state.channels) && state.channels.length > 0) {
+    return [...new Set(state.channels.filter((item) => item.trim().length > 0))];
+  }
+  return [state.channel];
+}
+
 async function printGatewayServiceStatus(
   paths: GatewayServicePaths,
-  channel = "feishu",
+  channel = "gateway",
 ): Promise<void> {
   const snapshot = await resolveGatewayServiceState(paths);
   if (!snapshot.state) {
@@ -1444,6 +1533,7 @@ async function printGatewayServiceStatus(
           running: false,
           pid: null,
           channel,
+          channels: [channel],
           statePath: paths.statePath,
           logPath: paths.logPath,
         },
@@ -1460,6 +1550,7 @@ async function printGatewayServiceStatus(
         status: snapshot.running ? "running" : "stopped",
         running: snapshot.running,
         channel: snapshot.state.channel,
+        channels: getGatewayStateChannels(snapshot.state),
         pid: snapshot.state.pid,
         startedAt: snapshot.state.startedAt,
         statePath: snapshot.state.statePath,
@@ -1473,6 +1564,34 @@ async function printGatewayServiceStatus(
   );
 }
 
+async function runGatewayServiceLifecycleAction(
+  serviceContext: GatewayServiceRunContext,
+): Promise<void> {
+  const paths = resolveGatewayServicePaths(serviceContext.channel, {
+    statePath: serviceContext.statePath,
+    logPath: serviceContext.logPath,
+  });
+
+  if (serviceContext.action === "status") {
+    await printGatewayServiceStatus(paths);
+    return;
+  }
+  if (serviceContext.action !== "stop") {
+    throw new Error(`Unsupported gateway action: ${serviceContext.action}`);
+  }
+
+  const snapshot = await resolveGatewayServiceState(paths);
+  if (!snapshot.state || !snapshot.running) {
+    console.log("gateway service already stopped");
+    if (snapshot.state) {
+      await clearGatewayServiceState(paths.statePath);
+    }
+    return;
+  }
+  await stopGatewayServiceIfRunning(paths, snapshot.state);
+  console.log(`gateway service stopped (pid=${snapshot.state.pid})`);
+}
+
 async function runFeishuGatewayWithHeartbeat(
   overrides: Partial<FeishuGatewayConfig>,
   onFailureHint: (rawMessage: string) => string,
@@ -1481,22 +1600,9 @@ async function runFeishuGatewayWithHeartbeat(
     serviceArgv: [],
   },
 ): Promise<void> {
+  const effectiveChannel: GatewayChannel = serviceContext.channel === "gateway" ? "feishu" : serviceContext.channel;
   if (serviceContext.serviceChild) {
-    const config = await resolveFeishuGatewayConfig(overrides, serviceContext.channel);
-    validateFeishuGatewayCredentials(config);
-    if (config.heartbeatEnabled && !config.heartbeatTargetOpenId) {
-      throw new Error("Missing value for heartbeat-target-open-id");
-    }
-    if (config.heartbeatEnabled && config.heartbeatTargetOpenId) {
-      const targetDiagnostic = inspectHeartbeatTargetOpenId(config.heartbeatTargetOpenId);
-      if (typeof targetDiagnostic.warning === "string" && targetDiagnostic.warning.length > 0) {
-        if (targetDiagnostic.kind === "unknown") {
-          console.warn(`[heartbeat] ${targetDiagnostic.warning}`);
-        } else {
-          console.info(`[heartbeat] ${targetDiagnostic.warning}`);
-        }
-      }
-    }
+    const config = await resolveFeishuGatewayRuntimeConfig(overrides, effectiveChannel);
 
     const heartbeatHandle =
       config.heartbeatEnabled
@@ -1567,9 +1673,13 @@ async function runFeishuGatewayWithHeartbeat(
     }
 
     try {
-      await runFeishuGatewayServer(overrides, {
-        onFailureHint,
-      }, serviceContext.channel);
+      await runFeishuGatewayServer(
+        overrides,
+        {
+          onFailureHint,
+        },
+        effectiveChannel,
+      );
     } finally {
       heartbeatHandle?.stop();
     }
@@ -1581,41 +1691,8 @@ async function runFeishuGatewayWithHeartbeat(
     logPath: serviceContext.logPath,
   });
 
-  if (serviceContext.action === "status") {
-    await printGatewayServiceStatus(paths, serviceContext.channel);
-    return;
-  }
-
-  if (serviceContext.action === "stop") {
-    const snapshot = await resolveGatewayServiceState(paths);
-    if (!snapshot.state || !snapshot.running) {
-      console.log("gateway service already stopped");
-      if (snapshot.state) {
-        await clearGatewayServiceState(paths.statePath);
-      }
-      return;
-    }
-    await stopGatewayServiceIfRunning(paths, snapshot.state);
-    console.log(`gateway service stopped (pid=${snapshot.state.pid})`);
-    return;
-  }
-
   if (serviceContext.daemon) {
-    const preflightConfig = await resolveFeishuGatewayConfig(overrides, serviceContext.channel);
-    validateFeishuGatewayCredentials(preflightConfig);
-    if (preflightConfig.heartbeatEnabled && !preflightConfig.heartbeatTargetOpenId) {
-      throw new Error("Missing value for heartbeat-target-open-id");
-    }
-    if (preflightConfig.heartbeatEnabled && preflightConfig.heartbeatTargetOpenId) {
-      const targetDiagnostic = inspectHeartbeatTargetOpenId(preflightConfig.heartbeatTargetOpenId);
-      if (typeof targetDiagnostic.warning === "string" && targetDiagnostic.warning.length > 0) {
-        if (targetDiagnostic.kind === "unknown") {
-          console.warn(`[heartbeat] ${targetDiagnostic.warning}`);
-        } else {
-          console.info(`[heartbeat] ${targetDiagnostic.warning}`);
-        }
-      }
-    }
+    await resolveFeishuGatewayRuntimeConfig(overrides, effectiveChannel);
 
     const snapshot = await resolveGatewayServiceState(paths);
     if (snapshot.running) {
@@ -1630,7 +1707,8 @@ async function runFeishuGatewayWithHeartbeat(
 
     const daemonPid = await spawnGatewayServiceProcess(scriptPath, daemonArgv, paths);
     const daemonState: GatewayServiceState = {
-      channel: serviceContext.channel,
+      channel: effectiveChannel,
+      channels: [effectiveChannel],
       pid: daemonPid,
       startedAt: new Date().toISOString(),
       command: `${process.execPath} ${scriptPath} ${daemonArgv.join(" ")}`.trim(),
@@ -1645,21 +1723,7 @@ async function runFeishuGatewayWithHeartbeat(
     return;
   }
 
-  const config = await resolveFeishuGatewayConfig(overrides, serviceContext.channel);
-  validateFeishuGatewayCredentials(config);
-  if (config.heartbeatEnabled && !config.heartbeatTargetOpenId) {
-    throw new Error("Missing value for heartbeat-target-open-id");
-  }
-  if (config.heartbeatEnabled && config.heartbeatTargetOpenId) {
-    const targetDiagnostic = inspectHeartbeatTargetOpenId(config.heartbeatTargetOpenId);
-    if (typeof targetDiagnostic.warning === "string" && targetDiagnostic.warning.length > 0) {
-      if (targetDiagnostic.kind === "unknown") {
-        console.warn(`[heartbeat] ${targetDiagnostic.warning}`);
-      } else {
-        console.info(`[heartbeat] ${targetDiagnostic.warning}`);
-      }
-    }
-  }
+  const config = await resolveFeishuGatewayRuntimeConfig(overrides, effectiveChannel);
 
   const heartbeatHandle =
     config.heartbeatEnabled
@@ -1733,11 +1797,72 @@ async function runFeishuGatewayWithHeartbeat(
       {
         onFailureHint,
       },
-      serviceContext.channel,
+      effectiveChannel,
     );
   } finally {
     heartbeatHandle?.stop();
   }
+}
+
+async function runGatewayServiceForChannels(
+  overrides: GatewayStartOverrides,
+  serviceContext: GatewayServiceRunContext,
+  channels: GatewayChannel[],
+): Promise<void> {
+  const normalizedChannels = normalizeGatewayChannels(channels);
+  if (normalizedChannels.length === 0) {
+    throw new Error("At least one gateway channel is required");
+  }
+
+  if (serviceContext.daemon) {
+    const paths = resolveGatewayServicePaths("gateway", {
+      statePath: serviceContext.statePath,
+      logPath: serviceContext.logPath,
+    });
+    const snapshot = await resolveGatewayServiceState(paths);
+    if (snapshot.running) {
+      throw new Error(`Gateway already running (pid=${snapshot.state?.pid})`);
+    }
+
+    for (const channel of normalizedChannels) {
+      if (channel === "feishu") {
+        await resolveFeishuGatewayRuntimeConfig(overrides, channel);
+      }
+    }
+
+    const daemonArgv = ["gateway", "start", ...serviceContext.serviceArgv, "--service-child"];
+    const scriptPath = process.argv[1];
+    if (!scriptPath) {
+      throw new Error("Cannot locate service entrypoint");
+    }
+
+    const daemonPid = await spawnGatewayServiceProcess(scriptPath, daemonArgv, paths);
+    const daemonState: GatewayServiceState = {
+      channel: "gateway",
+      channels: normalizedChannels,
+      pid: daemonPid,
+      startedAt: new Date().toISOString(),
+      command: `${process.execPath} ${scriptPath} ${daemonArgv.join(" ")}`.trim(),
+      statePath: paths.statePath,
+      logPath: paths.logPath,
+      argv: [scriptPath, ...daemonArgv],
+    };
+    await writeGatewayServiceState(daemonState);
+    console.log(`gateway service started as daemon: pid=${daemonPid}`);
+    console.log(`status: ${paths.statePath}`);
+    console.log(`log: ${paths.logPath}`);
+    return;
+  }
+
+  const startedChannels = normalizedChannels.map((channel) => {
+    const plugin = resolveGatewayChannelPlugin(channel);
+    return plugin.run(overrides, {
+      ...serviceContext,
+      channel,
+    });
+  });
+
+  await Promise.all(startedChannels);
 }
 
 async function runLocalGatewayService(
@@ -1757,25 +1882,6 @@ async function runLocalGatewayService(
     logPath: serviceContext.logPath,
   });
 
-  if (serviceContext.action === "status") {
-    await printGatewayServiceStatus(paths, serviceContext.channel);
-    return;
-  }
-
-  if (serviceContext.action === "stop") {
-    const snapshot = await resolveGatewayServiceState(paths);
-    if (!snapshot.state || !snapshot.running) {
-      console.log("gateway service already stopped");
-      if (snapshot.state) {
-        await clearGatewayServiceState(paths.statePath);
-      }
-      return;
-    }
-    await stopGatewayServiceIfRunning(paths, snapshot.state);
-    console.log(`gateway service stopped (pid=${snapshot.state.pid})`);
-    return;
-  }
-
   if (serviceContext.daemon) {
     const snapshot = await resolveGatewayServiceState(paths);
     if (snapshot.running) {
@@ -1791,6 +1897,7 @@ async function runLocalGatewayService(
     const daemonPid = await spawnGatewayServiceProcess(scriptPath, daemonArgv, paths);
     const daemonState: GatewayServiceState = {
       channel: serviceContext.channel,
+      channels: [serviceContext.channel],
       pid: daemonPid,
       startedAt: new Date().toISOString(),
       command: `${process.execPath} ${scriptPath} ${daemonArgv.join(" ")}`.trim(),
@@ -1902,34 +2009,53 @@ export async function runCli(argv: string[]): Promise<number> {
         return 0;
       }
       const options = parseGatewayArgs(argv.slice(1));
-      const { channel, action, serviceArgv, ...gatewayOptions } = options;
-      if (channel === "feishu") {
-        await runFeishuGatewayWithHeartbeat(gatewayOptions, makeFeishuFailureHint, {
-          channel,
+      const {
+        channel,
+        channels,
+        action,
+        serviceArgv,
+        daemon,
+        statePath,
+        logPath,
+        serviceChild,
+        ...gatewayOptions
+      } = options;
+      if (action !== "start") {
+        await runGatewayServiceLifecycleAction({
+          channel: "gateway",
           action,
-          serviceChild: options.serviceChild,
-          daemon: options.daemon,
-          statePath: options.statePath,
-          logPath: options.logPath,
+          serviceChild,
+          daemon,
+          statePath,
+          logPath,
           serviceArgv,
         });
         return 0;
       }
-
-      if (channel === "local") {
-        await runLocalGatewayService(gatewayOptions, {
+      if (channels.length > 1) {
+        await runGatewayServiceForChannels(gatewayOptions, {
           channel,
+          channels,
           action,
-          serviceChild: options.serviceChild,
-          daemon: options.daemon,
-          statePath: options.statePath,
-          logPath: options.logPath,
+          serviceChild,
+          daemon,
+          statePath,
+          logPath,
           serviceArgv,
-        });
+        }, channels);
         return 0;
       }
-
-      throw new Error(`Unsupported channel: ${channel}`);
+      const channelPlugin = resolveGatewayChannelPlugin(channel);
+      await channelPlugin.run(gatewayOptions, {
+        channel,
+        action,
+        serviceChild,
+        daemon,
+        statePath,
+        logPath,
+        serviceArgv,
+      });
+      return 0;
 
     } catch (error) {
       if (error instanceof ValidationError) {
@@ -1939,7 +2065,7 @@ export async function runCli(argv: string[]): Promise<number> {
       }
       console.error(
         "Usage:",
-        "  lainclaw gateway start [--channel <channel>] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]",
+        "  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]",
         "  lainclaw gateway status [--channel <channel>] [--pid-file <path>]",
         "  lainclaw gateway stop [--channel <channel>] [--pid-file <path>]",
         "  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]",

@@ -6,6 +6,7 @@ import { resolveAuthDirectory } from "../auth/configStore.js";
 
 export interface GatewayServiceState {
   channel: string;
+  channels?: string[];
   pid: number;
   startedAt: string;
   command: string;
@@ -24,35 +25,27 @@ export interface GatewayServiceTerminateOptions {
   forceKillTimeoutMs?: number;
 }
 
-const DEFAULT_CHANNEL = "unknown";
 const DEFAULT_STATE_FILE_SUFFIX = ".json";
 const DEFAULT_LOG_FILE_SUFFIX = ".log";
+const DEFAULT_GATEWAY_SERVICE_BASENAME = "gateway-service";
 const DEFAULT_GRACEFUL_TIMEOUT_MS = 5000;
 const DEFAULT_FORCE_KILL_TIMEOUT_MS = 2000;
 const POLL_INTERVAL_MS = 200;
 
-function normalizeChannel(rawChannel: string | undefined): string {
-  const trimmed = (rawChannel || "").trim().toLowerCase();
-  if (!trimmed) {
-    return DEFAULT_CHANNEL;
-  }
-  return trimmed.replace(/[^a-z0-9._-]+/g, "-");
-}
-
 export function resolveGatewayServicePaths(
-  rawChannel: string,
+  _rawChannel: string,
   overrides: Partial<GatewayServicePaths> = {},
 ): GatewayServicePaths {
-  const channel = normalizeChannel(rawChannel);
+  void _rawChannel;
   const serviceDir = path.join(resolveAuthDirectory(), "service");
 
   return {
     statePath: overrides.statePath
       ? path.resolve(overrides.statePath)
-      : path.join(serviceDir, `${channel}-gateway-service${DEFAULT_STATE_FILE_SUFFIX}`),
+      : path.join(serviceDir, `${DEFAULT_GATEWAY_SERVICE_BASENAME}${DEFAULT_STATE_FILE_SUFFIX}`),
     logPath: overrides.logPath
       ? path.resolve(overrides.logPath)
-      : path.join(serviceDir, `${channel}-gateway-service${DEFAULT_LOG_FILE_SUFFIX}`),
+      : path.join(serviceDir, `${DEFAULT_GATEWAY_SERVICE_BASENAME}${DEFAULT_LOG_FILE_SUFFIX}`),
   };
 }
 
@@ -81,6 +74,14 @@ function isGatewayServiceState(raw: unknown): raw is GatewayServiceState {
   }
   if (!Array.isArray(candidate.argv) || candidate.argv.length === 0) {
     return false;
+  }
+  if (Array.isArray(candidate.channels)) {
+    if (candidate.channels.length === 0) {
+      return false;
+    }
+    if (!candidate.channels.every((item) => typeof item === "string" && item.trim().length > 0)) {
+      return false;
+    }
   }
   return true;
 }
