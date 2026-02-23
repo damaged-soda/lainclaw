@@ -3,6 +3,7 @@ import path from "node:path";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
 import type { PairingPolicy, PairingRequest } from "../../pairing/pairing-store.js";
 import { DEFAULT_PAIRING_PENDING_MAX, DEFAULT_PAIRING_PENDING_TTL_MS } from "../../pairing/pairing-store.js";
+import { getBuiltinToolNames } from "../../tools/registry.js";
 
 export interface FeishuGatewayConfig {
   /**
@@ -91,6 +92,7 @@ const DEFAULT_HEARTBEAT_ENABLED = false;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 const DEFAULT_PAIRING_POLICY = "open" as PairingPolicy;
+const DEFAULT_TOOL_ALLOW = getBuiltinToolNames();
 const FEISHU_GATEWAY_CONFIG_FILE = "gateway.json";
 const LEGACY_FEISHU_GATEWAY_CONFIG_SUFFIX = "-gateway.json";
 const CURRENT_VERSION = 1 as const;
@@ -1013,7 +1015,7 @@ export async function resolveFeishuGatewayConfig(
       cached.heartbeatSessionKey,
       DEFAULT_HEARTBEAT_SESSION_KEY,
     ),
-    toolAllow: firstToolAllow(overrides.toolAllow, envToolAllow, cached.toolAllow),
+    toolAllow: firstToolAllow(overrides.toolAllow, envToolAllow, cached.toolAllow) || DEFAULT_TOOL_ALLOW,
     toolMaxSteps: firstNumber(
       overrides.toolMaxSteps,
       envToolMaxSteps,

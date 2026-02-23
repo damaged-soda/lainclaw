@@ -7,6 +7,11 @@ import {
   saveHeartbeatRules,
 } from './store.js';
 import { resolveAuthDirectory } from "../auth/configStore.js";
+import {
+  formatWorkspaceContextSummary,
+  inspectWorkspaceContext,
+  resolveWorkspaceDir,
+} from "../shared/workspaceContext.js";
 
 const DEFAULT_HEARTBEAT_SESSION_KEY = 'heartbeat';
 const HEARTBEAT_LOG_FILE = "heartbeat-run.log";
@@ -69,6 +74,7 @@ export interface HeartbeatRunOptions {
   toolAllow?: string[];
   toolMaxSteps?: number;
   sessionKey?: string;
+  workspaceDir?: string;
   memory?: boolean;
   onSummary?: (summary: HeartbeatRunSummary) => void;
   onResult?: (result: HeartbeatRunResult) => void;
@@ -261,7 +267,7 @@ function parseDecision(raw: string): HeartbeatRuleDecision {
   };
 }
 
-function buildRulePrompt(rule: HeartbeatRule, now: string): string {
+function buildRulePrompt(rule: HeartbeatRule, now: string, workspaceSummary: string): string {
   const title = `RuleId: ${rule.id}`;
   const header = '你是一个只用于判断个人提醒触发的裁决器。';
   const constraints = [
@@ -272,6 +278,8 @@ function buildRulePrompt(rule: HeartbeatRule, now: string): string {
     `当前时间：${now}`,
     title,
     `规则：${rule.ruleText}`,
+    "工作区上下文：",
+    workspaceSummary,
     '如果当前时机满足提醒需求，必须返回 TRIGGER；否则返回 SKIP。',
     '不要输出 markdown、序号、说明文本。',
   ];
@@ -308,8 +316,10 @@ function resolveText(raw?: string): string | undefined {
 export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promise<HeartbeatRunSummary> {
   const now = toIso(Date.now());
   const runId = `hb-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
-  const rules = await loadHeartbeatRules();
+  const workspaceDir = resolveWorkspaceDir(options.workspaceDir);
+  const rules = await loadHeartbeatRules(workspaceDir);
   const baseSessionKey = resolveText(options.sessionKey) || DEFAULT_HEARTBEAT_SESSION_KEY;
+  const runContext = await inspectWorkspaceContext(workspaceDir, now);
 
   const summary: HeartbeatRunSummary = {
     ranAt: now,
@@ -358,7 +368,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
     }
 
     summary.evaluated += 1;
-    const decisionPrompt = buildRulePrompt(rule, now);
+    const decisionPrompt = buildRulePrompt(rule, now, formatWorkspaceContextSummary(runContext));
     const ruleCtx = resolveRuleDecisionContext(rule, now);
     try {
       const askResult = await runAsk(decisionPrompt, {
@@ -369,6 +379,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
         toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
         memory: options.memory,
+        cwd: workspaceDir,
       });
 
       const parsed = parseDecision(askResult.result);
@@ -592,7 +603,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
     reason: `total=${summary.total} evaluated=${summary.evaluated} triggered=${summary.triggered} skipped=${summary.skipped} errors=${summary.errors}`,
   });
 
-  await saveHeartbeatRules(nextRules);
+  await saveHeartbeatRules(nextRules, workspaceDir);
   return summary;
 }
 

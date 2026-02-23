@@ -4,6 +4,7 @@ import { runHeartbeatOnce, startHeartbeatLoop } from '../heartbeat/runner.js';
 import type { HeartbeatRunSummary } from '../heartbeat/runner.js';
 import {
   addHeartbeatRule,
+  initHeartbeatFile,
   listHeartbeatRules,
   removeHeartbeatRule,
   setHeartbeatRuleEnabled,
@@ -82,6 +83,7 @@ export function printUsage(): string {
     '  lainclaw tools list',
     '  lainclaw tools info <name>',
     '  lainclaw tools invoke <name> --args <json>',
+    '  lainclaw heartbeat init [--template <path>] [--force]',
     '  lainclaw heartbeat add "<ruleText>" [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>]',
     '  lainclaw heartbeat list',
     '  lainclaw heartbeat remove <ruleId>',
@@ -1455,12 +1457,61 @@ function parseHeartbeatRunArgs(argv: string[]): {
   };
 }
 
+function parseHeartbeatInitArgs(argv: string[]): { force: boolean; templatePath?: string } {
+  let force = false;
+  let templatePath: string | undefined;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--force") {
+      force = true;
+      continue;
+    }
+    if (arg === "--template") {
+      if (i + 1 >= argv.length) {
+        throw new Error("Missing value for --template");
+      }
+      templatePath = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--template=")) {
+      templatePath = arg.slice("--template=".length);
+      continue;
+    }
+    if (arg.startsWith("--")) {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+  return { force, ...(templatePath ? { templatePath } : {}) };
+}
+
 async function runHeartbeatCommand(argv: string[]): Promise<number> {
   const [, subcommand, ...rest] = argv;
 
   if (!subcommand) {
-    console.error("Usage: lainclaw heartbeat <add|list|remove|enable|disable|run>");
+    console.error("Usage: lainclaw heartbeat <init|add|list|remove|enable|disable|run>");
     return 1;
+  }
+
+  if (subcommand === "init") {
+    const parsed = parseHeartbeatInitArgs(rest);
+    const initResult = await initHeartbeatFile({
+      overwrite: parsed.force,
+      ...(parsed.templatePath ? { templatePath: parsed.templatePath } : {}),
+    });
+    if (initResult.status === "skipped") {
+      console.log(`Skipped: HEARTBEAT.md already exists: ${initResult.targetPath}`);
+      console.log(`Use --force to overwrite with ${initResult.templatePath}`);
+      return 0;
+    }
+    if (initResult.status === "updated") {
+      console.log(`Updated: ${initResult.targetPath}`);
+    } else {
+      console.log(`Created: ${initResult.targetPath}`);
+    }
+    console.log(`Template: ${initResult.templatePath}`);
+    return 0;
   }
 
   if (subcommand === "add") {
@@ -1536,7 +1587,7 @@ async function runHeartbeatCommand(argv: string[]): Promise<number> {
   }
 
   console.error(`Unknown heartbeat subcommand: ${subcommand}`);
-  console.error('Usage: lainclaw heartbeat <add|list|remove|enable|disable|run>');
+  console.error('Usage: lainclaw heartbeat <init|add|list|remove|enable|disable|run>');
   return 1;
 }
 
@@ -1699,49 +1750,48 @@ async function runFeishuGatewayWithHeartbeat(
   if (serviceContext.serviceChild) {
     const config = await resolveFeishuGatewayRuntimeConfig(overrides, effectiveChannel);
 
-    const heartbeatHandle =
-      config.heartbeatEnabled
-        ? startHeartbeatLoop(config.heartbeatIntervalMs, {
-            provider: config.provider,
-            ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
-            withTools: config.withTools,
-            ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
-            ...(typeof config.toolMaxSteps === "number" ? { toolMaxSteps: config.toolMaxSteps } : {}),
-            memory: config.memory,
-            sessionKey: config.heartbeatSessionKey,
-            onSummary: (summary) => {
-              console.log(formatHeartbeatSummary(summary));
-            },
-            onResult: (result) => {
-              if (result.status === "triggered") {
-                console.log(
-                  `[heartbeat] rule=${result.ruleId} triggered message=${result.message || "(no message)"}`,
-                );
-                return;
-              }
-              if (result.status === "skipped") {
-                console.log(
-                  `[heartbeat] rule=${result.ruleId} skipped reason=${result.reason || result.message || "disabled/condition not met"}`,
-                );
-                return;
-              }
-              console.error(
-                `[heartbeat] rule=${result.ruleId} errored reason=${formatHeartbeatErrorHint(
-                  result.reason || result.decisionRaw || "unknown error",
-                )}`,
+    const heartbeatHandle = config.heartbeatEnabled
+      ? startHeartbeatLoop(config.heartbeatIntervalMs, {
+          provider: config.provider,
+          ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
+          withTools: config.withTools,
+          ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
+          ...(typeof config.toolMaxSteps === "number" ? { toolMaxSteps: config.toolMaxSteps } : {}),
+          memory: config.memory,
+          sessionKey: config.heartbeatSessionKey,
+          onSummary: (summary) => {
+            console.log(formatHeartbeatSummary(summary));
+          },
+          onResult: (result) => {
+            if (result.status === "triggered") {
+              console.log(
+                `[heartbeat] rule=${result.ruleId} triggered message=${result.message || "(no message)"}`,
               );
-            },
-            send: async ({ rule, triggerMessage }) => {
-              if (!config.heartbeatTargetOpenId) {
-                throw new Error("heartbeat is enabled but heartbeatTargetOpenId is not configured");
-              }
-              await sendFeishuTextMessage(config, {
-                openId: config.heartbeatTargetOpenId,
-                text: buildHeartbeatMessage(rule.ruleText, triggerMessage),
-              });
-            },
-          })
-        : undefined;
+              return;
+            }
+            if (result.status === "skipped") {
+              console.log(
+                `[heartbeat] rule=${result.ruleId} skipped reason=${result.reason || result.message || "disabled/condition not met"}`,
+              );
+              return;
+            }
+            console.error(
+              `[heartbeat] rule=${result.ruleId} errored reason=${formatHeartbeatErrorHint(
+                result.reason || result.decisionRaw || "unknown error",
+              )}`,
+            );
+          },
+          send: async ({ rule, triggerMessage }) => {
+            if (!config.heartbeatTargetOpenId) {
+              throw new Error("heartbeat is enabled but heartbeatTargetOpenId is not configured");
+            }
+            await sendFeishuTextMessage(config, {
+              openId: config.heartbeatTargetOpenId,
+              text: buildHeartbeatMessage(rule.ruleText, triggerMessage),
+            });
+          },
+        })
+      : undefined;
 
     if (heartbeatHandle) {
       heartbeatHandle

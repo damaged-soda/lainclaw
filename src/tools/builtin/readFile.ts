@@ -20,7 +20,7 @@ export const readFileTool: ToolSpec = {
     },
   },
   handler: async (_context: ToolContext, args: Record<string, unknown>) => {
-    const cwd = process.cwd();
+    const cwd = _context.cwd || process.cwd();
     const maxBytesRaw = Number(args.maxBytes);
     const maxBytes = Number.isFinite(maxBytesRaw) && maxBytesRaw > 0 ? Math.floor(maxBytesRaw) : 204800;
 

@@ -2,6 +2,10 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import { runAsk } from "../../gateway/askGateway.js";
 import { sendFeishuTextMessage } from "./outbound.js";
 import {
+  ensureAskAuditDirectory,
+  writeAskAuditRecord,
+} from "../../shared/askAudit.js";
+import {
   resolveFeishuGatewayConfig,
   type FeishuGatewayConfig,
   persistFeishuGatewayConfig,
@@ -353,6 +357,24 @@ async function handleWsPayload(
       }),
     ]);
 
+    if (runResult.promptAudit) {
+      await writeAskAuditRecord({
+        channel: "feishu",
+        requestId: runResult.requestId,
+        requestSource: inbound.requestId,
+        sessionKey: runResult.sessionKey,
+        input: inbound.input,
+        result: runResult,
+        metadata: {
+          inboundRequestId: inbound.requestId,
+          openId: inbound.openId,
+          chatId: inbound.chatId,
+          chatType: inbound.chatType,
+          messageId: inbound.messageId,
+        },
+      });
+    }
+
     await sendFeishuTextMessage(config, {
       openId: inbound.openId,
       text: runResult.result,
@@ -362,6 +384,27 @@ async function handleWsPayload(
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (inbound?.openId && inbound.input) {
+      const sessionKey = `feishu:dm:${inbound.openId}`;
+      await writeAskAuditRecord({
+        channel: "feishu",
+        requestId: inbound.requestId,
+        requestSource: inbound.requestId,
+        sessionKey,
+        input: inbound.input,
+        error: message,
+        metadata: {
+          inboundRequestId: inbound.requestId,
+          openId: inbound.openId,
+          chatId: inbound.chatId,
+          chatType: inbound.chatType,
+          messageId: inbound.messageId,
+          context: inbound,
+        },
+      }).catch((writeError) => {
+        console.warn(`[feishu] ${requestId} ask audit error-record failed: ${String(writeError)}`);
+      });
+    }
     console.error(`[feishu] ${requestId} error: ${message}`);
     if (inbound?.openId) {
       const reason =
@@ -388,6 +431,9 @@ export async function runFeishuGatewayServer(
   options: FeishuGatewayServerOptions = {},
   channel = "feishu",
 ): Promise<void> {
+  await ensureAskAuditDirectory("feishu").catch((error) => {
+    console.warn(`[feishu] failed to prepare ask audit directory: ${String(error)}`);
+  });
   const config = await resolveFeishuGatewayConfig(overrides, channel);
   await persistFeishuGatewayConfig(overrides, channel);
 

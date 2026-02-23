@@ -76,7 +76,7 @@ export const listDirTool: ToolSpec = {
     },
   },
   handler: async (_context: ToolContext, args: Record<string, unknown>) => {
-    const cwd = process.cwd();
+    const cwd = _context.cwd || process.cwd();
     const requestPath = typeof args.path === "string" && args.path.trim().length > 0 ? args.path.trim() : ".";
     const recursive = args.recursive === true;
     const maxDepth = Math.max(1, Number.isFinite(Number(args.maxDepth)) ? Number(args.maxDepth) : 4);

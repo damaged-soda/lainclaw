@@ -5,6 +5,8 @@ import {
   RequestContext,
   SessionHistoryMessage,
   ValidationError,
+  PromptAudit,
+  PromptAuditRecord,
 } from "../shared/types.js";
 import type { AdapterResult } from "../adapters/stubAdapter.js";
 import { runPipeline } from "../pipeline/pipeline.js";
@@ -23,6 +25,12 @@ import type { ToolCall, ToolContext, ToolExecutionLog, ToolError } from "../tool
 import { getToolInfo, invokeToolsForAsk, listToolsCatalog } from "../tools/gateway.js";
 import { isToolAllowed } from "../tools/registry.js";
 import { OPENAI_CODEX_MODEL } from "../auth/authManager.js";
+import path from "node:path";
+import {
+  buildAskSystemPrompt,
+  inspectWorkspaceContext,
+  resolveWorkspaceDir,
+} from "../shared/workspaceContext.js";
 
 const DEFAULT_SESSION_KEY = "main";
 const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;
@@ -34,6 +42,7 @@ const MEMORY_SUMMARY_LINE_LIMIT = 120;
 const TOOL_PARSE_PREFIX = "tool:";
 const DEFAULT_TOOL_MAX_STEPS = 3;
 const ASSISTANT_FOLLOWUP_PROMPT = "请基于上述工具结果回答问题。";
+const PROMPT_AUDIT_ENV_KEYS = ["LAINCLAW_PROMPT_AUDIT", "LAINCLAW_ASK_PROMPT_AUDIT"];
 
 interface DeniedToolCall {
   call: ToolCall;
@@ -266,6 +275,46 @@ function chooseFirstToolError(first: ToolError | undefined, next: ToolError | un
   return next;
 }
 
+function isPromptAuditEnabled(): boolean {
+  const rawValue = PROMPT_AUDIT_ENV_KEYS
+    .map((key) => process.env[key])
+    .find((value) => typeof value === "string" && value.trim().length > 0);
+
+  if (!rawValue) {
+    return false;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  return ["1", "true", "yes", "on", "enabled"].includes(normalized);
+}
+
+function buildPromptAuditRecord(
+  step: number,
+  requestContext: RequestContext,
+  routeDecision?: string,
+): PromptAuditRecord {
+  const clonedMessages = JSON.parse(JSON.stringify(requestContext.messages)) as Message[];
+  const clonedTools = Array.isArray(requestContext.tools) && requestContext.tools.length > 0
+    ? (JSON.parse(JSON.stringify(requestContext.tools)) as ContextToolSpec[])
+    : undefined;
+  return {
+    step,
+    ...(typeof routeDecision === "string" && routeDecision.trim() ? { routeDecision } : {}),
+    requestContext: {
+      requestId: requestContext.requestId,
+      createdAt: requestContext.createdAt,
+      input: requestContext.input,
+      sessionKey: requestContext.sessionKey,
+      sessionId: requestContext.sessionId,
+      ...(requestContext.provider ? { provider: requestContext.provider } : {}),
+      ...(requestContext.profileId ? { profileId: requestContext.profileId } : {}),
+      systemPrompt: requestContext.systemPrompt ?? "",
+      messages: clonedMessages,
+      ...(clonedTools ? { tools: clonedTools } : {}),
+    },
+  };
+}
+
 function makeUsageZero() {
   return {
     input: 0,
@@ -398,6 +447,7 @@ function makeBaseRequestContext(
   provider?: string,
   profileId?: string,
   tools?: ContextToolSpec[],
+  systemPrompt?: string,
   memoryEnabled: boolean = true,
 ): RequestContext {
   return {
@@ -410,6 +460,7 @@ function makeBaseRequestContext(
     ...(provider ? { provider } : {}),
     ...(profileId ? { profileId } : {}),
     ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
+    ...(typeof systemPrompt === "string" && systemPrompt.trim().length > 0 ? { systemPrompt } : {}),
     memoryEnabled,
   };
 }
@@ -450,16 +501,18 @@ async function executeAllowedToolCalls(
   sessionId: string,
   sessionKey: string,
   calls: ToolCall[],
+  cwd?: string,
 ): Promise<{ logs: ToolExecutionLog[]; toolError?: ToolError }> {
   if (calls.length === 0) {
     return { logs: [], toolError: undefined };
   }
 
+  const resolvedCwd = typeof cwd === "string" && cwd.trim().length > 0 ? path.resolve(cwd) : process.cwd();
   const toolContext: ToolContext = {
     requestId,
     sessionId,
     sessionKey,
-    cwd: process.cwd(),
+    cwd: resolvedCwd,
   };
   const logs = await invokeToolsForAsk(calls, toolContext);
   const firstError = logs.find((log) => log.result.error)?.result.error;
@@ -497,6 +550,7 @@ export async function runAsk(
     withTools?: boolean;
     toolAllow?: string[];
     toolMaxSteps?: number;
+    cwd?: string;
   } = {},
 ): Promise<GatewayResult> {
   if (!rawInput || !rawInput.trim()) {
@@ -511,6 +565,11 @@ export async function runAsk(
   const withTools = typeof opts.withTools === "boolean" ? opts.withTools : true;
   const toolAllow = normalizeToolAllow(opts.toolAllow);
   const toolMaxSteps = resolveToolMaxSteps(opts.toolMaxSteps);
+  const workspaceContext = await inspectWorkspaceContext(
+    resolveWorkspaceDir(opts.cwd),
+    nowIso(),
+  );
+  const requestSystemPrompt = buildAskSystemPrompt(workspaceContext);
 
   const session = await getOrCreateSession({
     sessionKey,
@@ -524,6 +583,17 @@ export async function runAsk(
   const priorMessages = trimContextMessages(await getRecentSessionMessages(session.sessionId));
   const requestId = createRequestId();
   const createdAt = nowIso();
+  const promptAudit: PromptAudit | undefined = isPromptAuditEnabled()
+    ? { enabled: true, records: [] }
+    : undefined;
+  let promptAuditStep = 1;
+  const recordPromptAudit = (context: RequestContext, routeDecision: string) => {
+    if (!promptAudit) {
+      return;
+    }
+    promptAudit.records.push(buildPromptAuditRecord(promptAuditStep, context, routeDecision));
+    promptAuditStep += 1;
+  };
 
   const historyContext: Message[] = contextMessagesFromHistory(priorMessages);
   if (memorySnippet) {
@@ -555,7 +625,13 @@ export async function runAsk(
     }
 
     if (split.allowed.length > 0) {
-      const executed = await executeAllowedToolCalls(requestId, session.sessionId, sessionKey, split.allowed);
+      const executed = await executeAllowedToolCalls(
+        requestId,
+        session.sessionId,
+        sessionKey,
+        split.allowed,
+        opts.cwd,
+      );
       toolCalls.push(...split.allowed.map(normalizeToolCall));
       toolResults.push(...executed.logs);
       toolError = chooseFirstToolError(toolError, executed.toolError);
@@ -621,8 +697,10 @@ export async function runAsk(
       provider,
       profileId,
       undefined,
+      requestSystemPrompt,
       session.memoryEnabled,
     );
+    recordPromptAudit(requestContext, "manual_tool_path");
     finalResult = (await runPipeline(requestContext)).adapter;
   } else {
     const shouldAutoCall = provider === "openai-codex" && withTools;
@@ -640,8 +718,10 @@ export async function runAsk(
         provider,
         profileId,
         autoTools,
+        requestSystemPrompt,
         session.memoryEnabled,
       );
+      recordPromptAudit(requestContext, "auto_tool_path_step_1");
 
       for (let step = 0; step < toolMaxSteps; step += 1) {
         const output = await runPipeline(requestContext);
@@ -656,7 +736,13 @@ export async function runAsk(
         const deniedLogs = split.denied.map((entry) =>
           makeToolExecutionError(entry.call, entry.message, entry.code),
         );
-        const executed = await executeAllowedToolCalls(requestId, session.sessionId, sessionKey, split.allowed);
+        const executed = await executeAllowedToolCalls(
+          requestId,
+          session.sessionId,
+          sessionKey,
+          split.allowed,
+          opts.cwd,
+        );
 
         const roundState: ToolLoopState = {
           roundCalls,
@@ -674,6 +760,9 @@ export async function runAsk(
           finalResult.stopReason,
           provider,
         );
+        if (step < toolMaxSteps - 1) {
+          recordPromptAudit(requestContext, `auto_tool_path_step_${step + 2}`);
+        }
 
         if (toolResults.length > 0) {
           sessionContextUpdated = true;
@@ -696,8 +785,10 @@ export async function runAsk(
         provider,
         profileId,
         undefined,
+        requestSystemPrompt,
         session.memoryEnabled,
       );
+      recordPromptAudit(requestContext, "single_pass");
       finalResult = (await runPipeline(requestContext)).adapter;
     }
   }
@@ -774,6 +865,7 @@ export async function runAsk(
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     toolResults: toolResults.length > 0 ? toolResults : undefined,
     toolError,
+    ...(promptAudit ? { promptAudit } : {}),
     sessionContextUpdated,
   };
 }

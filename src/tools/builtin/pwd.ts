@@ -8,8 +8,8 @@ export const pwdTool: ToolSpec = {
     type: "object",
     properties: {},
   },
-  handler: (_context: ToolContext) => {
-    const cwd = process.cwd();
+  handler: (context: ToolContext) => {
+    const cwd = context.cwd || process.cwd();
     return {
       ok: true,
       content: cwd,

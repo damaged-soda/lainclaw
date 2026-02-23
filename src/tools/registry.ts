@@ -25,6 +25,10 @@ const registry = new Map<string, ToolSpec>(
   builtinTools.map((tool) => [normalizeName(tool.name), tool]),
 );
 
+const BUILTIN_TOOL_NAMES = Array.from(registry.values())
+  .map((tool) => tool.name)
+  .sort((left, right) => left.localeCompare(right));
+
 export interface ToolQueryOptions {
   allowList?: string[];
 }
@@ -47,6 +51,10 @@ export function listTools(options: ToolQueryOptions = {}): ToolSpec[] {
   });
 
   return entries.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function getBuiltinToolNames(): string[] {
+  return [...BUILTIN_TOOL_NAMES];
 }
 
 export function getTool(name: string, options: ToolQueryOptions = {}): ToolSpec | undefined {

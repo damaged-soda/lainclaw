@@ -130,7 +130,7 @@ npm start -- gateway config set --channel feishu --app-id <AppID> --app-secret <
 - `--profile <profileId>`：使用指定 openai-codex 登录 Profile（默认走当前 active profile）
 - `--with-tools` / `--no-with-tools`：是否允许模型发起 tool-call（默认打开）
 - `--memory` / `--no-memory`：是否启用会话记忆摘要合并（默认关闭）
-- `--tool-allow <tool1,tool2>`：限制允许的工具白名单（默认允许全部）
+- `--tool-allow <tool1,tool2>`：限制允许的工具白名单（默认允许所有内置工具，`gateway.json` 不配置则等于放开全部）
 - `--tool-max-steps <N>`：限制模型自动 tool-call 循环次数（建议值 4~8）
 
 示例（10秒超时）：
@@ -220,6 +220,7 @@ lainclaw pairing revoke [--channel feishu] <openIdOrUserId> [--account <accountI
 ## 心跳（Heartbeat）规则命令
 
 ```bash
+lainclaw heartbeat init [--template <path>] [--force]
 lainclaw heartbeat add "提醒我：每天中午检查邮件"
 lainclaw heartbeat list
 lainclaw heartbeat enable <ruleId>
@@ -230,6 +231,7 @@ lainclaw heartbeat remove <ruleId>
 
 说明：
 
+- `init`：首次使用时手动初始化 `~/.lainclaw/HEARTBEAT.md`，默认会从源码目录下的 `template/HEARTBEAT.md` 拷贝；`--force` 可强制覆盖已有文件。  
 - `add`：写入自然语言规则（按模型语义判断是否触发）  
 - `list`：查看持久化规则  
 - `run`：手动触发一次执行（不启动网关）  

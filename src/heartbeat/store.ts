@@ -1,112 +1,25 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveAuthDirectory } from "../auth/configStore.js";
+import { fileURLToPath } from "node:url";
+import { resolveWorkspaceDir } from "../shared/workspaceContext.js";
 
-const HEARTBEAT_RULE_FILE = "heartbeat-rules.json";
-const CURRENT_VERSION = 1 as const;
+const HEARTBEAT_RULE_FILE = "HEARTBEAT.md";
+const HEARTBEAT_TEMPLATE_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "template",
+  HEARTBEAT_RULE_FILE,
+);
 
-interface HeartbeatRuleStorage {
-  version: 1;
-  rules: Array<{
-    id: string;
-    ruleText: string;
-    enabled: boolean;
-    provider?: string;
-    profileId?: string;
-    withTools?: boolean;
-    toolAllow?: string[];
-    toolMaxSteps?: number;
-    createdAt: string;
-    updatedAt: string;
-    lastRunAt?: string;
-    lastTriggerAt?: string;
-    lastStatus?: "skip" | "trigger" | "error";
-    lastStatusMessage?: string;
-  }>;
-}
+const HEARTBEAT_MARKER_TASK = /^(?<indent>\s*)(?<marker>[-*+])(?:\s*\[(?<done>[xX\s])\]\s*)?(?<text>.+)$/;
+const HEARTBEAT_MARKER_ORDERED = /^\s*\d+[.)]\s+(?<text>.+)$/;
 
-function resolveHeartbeatRulePath(): string {
-  return path.join(resolveAuthDirectory(), HEARTBEAT_RULE_FILE);
-}
-
-function sanitizeText(raw: unknown): string | undefined {
-  if (typeof raw !== "string") {
-    return undefined;
-  }
-  const text = raw.trim();
-  return text.length > 0 ? text : undefined;
-}
-
-function sanitizeBoolean(raw: unknown): boolean | undefined {
-  if (typeof raw !== "boolean") {
-    return undefined;
-  }
-  return raw;
-}
-
-function sanitizeStringArray(raw: unknown): string[] | undefined {
-  if (!Array.isArray(raw)) {
-    return undefined;
-  }
-  const values = raw
-    .map((value) => (typeof value === "string" ? value.trim() : ""))
-    .filter((value) => value.length > 0);
-  return values.length > 0 ? values : undefined;
-}
-
-function sanitizePositiveNumber(raw: unknown): number | undefined {
-  if (typeof raw !== "number" || !Number.isFinite(raw)) {
-    return undefined;
-  }
-  const n = Math.floor(raw);
-  if (n <= 0) {
-    return undefined;
-  }
-  return n;
-}
-
-function sanitizeProvider(raw: unknown): string | undefined {
-  const provider = sanitizeText(raw)?.toLowerCase();
-  if (!provider) {
-    return undefined;
-  }
-  if (provider === "openai-codex") {
-    return provider;
-  }
-  return undefined;
-}
-
-function normalizeRule(raw: unknown): Partial<HeartbeatRule> | undefined {
-  if (!raw || typeof raw !== "object") {
-    return undefined;
-  }
-
-  const candidate = raw as Record<string, unknown>;
-  const id = sanitizeText(candidate.id);
-  const ruleText = sanitizeText(candidate.ruleText);
-  if (!id || !ruleText) {
-    return undefined;
-  }
-
-  return {
-    id,
-    ruleText,
-    enabled: candidate.enabled === undefined ? true : candidate.enabled === true,
-    provider: sanitizeProvider(candidate.provider),
-    profileId: sanitizeText(candidate.profileId),
-    withTools: sanitizeBoolean(candidate.withTools) ?? false,
-    toolAllow: sanitizeStringArray(candidate.toolAllow),
-    toolMaxSteps: sanitizePositiveNumber(candidate.toolMaxSteps),
-    createdAt: sanitizeText(candidate.createdAt) ?? new Date().toISOString(),
-    updatedAt: sanitizeText(candidate.updatedAt) ?? new Date().toISOString(),
-    lastRunAt: sanitizeText(candidate.lastRunAt),
-    lastTriggerAt: sanitizeText(candidate.lastTriggerAt),
-    lastStatus: candidate.lastStatus === "trigger" || candidate.lastStatus === "skip" || candidate.lastStatus === "error"
-      ? candidate.lastStatus
-      : undefined,
-    lastStatusMessage: sanitizeText(candidate.lastStatusMessage),
-  };
-}
+const HEARTBEAT_TASK_TEMPLATE =
+  "# HEARTBEAT.md\n" +
+  "# Keep this file empty (or with only comments) to skip heartbeat API calls.\n" +
+  "\n" +
+  "# Add tasks below when you want the agent to check something periodically.\n";
 
 export interface HeartbeatRule {
   id: string;
@@ -135,170 +48,297 @@ export interface NewHeartbeatRule {
   enabled?: boolean;
 }
 
-export function createHeartbeatRuleId(): string {
-  return `heartbeat-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
+interface ParsedHeartbeatTask {
+  id: string;
+  ruleText: string;
+  enabled: boolean;
+  lineNo: number;
+  rawLine: string;
 }
 
-export async function loadHeartbeatRules(): Promise<HeartbeatRule[]> {
-  const rawPath = resolveHeartbeatRulePath();
+interface ParsedFile {
+  tasks: ParsedHeartbeatTask[];
+  lines: string[];
+}
 
+function resolveHeartbeatRulePath(workspaceDir?: string): string {
+  const workspace = resolveWorkspaceDir(workspaceDir);
+  return path.join(path.resolve(workspace), HEARTBEAT_RULE_FILE);
+}
+
+function resolveHeartbeatTemplatePath(rawTemplatePath?: string): string {
+  if (!rawTemplatePath?.trim()) {
+    return HEARTBEAT_TEMPLATE_PATH;
+  }
+  return path.resolve(rawTemplatePath);
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
   try {
-    const raw = await fs.readFile(rawPath, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<HeartbeatRuleStorage>;
-    if (!parsed || typeof parsed !== "object" || parsed.version !== CURRENT_VERSION || !Array.isArray(parsed.rules)) {
-      return [];
-    }
-
-    const list: HeartbeatRule[] = [];
-    for (const candidate of parsed.rules) {
-      const normalized = normalizeRule(candidate);
-      if (!normalized) {
-        continue;
-      }
-      const {
-        id,
-        ruleText,
-        enabled,
-        provider,
-        profileId,
-        withTools,
-        toolAllow,
-        toolMaxSteps,
-        createdAt,
-        updatedAt,
-        lastRunAt,
-        lastTriggerAt,
-        lastStatus,
-        lastStatusMessage,
-      } = normalized;
-      if (!id || !ruleText || typeof enabled !== "boolean") {
-        continue;
-      }
-      list.push({
-        id,
-        ruleText,
-        enabled,
-        ...(provider ? { provider } : {}),
-        ...(profileId ? { profileId } : {}),
-        withTools: typeof withTools === "boolean" ? withTools : false,
-        ...(toolAllow ? { toolAllow } : {}),
-        ...(toolMaxSteps ? { toolMaxSteps } : {}),
-        createdAt: createdAt || new Date().toISOString(),
-        updatedAt: updatedAt || new Date().toISOString(),
-        ...(lastRunAt ? { lastRunAt } : {}),
-        ...(lastTriggerAt ? { lastTriggerAt } : {}),
-        ...(lastStatus ? { lastStatus } : {}),
-        ...(lastStatusMessage ? { lastStatusMessage } : {}),
-      });
-    }
-    return list;
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
+    const anyErr = error as { code?: string };
+    if (anyErr.code === "ENOENT" || anyErr.code === "ENOTDIR") {
+      return false;
     }
     throw error;
   }
 }
 
-export async function saveHeartbeatRules(rules: HeartbeatRule[]): Promise<void> {
-  const rawPath = resolveHeartbeatRulePath();
-  const nowIso = new Date().toISOString();
-
-  const storage: HeartbeatRuleStorage = {
-    version: CURRENT_VERSION,
-    rules: rules.map((rule) => ({
-      id: rule.id,
-      ruleText: rule.ruleText,
-      enabled: rule.enabled,
-      ...(rule.provider ? { provider: rule.provider } : {}),
-      ...(rule.profileId ? { profileId: rule.profileId } : {}),
-      ...(typeof rule.withTools === "boolean" ? { withTools: rule.withTools } : {}),
-      ...(Array.isArray(rule.toolAllow) && rule.toolAllow.length > 0 ? { toolAllow: rule.toolAllow } : {}),
-      ...(typeof rule.toolMaxSteps === "number" ? { toolMaxSteps: rule.toolMaxSteps } : {}),
-      createdAt: rule.createdAt,
-      updatedAt: rule.updatedAt || nowIso,
-      ...(rule.lastRunAt ? { lastRunAt: rule.lastRunAt } : {}),
-      ...(rule.lastTriggerAt ? { lastTriggerAt: rule.lastTriggerAt } : {}),
-      ...(rule.lastStatus ? { lastStatus: rule.lastStatus } : {}),
-      ...(rule.lastStatusMessage ? { lastStatusMessage: rule.lastStatusMessage } : {}),
-    })),
-  };
-  await fs.mkdir(resolveAuthDirectory(), { recursive: true });
-  const tmpPath = `${rawPath}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(storage, null, 2), "utf-8");
-  await fs.rename(tmpPath, rawPath);
+function nowIso(): string {
+  return new Date().toISOString();
 }
 
-function cloneRule(rule: HeartbeatRule): HeartbeatRule {
-  return {
-    ...rule,
-    ...(Array.isArray(rule.toolAllow) ? { toolAllow: [...rule.toolAllow] } : {}),
-  };
-}
-
-export async function findHeartbeatRule(ruleId: string): Promise<HeartbeatRule | undefined> {
-  const rules = await loadHeartbeatRules();
-  return rules.find((rule) => rule.id === ruleId);
-}
-
-export async function addHeartbeatRule(input: NewHeartbeatRule): Promise<HeartbeatRule> {
-  const rule = buildHeartbeatRule(input);
-  const rules = await loadHeartbeatRules();
-  await saveHeartbeatRules([rule, ...rules]);
-  return rule;
-}
-
-export async function removeHeartbeatRule(ruleId: string): Promise<boolean> {
-  const rules = await loadHeartbeatRules();
-  const next = rules.filter((rule) => rule.id !== ruleId);
-  if (next.length === rules.length) {
-    return false;
+function normalizeText(raw: unknown): string | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
   }
-  await saveHeartbeatRules(next);
-  return true;
+  const text = raw.trim();
+  return text.length > 0 ? text : undefined;
 }
 
-export async function setHeartbeatRuleEnabled(ruleId: string, enabled: boolean): Promise<boolean> {
-  const rules = await loadHeartbeatRules();
-  let updated = false;
+function normalizeStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const values = raw
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .filter((value) => value.length > 0);
+  return values.length > 0 ? values : undefined;
+}
 
-  const next = rules.map((rule) => {
-    if (rule.id !== ruleId) {
-      return rule;
+function normalizeProvider(raw: unknown): string | undefined {
+  const provider = normalizeText(raw)?.toLowerCase();
+  if (!provider) {
+    return undefined;
+  }
+  if (provider === "openai-codex") {
+    return provider;
+  }
+  return undefined;
+}
+
+function normalizePositiveNumber(raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return undefined;
+  }
+  const n = Math.floor(raw);
+  if (n <= 0) {
+    return undefined;
+  }
+  return n;
+}
+
+function normalizeBoolean(raw: unknown): boolean | undefined {
+  if (typeof raw !== "boolean") {
+    return undefined;
+  }
+  return raw;
+}
+
+function hashTaskId(input: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = (hash * 16_777_619) >>> 0;
+  }
+  return `hb-${hash.toString(36)}`;
+}
+
+function parseHeartbeatTasks(content: string): ParsedHeartbeatTask[] {
+  const tasks: ParsedHeartbeatTask[] = [];
+
+  const lines = content.split(/\r?\n/);
+  for (const [index, rawLine] of lines.entries()) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (trimmed.startsWith("#")) {
+      continue;
     }
 
-    updated = true;
-    return {
-      ...rule,
-      enabled,
-      updatedAt: new Date().toISOString(),
-    };
-  });
+    const matchTask = trimmed.match(HEARTBEAT_MARKER_TASK);
+    if (matchTask?.groups) {
+      const text = normalizeText(matchTask.groups.text);
+      if (!text) {
+        continue;
+      }
+      const done = matchTask.groups.done;
+      const hasCheckbox = typeof done === "string";
+      const enabled = !hasCheckbox || done?.toLowerCase() === "x";
+      const id = hashTaskId(`${index}-${text}`);
+      tasks.push({ id, ruleText: text, enabled, lineNo: index, rawLine });
+      continue;
+    }
 
-  if (!updated) {
-    return false;
+    const matchOrdered = trimmed.match(HEARTBEAT_MARKER_ORDERED);
+    if (matchOrdered?.groups) {
+      const text = normalizeText(matchOrdered.groups.text);
+      if (!text) {
+        continue;
+      }
+      tasks.push({
+        id: hashTaskId(`${index}-${text}`),
+        ruleText: text,
+        enabled: true,
+        lineNo: index,
+        rawLine,
+      });
+    }
   }
 
-  await saveHeartbeatRules(next);
-  return true;
+  return tasks;
 }
 
-export async function listHeartbeatRules(): Promise<HeartbeatRule[]> {
-  const rules = await loadHeartbeatRules();
-  return rules.map(cloneRule);
+async function readHeartbeatFile(rawPath: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(rawPath, "utf-8");
+  } catch (error) {
+    const anyErr = error as { code?: string };
+    if (anyErr.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function loadHeartbeatFile(workspaceDir?: string): Promise<ParsedFile> {
+  const heartbeatPath = resolveHeartbeatRulePath(workspaceDir);
+  const content = await readHeartbeatFile(heartbeatPath);
+  const lines = typeof content === "string" ? content.split(/\r?\n/) : [];
+  return {
+    tasks: parseHeartbeatTasks(content ?? ""),
+    lines,
+  };
+}
+
+function asRule(task: ParsedHeartbeatTask, now = nowIso()): HeartbeatRule {
+  return {
+    id: task.id,
+    ruleText: task.ruleText,
+    enabled: task.enabled,
+    withTools: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function normalizeTaskLine(rawLine: string, enabled: boolean, ruleText: string): string {
+  const trimmed = rawLine.trim();
+  const markerMatch = trimmed.match(/^([*-+])/);
+  const marker = markerMatch?.[1] ?? "-";
+  const indent = rawLine.match(/^\s*/)?.[0] ?? "";
+
+  const base = `${indent}${marker} `;
+  return enabled ? `${base}${ruleText}` : `${base}[ ] ${ruleText}`;
+}
+
+interface HeartbeatTemplateInitOptions {
+  workspaceDir?: string;
+  templatePath?: string;
+  overwrite?: boolean;
+}
+
+export interface HeartbeatTemplateInitResult {
+  status: "created" | "updated" | "skipped";
+  targetPath: string;
+  templatePath: string;
+}
+
+async function loadHeartbeatTemplate(rawTemplatePath?: string): Promise<{ templatePath: string; content: string }> {
+  const templatePath = resolveHeartbeatTemplatePath(rawTemplatePath);
+  try {
+    const content = await fs.readFile(templatePath, "utf-8");
+    return { templatePath, content };
+  } catch (error) {
+    const anyErr = error as { code?: string };
+    if (anyErr.code === "ENOENT" && templatePath === HEARTBEAT_TEMPLATE_PATH) {
+      return {
+        templatePath,
+        content: HEARTBEAT_TASK_TEMPLATE,
+      };
+    }
+    if (anyErr.code === "ENOENT") {
+      throw new Error(`Heartbeat template not found: ${templatePath}`);
+    }
+    if (anyErr.code === "ENOTDIR") {
+      throw new Error(`Invalid heartbeat template path: ${templatePath}`);
+    }
+    throw error;
+  }
+}
+
+export async function initHeartbeatFile(
+  options: HeartbeatTemplateInitOptions = {},
+): Promise<HeartbeatTemplateInitResult> {
+  const workspaceDir = resolveWorkspaceDir(options.workspaceDir);
+  const targetPath = resolveHeartbeatRulePath(workspaceDir);
+  const { templatePath, content } = await loadHeartbeatTemplate(options.templatePath);
+  const exists = await fileExists(targetPath);
+
+  if (exists && !options.overwrite) {
+    return {
+      status: "skipped",
+      targetPath,
+      templatePath,
+    };
+  }
+
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.writeFile(targetPath, content, "utf-8");
+  return {
+    status: exists ? "updated" : "created",
+    targetPath,
+    templatePath,
+  };
+}
+
+export function createHeartbeatRuleId(): string {
+  return `heartbeat-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
+}
+
+export async function loadHeartbeatRules(workspaceDir?: string): Promise<HeartbeatRule[]> {
+  const now = nowIso();
+  const parsed = await loadHeartbeatFile(workspaceDir);
+  return parsed.tasks.map((task) => asRule(task, now));
+}
+
+export async function saveHeartbeatRules(rules: HeartbeatRule[], workspaceDir?: string): Promise<void> {
+  const heartbeatPath = resolveHeartbeatRulePath(workspaceDir);
+  const existingRaw = await loadHeartbeatFile(workspaceDir);
+  const lines = existingRaw.lines;
+  const byId = new Map<string, HeartbeatRule>(rules.map((rule) => [rule.id, rule]));
+
+  const updated = lines
+    .map((line, index) => {
+      const task = existingRaw.tasks.find((entry) => entry.lineNo === index);
+      if (!task) {
+        return line;
+      }
+      const next = byId.get(task.id);
+      if (!next) {
+        return line;
+      }
+      return normalizeTaskLine(task.rawLine, next.enabled, next.ruleText);
+    })
+    .join("\n");
+
+  await fs.writeFile(heartbeatPath, `${updated}\n`, "utf-8");
 }
 
 export function buildHeartbeatRule(input: NewHeartbeatRule): HeartbeatRule {
-  const ruleText = sanitizeText(input.ruleText) ?? "";
+  const ruleText = normalizeText(input.ruleText) ?? "";
   if (!ruleText) {
     throw new Error("Heartbeat rule text cannot be empty.");
   }
-  const provider = sanitizeProvider(input.provider);
-  const withTools = sanitizeBoolean(input.withTools) ?? false;
-  const toolAllow = sanitizeStringArray(input.toolAllow);
-  const toolMaxSteps = sanitizePositiveNumber(input.toolMaxSteps);
-  const profileId = sanitizeText(input.profileId);
-  const now = new Date().toISOString();
+  const withTools = normalizeBoolean(input.withTools) ?? false;
+  const toolAllow = normalizeStringArray(input.toolAllow);
+  const toolMaxSteps = normalizePositiveNumber(input.toolMaxSteps);
+  const profileId = normalizeText(input.profileId);
+  const provider = normalizeProvider(input.provider);
+  const now = nowIso();
   return {
     id: createHeartbeatRuleId(),
     ruleText,
@@ -311,4 +351,52 @@ export function buildHeartbeatRule(input: NewHeartbeatRule): HeartbeatRule {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export async function addHeartbeatRule(
+  input: NewHeartbeatRule,
+  workspaceDir?: string,
+): Promise<HeartbeatRule> {
+  const rule = buildHeartbeatRule(input);
+  const heartbeatPath = resolveHeartbeatRulePath(workspaceDir);
+  await fs.mkdir(path.dirname(heartbeatPath), { recursive: true });
+
+  const existing = await readHeartbeatFile(heartbeatPath);
+  const normalized = existing ?? HEARTBEAT_TASK_TEMPLATE;
+  const marker = rule.enabled ? `- ${rule.ruleText}` : `- [ ] ${rule.ruleText}`;
+  const connector = normalized.endsWith("\n") || normalized.length === 0 ? "" : "\n";
+  await fs.appendFile(heartbeatPath, `${connector}${marker}\n`, "utf-8");
+  return rule;
+}
+
+export async function removeHeartbeatRule(ruleId: string, workspaceDir?: string): Promise<boolean> {
+  const parsed = await loadHeartbeatFile(workspaceDir);
+  const target = parsed.tasks.find((task) => task.id === ruleId);
+  if (!target) {
+    return false;
+  }
+
+  const nextLines = parsed.lines.filter((_line, index) => index !== target.lineNo);
+  const heartbeatPath = resolveHeartbeatRulePath(workspaceDir);
+  await fs.writeFile(heartbeatPath, `${nextLines.join("\n")}${nextLines.length > 0 ? "\n" : ""}`, "utf-8");
+  return true;
+}
+
+export async function setHeartbeatRuleEnabled(ruleId: string, enabled: boolean, workspaceDir?: string): Promise<boolean> {
+  const parsed = await loadHeartbeatFile(workspaceDir);
+  const target = parsed.tasks.find((task) => task.id === ruleId);
+  if (!target) {
+    return false;
+  }
+
+  const nextLines = [...parsed.lines];
+  nextLines[target.lineNo] = normalizeTaskLine(target.rawLine, enabled, target.ruleText);
+
+  const heartbeatPath = resolveHeartbeatRulePath(workspaceDir);
+  await fs.writeFile(heartbeatPath, `${nextLines.join("\n")}\n`, "utf-8");
+  return true;
+}
+
+export async function listHeartbeatRules(workspaceDir?: string): Promise<HeartbeatRule[]> {
+  return await loadHeartbeatRules(workspaceDir);
 }

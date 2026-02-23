@@ -177,7 +177,7 @@ export async function runCodexAdapter(
   const response = await complete(
     model,
     {
-      systemPrompt: OPENAI_CODEX_SYSTEM_PROMPT,
+      systemPrompt: context.systemPrompt ?? OPENAI_CODEX_SYSTEM_PROMPT,
       messages: normalizeMessages(context),
       ...(Array.isArray(context.tools) && context.tools.length > 0
         ? { tools: mapToolSpecs(context.tools) }

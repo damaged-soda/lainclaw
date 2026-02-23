@@ -3,6 +3,11 @@ import path from "node:path";
 import os from "node:os";
 import { runAsk } from "../../gateway/askGateway.js";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
+import { type PromptAudit } from "../../shared/types.js";
+import {
+  ensureAskAuditDirectory,
+  writeAskAuditRecord,
+} from "../../shared/askAudit.js";
 
 export interface LocalGatewayOverrides {
   provider?: string;
@@ -40,6 +45,7 @@ interface LocalRunboxRecord {
     toolResults?: unknown;
     toolError?: unknown;
     sessionContextUpdated?: boolean;
+    promptAudit?: PromptAudit;
   };
 }
 
@@ -198,6 +204,7 @@ function buildRunboxRecord(
       ...(response.toolResults ? { toolResults: response.toolResults } : {}),
       ...(response.toolError ? { toolError: response.toolError } : {}),
       ...(response.sessionContextUpdated ? { sessionContextUpdated: response.sessionContextUpdated } : {}),
+      ...(response.promptAudit ? { promptAudit: response.promptAudit } : {}),
     },
   };
 }
@@ -266,6 +273,10 @@ export async function runLocalGatewayServer(
     toolMaxSteps: overrides.toolMaxSteps,
   };
 
+  await ensureAskAuditDirectory("local").catch((error) => {
+    console.warn(`[local] failed to prepare ask audit directory: ${String(error)}`);
+  });
+
   while (running) {
     const raw = await readRawInbox(inboxPath);
 
@@ -304,12 +315,40 @@ export async function runLocalGatewayServer(
           });
 
           const record = buildRunboxRecord(result, input, requestSource, sessionKey);
+          if (result.promptAudit) {
+            await writeAskAuditRecord({
+              channel: "local",
+              requestId: result.requestId,
+              requestSource,
+              sessionKey,
+              input,
+              result,
+              metadata: {
+                channel: "local",
+                requestSource,
+              },
+            });
+          }
           await appendLine(outboxPath, writeRunboxRecordSafe(record));
           console.log(`[local] ${requestSource} route=${result.route} stage=${result.stage}`);
           continue;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const requestId = `${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
+          await writeAskAuditRecord({
+            channel: "local",
+            requestId,
+            requestSource,
+            sessionKey,
+            input,
+            error: message,
+            metadata: {
+              channel: "local",
+              requestSource,
+            },
+          }).catch((writeError) => {
+            console.warn(`[local] ${requestId} ask audit error-record failed: ${String(writeError)}`);
+          });
           const record = buildErrorRecord(requestId, input, requestSource, sessionKey, message);
           await appendLine(outboxPath, writeErrorRecordSafe(record));
           console.log(`[local] ${requestSource} failed: ${message}`);
