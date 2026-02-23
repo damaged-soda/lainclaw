@@ -26,14 +26,21 @@ export interface PairingRequest {
   meta?: Record<string, string>;
 }
 
-interface PairingStore {
-  version: 1;
-  requests: PairingRequest[];
+interface GatewayPairingChannelState {
+  requests?: PairingRequest[];
+  allowFrom?: string[];
+  accountAllowFrom?: Record<string, string[]>;
 }
 
-interface AllowFromStore {
+interface GatewayPairingState {
   version: 1;
-  allowFrom: string[];
+  channels?: Record<string, GatewayPairingChannelState>;
+}
+
+interface GatewayConfigFile {
+  [key: string]: unknown;
+  version?: number;
+  pairing?: GatewayPairingState;
 }
 
 function safeChannelKey(channel: PairingChannel): string {
@@ -48,32 +55,33 @@ function safeChannelKey(channel: PairingChannel): string {
   return safe;
 }
 
-function safeAccountKey(accountId: string): string {
-  const raw = String(accountId).trim().toLowerCase();
-  if (!raw) {
-    throw new Error("invalid pairing account id");
-  }
-  const safe = raw.replace(/[\\/:*?\"<>|]/g, "_").replace(/\.\./g, "_");
-  if (!safe || safe === "_") {
-    throw new Error("invalid pairing account id");
-  }
-  return safe;
+function resolveGatewayConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(resolveAuthDirectory(env.HOME), FEISHU_GATEWAY_CONFIG_FILE);
 }
 
-function resolvePairingPath(channel: PairingChannel, env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(resolveAuthDirectory(env.HOME), `${safeChannelKey(channel)}-pairing.json`);
-}
-
-function resolveAllowFromPath(channel: PairingChannel, env: NodeJS.ProcessEnv = process.env, accountId?: string): string {
-  const base = safeChannelKey(channel);
-  const normalizedAccountId = String(accountId || "").trim();
-  if (!normalizedAccountId) {
-    return path.join(resolveAuthDirectory(env.HOME), `${base}-allowFrom.json`);
-  }
-  return path.join(resolveAuthDirectory(env.HOME), `${base}-${safeAccountKey(normalizedAccountId)}-allowFrom.json`);
-}
+const FEISHU_GATEWAY_CONFIG_FILE = "gateway.json";
 
 const storeLocks = new Map<string, Promise<void>>();
+
+const DEFAULT_GATEWAY_CONFIG_FILE: GatewayConfigFile = {
+  version: CURRENT_VERSION,
+  pairing: {
+    version: CURRENT_VERSION,
+    channels: {},
+  },
+};
+
+function hasPairingChannelData(state: GatewayPairingChannelState): boolean {
+  return (
+    (state.requests?.length ?? 0) > 0
+    || (state.allowFrom?.length ?? 0) > 0
+    || Object.keys(state.accountAllowFrom ?? {}).length > 0
+  );
+}
+
+function isRecord(raw: unknown): raw is Record<string, unknown> {
+  return !!raw && typeof raw === "object" && !Array.isArray(raw);
+}
 
 async function withStoreLock<T>(filePath: string, fallback: unknown, fn: () => Promise<T>): Promise<T> {
   await ensureJsonFile(filePath, fallback);
@@ -113,9 +121,60 @@ function trimText(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
-function normalizePairingStore(raw: unknown): PairingStore {
-  const parsed = raw as Partial<PairingStore>;
-  const requests = Array.isArray(parsed?.requests) ? parsed.requests : [];
+function normalizeGatewayPairingState(raw: unknown): GatewayPairingState {
+  if (!isRecord(raw)) {
+    return {
+      version: CURRENT_VERSION,
+      channels: {},
+    };
+  }
+  const candidate = raw as Partial<GatewayPairingState>;
+  if (!Number.isInteger(candidate.version) || candidate.version !== CURRENT_VERSION) {
+    return {
+      version: CURRENT_VERSION,
+      channels: {},
+    };
+  }
+  const channelsSource = isRecord(candidate.channels) ? candidate.channels : {};
+  const normalizedChannels: Record<string, GatewayPairingChannelState> = {};
+  for (const [rawChannel, rawScope] of Object.entries(channelsSource)) {
+    const normalizedScope = normalizeGatewayPairingChannelState(rawScope);
+    if (hasPairingChannelData(normalizedScope)) {
+      normalizedChannels[rawChannel] = normalizedScope;
+    }
+  }
+  return {
+    version: CURRENT_VERSION,
+    channels: normalizedChannels,
+  };
+}
+
+function normalizeGatewayConfigFile(raw: unknown): GatewayConfigFile {
+  if (!isRecord(raw)) {
+    return { ...DEFAULT_GATEWAY_CONFIG_FILE };
+  }
+  const parsed = raw as GatewayConfigFile;
+  const version = Number.isFinite(parsed.version as number) ? parsed.version : CURRENT_VERSION;
+  return {
+    ...parsed,
+    version,
+    pairing: normalizeGatewayPairingState(parsed.pairing),
+  };
+}
+
+async function readGatewayConfigFile(filePath: string): Promise<GatewayConfigFile> {
+  const parsed = await readJsonFile(filePath, DEFAULT_GATEWAY_CONFIG_FILE);
+  return normalizeGatewayConfigFile(parsed.value);
+}
+
+async function writeGatewayConfigFile(filePath: string, value: GatewayConfigFile): Promise<void> {
+  const normalized = normalizeGatewayConfigFile(value);
+  await writeJsonFile(filePath, normalized);
+}
+
+function normalizePairingRequestList(raw: unknown): PairingRequest[] {
+  const candidate = isRecord(raw) ? raw.requests : raw;
+  const requests = Array.isArray(candidate) ? candidate : [];
   const normalized: PairingRequest[] = [];
 
   for (const candidate of requests) {
@@ -151,15 +210,33 @@ function normalizePairingStore(raw: unknown): PairingStore {
     });
   }
 
-  return { version: CURRENT_VERSION, requests: normalized };
+  return normalized;
 }
 
-function normalizeAllowFromStore(raw: unknown): AllowFromStore {
-  const parsed = raw as Partial<AllowFromStore>;
-  const allowFrom = Array.isArray(parsed?.allowFrom) ? parsed.allowFrom : [];
+function normalizeGatewayPairingChannelState(raw: unknown): GatewayPairingChannelState {
+  if (!isRecord(raw)) {
+    return { requests: [] };
+  }
+  const candidate = raw as Partial<GatewayPairingChannelState>;
+  const requests = normalizePairingRequestList(candidate.requests);
+  const allowFrom = normalizeAndDedup(Array.isArray(candidate.allowFrom) ? candidate.allowFrom : []);
+  const rawAccountMap = isRecord(candidate.accountAllowFrom) ? candidate.accountAllowFrom : {};
+  const accountAllowFrom: Record<string, string[]> = {};
+  for (const [accountId, rawEntries] of Object.entries(rawAccountMap)) {
+    const normalizedAccountId = normalizePairingAccountId(accountId);
+    if (!normalizedAccountId) {
+      continue;
+    }
+    const normalizedEntries = normalizeAndDedup(Array.isArray(rawEntries) ? rawEntries : []);
+    if (normalizedEntries.length > 0) {
+      accountAllowFrom[normalizedAccountId] = normalizedEntries;
+    }
+  }
+
   return {
-    version: CURRENT_VERSION,
-    allowFrom: allowFrom.map(trimText).filter(Boolean),
+    ...(requests.length > 0 ? { requests } : { requests: [] }),
+    ...(allowFrom.length > 0 ? { allowFrom } : {}),
+    ...(Object.keys(accountAllowFrom).length > 0 ? { accountAllowFrom } : {}),
   };
 }
 
@@ -192,17 +269,53 @@ async function ensureJsonFile(filePath: string, fallback: unknown): Promise<void
   }
 }
 
-async function readPairingRequests(filePath: string): Promise<PairingRequest[]> {
-  const fallback: PairingStore = {
-    version: CURRENT_VERSION,
-    requests: [],
-  };
-  const parsed = await readJsonFile(filePath, fallback);
-  const normalized = normalizePairingStore(parsed.value);
-  if (!normalized.version) {
-    return [];
+async function readPairingChannelState(
+  filePath: string,
+  channel: PairingChannel,
+): Promise<GatewayPairingChannelState> {
+  const gateway = await readGatewayConfigFile(filePath);
+  const pairing = normalizeGatewayPairingState(gateway.pairing);
+  const channelState = pairing.channels?.[safeChannelKey(channel)];
+  return normalizeGatewayPairingChannelState(channelState);
+}
+
+async function writePairingChannelState(
+  filePath: string,
+  channel: PairingChannel,
+  state: GatewayPairingChannelState,
+): Promise<void> {
+  const gateway = await readGatewayConfigFile(filePath);
+  const pairing = normalizeGatewayPairingState(gateway.pairing);
+  const channels: Record<string, GatewayPairingChannelState> = { ...(pairing.channels ?? {}) };
+  const safeChannel = safeChannelKey(channel);
+  const normalizedAccountAllowFrom: Record<string, string[]> = {};
+  for (const [accountId, rawEntries] of Object.entries(state.accountAllowFrom ?? {})) {
+    const normalizedAccountId = normalizePairingAccountId(accountId);
+    if (!normalizedAccountId) {
+      continue;
+    }
+    const normalizedEntries = normalizeAndDedup(Array.isArray(rawEntries) ? rawEntries : []);
+    if (normalizedEntries.length > 0) {
+      normalizedAccountAllowFrom[normalizedAccountId] = normalizedEntries;
+    }
   }
-  return normalized.requests;
+  const nextState = {
+    requests: normalizePairingRequestList(state.requests),
+    ...(state.allowFrom && normalizeAndDedup(state.allowFrom).length > 0 ? { allowFrom: normalizeAndDedup(state.allowFrom) } : {}),
+    ...(Object.keys(normalizedAccountAllowFrom).length > 0 ? { accountAllowFrom: normalizedAccountAllowFrom } : {}),
+  };
+  if (hasPairingChannelData(nextState)) {
+    channels[safeChannel] = nextState;
+  } else {
+    delete channels[safeChannel];
+  }
+  await writeGatewayConfigFile(filePath, {
+    ...gateway,
+    pairing: {
+      version: CURRENT_VERSION,
+      ...(Object.keys(channels).length > 0 ? { channels } : {}),
+    },
+  });
 }
 
 function parseTimestamp(raw: string): number {
@@ -287,16 +400,51 @@ function normalizeAndDedup(entries: string[]): string[] {
   return out;
 }
 
-function readAllowFromState(filePath: string): Promise<string[]> {
-  const fallback: AllowFromStore = { version: CURRENT_VERSION, allowFrom: [] };
-  return readJsonFile(filePath, fallback).then(({ value }) => normalizeAllowFromStore(value).allowFrom);
+async function readAllowFromState(
+  filePath: string,
+  channel: PairingChannel,
+  accountId?: string,
+): Promise<string[]> {
+  const pairing = await readPairingChannelState(filePath, channel);
+  if (!accountId) {
+    return normalizeAndDedup(pairing.allowFrom ?? []);
+  }
+  const normalizedAccountId = normalizePairingAccountId(accountId);
+  if (!normalizedAccountId) {
+    return [];
+  }
+  return normalizeAndDedup(pairing.accountAllowFrom?.[normalizedAccountId] ?? []);
 }
 
-async function writeAllowFromState(filePath: string, allowFrom: string[]): Promise<void> {
-  await writeJsonFile(filePath, {
-    version: CURRENT_VERSION,
-    allowFrom,
-  } satisfies AllowFromStore);
+async function writeAllowFromState(
+  filePath: string,
+  channel: PairingChannel,
+  nextAllowFrom: string[],
+  accountId?: string,
+): Promise<void> {
+  const normalizedAccountId = accountId ? normalizePairingAccountId(accountId) || undefined : undefined;
+  const pairing = await readPairingChannelState(filePath, channel);
+  const nextState: GatewayPairingChannelState = {
+    ...pairing,
+    ...(accountId ? {} : { allowFrom: normalizeAndDedup(nextAllowFrom) }),
+  };
+
+  if (accountId && normalizedAccountId) {
+    const accountAllowFrom = {
+      ...(pairing.accountAllowFrom ?? {}),
+    };
+    if (nextAllowFrom.length > 0) {
+      accountAllowFrom[normalizedAccountId] = normalizeAndDedup(nextAllowFrom);
+    } else {
+      delete accountAllowFrom[normalizedAccountId];
+      if (Object.keys(accountAllowFrom).length === 0) {
+        delete nextState.accountAllowFrom;
+      }
+    }
+    nextState.accountAllowFrom = Object.keys(accountAllowFrom).length > 0 ? accountAllowFrom : {};
+  }
+
+  await writePairingChannelState(filePath, channel, nextState);
 }
 
 async function updateAllowFromStoreEntry(
@@ -309,9 +457,12 @@ async function updateAllowFromStoreEntry(
   },
 ): Promise<{ changed: boolean; allowFrom: string[] }> {
   const env = params.env ?? process.env;
-  const filePath = resolveAllowFromPath(params.channel, env, params.accountId);
-  return withStoreLock(filePath, { version: CURRENT_VERSION, allowFrom: [] } satisfies AllowFromStore, async () => {
-    const current = normalizeAndDedup(await readAllowFromState(filePath));
+  const filePath = resolveGatewayConfigPath(env);
+  const normalizedAccountId = params.accountId
+    ? normalizePairingAccountId(params.accountId) || undefined
+    : undefined;
+  return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
+    const current = normalizeAndDedup(await readAllowFromState(filePath, params.channel, normalizedAccountId));
     const normalized = normalizeAllowFromEntry(params.entry);
     if (!normalized) {
       return { changed: false, allowFrom: current };
@@ -321,7 +472,7 @@ async function updateAllowFromStoreEntry(
       return { changed: false, allowFrom: current };
     }
     const uniqueNext = normalizeAndDedup(next);
-    await writeAllowFromState(filePath, uniqueNext);
+    await writeAllowFromState(filePath, params.channel, uniqueNext, normalizedAccountId);
     return { changed: true, allowFrom: uniqueNext };
   });
 }
@@ -331,13 +482,14 @@ export async function readChannelAllowFromStore(
   env: NodeJS.ProcessEnv = process.env,
   accountId?: string,
 ): Promise<string[]> {
+  const filePath = resolveGatewayConfigPath(env);
   const normalizedAccountId = normalizePairingAccountId(accountId);
   if (!normalizedAccountId) {
-    return readAllowFromState(resolveAllowFromPath(channel, env));
+    return readAllowFromState(filePath, channel);
   }
 
-  const scopedEntries = await readAllowFromState(resolveAllowFromPath(channel, env, normalizedAccountId));
-  const legacyEntries = await readAllowFromState(resolveAllowFromPath(channel, env));
+  const scopedEntries = await readAllowFromState(filePath, channel, normalizedAccountId);
+  const legacyEntries = await readAllowFromState(filePath, channel);
   return normalizeAndDedup([...scopedEntries, ...legacyEntries]);
 }
 
@@ -382,17 +534,18 @@ export async function listChannelPairingRequests(
   accountId?: string,
   limits?: PairingStoreLimits,
 ): Promise<PairingRequest[]> {
-  const filePath = resolvePairingPath(channel, env);
+  const filePath = resolveGatewayConfigPath(env);
   const { ttlMs, maxPending } = resolvePendingLimits(limits);
-  return withStoreLock(filePath, { version: CURRENT_VERSION, requests: [] } satisfies PairingStore, async () => {
+  return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
     const nowMs = Date.now();
-    const reqs = await readPairingRequests(filePath);
+    const currentState = await readPairingChannelState(filePath, channel);
+    const reqs = currentState.requests ?? [];
     const { requests: prunedExpired, removed: expiredRemoved } = pruneExpiredRequests(reqs, nowMs, ttlMs);
     const { requests: pruned, removed: cappedRemoved } = pruneExcessRequests(prunedExpired, maxPending);
 
     if (expiredRemoved || cappedRemoved) {
-      await writeJsonFile(filePath, {
-        version: CURRENT_VERSION,
+      await writePairingChannelState(filePath, channel, {
+        ...currentState,
         requests: pruned,
       });
     }
@@ -417,14 +570,14 @@ export async function upsertChannelPairingRequest(params: {
   limits?: PairingStoreLimits;
 }): Promise<{ code: string; created: boolean }> {
   const env = params.env ?? process.env;
-  const filePath = resolvePairingPath(params.channel, env);
+  const filePath = resolveGatewayConfigPath(env);
   const id = trimText(params.id);
   if (!id) {
     throw new Error("invalid pairing sender id");
   }
   const { ttlMs, maxPending } = resolvePendingLimits(params.limits);
 
-  return withStoreLock(filePath, { version: CURRENT_VERSION, requests: [] } satisfies PairingStore, async () => {
+  return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
     const now = new Date().toISOString();
     const nowMs = Date.now();
     const normalizedAccountId = normalizePairingAccountId(params.accountId);
@@ -437,7 +590,8 @@ export async function upsertChannelPairingRequest(params: {
       : {};
     const meta = normalizedAccountId ? { ...baseMeta, accountId: normalizedAccountId } : baseMeta;
 
-    let reqs = await readPairingRequests(filePath);
+    const currentState = await readPairingChannelState(filePath, params.channel);
+    let reqs = currentState.requests ?? [];
     const { requests: prunedExpired, removed: expiredRemoved } = pruneExpiredRequests(reqs, nowMs, ttlMs);
     reqs = prunedExpired;
 
@@ -461,8 +615,8 @@ export async function upsertChannelPairingRequest(params: {
           : {}),
       };
       const { requests: capped } = pruneExcessRequests(reqs, maxPending);
-      await writeJsonFile(filePath, {
-        version: CURRENT_VERSION,
+      await writePairingChannelState(filePath, params.channel, {
+        ...currentState,
         requests: capped,
       });
       return { code, created: false };
@@ -473,8 +627,8 @@ export async function upsertChannelPairingRequest(params: {
 
     if (maxPending > 0 && reqs.length >= maxPending) {
       if (expiredRemoved || cappedRemoved) {
-        await writeJsonFile(filePath, {
-          version: CURRENT_VERSION,
+        await writePairingChannelState(filePath, params.channel, {
+          ...currentState,
           requests: reqs,
         });
       }
@@ -489,8 +643,8 @@ export async function upsertChannelPairingRequest(params: {
       lastSeenAt: now,
       ...(Object.keys(meta).length > 0 ? { meta } : {}),
     };
-    await writeJsonFile(filePath, {
-      version: CURRENT_VERSION,
+    await writePairingChannelState(filePath, params.channel, {
+      ...currentState,
       requests: [...reqs, next],
     });
     return { code, created: true };
@@ -510,12 +664,13 @@ export async function approveChannelPairingCode(params: {
     return null;
   }
 
-  const filePath = resolvePairingPath(params.channel, env);
+  const filePath = resolveGatewayConfigPath(env);
   const { ttlMs } = resolvePendingLimits(params.limits);
 
-  return withStoreLock(filePath, { version: CURRENT_VERSION, requests: [] } satisfies PairingStore, async () => {
+  return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
     const nowMs = Date.now();
-    const reqs = await readPairingRequests(filePath);
+    const currentState = await readPairingChannelState(filePath, params.channel);
+    const reqs = currentState.requests ?? [];
     const { requests: pruned, removed } = pruneExpiredRequests(reqs, nowMs, ttlMs);
     const normalizedAccountId = normalizePairingAccountId(params.accountId);
 
@@ -524,8 +679,8 @@ export async function approveChannelPairingCode(params: {
     );
     if (idx < 0) {
       if (removed) {
-        await writeJsonFile(filePath, {
-          version: CURRENT_VERSION,
+        await writePairingChannelState(filePath, params.channel, {
+          ...currentState,
           requests: pruned,
         });
       }
@@ -537,17 +692,32 @@ export async function approveChannelPairingCode(params: {
       return null;
     }
     pruned.splice(idx, 1);
-    await writeJsonFile(filePath, {
-      version: CURRENT_VERSION,
+    const accountId = normalizedPairingAccountId(params.accountId) || (entry.meta?.accountId ? entry.meta.accountId : undefined);
+    const nextState: GatewayPairingChannelState = {
+      ...currentState,
       requests: pruned,
-    });
+    };
+    const normalizedEntry = normalizeAllowFromEntry(entry.id);
+    if (accountId && normalizedEntry) {
+      const normalizedScopedAccountId = normalizePairingAccountId(accountId);
+      const allowFromByAccount = {
+        ...(currentState.accountAllowFrom ?? {}),
+      };
+      const nextScoped = normalizeAndDedup([
+        ...(allowFromByAccount[normalizedScopedAccountId] ?? []),
+        normalizedEntry,
+      ]);
+      if (nextScoped.length > 0) {
+        allowFromByAccount[normalizedScopedAccountId] = nextScoped;
+      } else {
+        delete allowFromByAccount[normalizedScopedAccountId];
+      }
+      nextState.accountAllowFrom = allowFromByAccount;
+    } else if (normalizedEntry) {
+      nextState.allowFrom = normalizeAndDedup([...(currentState.allowFrom ?? []), normalizedEntry]);
+    }
 
-    await addChannelAllowFromStoreEntry({
-      channel: params.channel,
-      entry: entry.id,
-      accountId: normalizedPairingAccountId(params.accountId) || (entry.meta?.accountId ? entry.meta.accountId : undefined),
-      env,
-    });
+    await writePairingChannelState(filePath, params.channel, nextState);
 
     return { id: entry.id, entry };
   });

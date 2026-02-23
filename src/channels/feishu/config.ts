@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
-import type { PairingPolicy } from "../../pairing/pairing-store.js";
+import type { PairingPolicy, PairingRequest } from "../../pairing/pairing-store.js";
 import { DEFAULT_PAIRING_PENDING_MAX, DEFAULT_PAIRING_PENDING_TTL_MS } from "../../pairing/pairing-store.js";
 
 export interface FeishuGatewayConfig {
@@ -48,10 +48,20 @@ export interface FeishuGatewayConfigSources {
   pairingAllowFrom?: "default" | "override";
 }
 
+interface FeishuPairingChannelState {
+  requests: PairingRequest[];
+  allowFrom?: string[];
+  accountAllowFrom?: Record<string, string[]>;
+}
+
 export interface FeishuGatewayStorage {
   version: 1;
   default?: Partial<FeishuGatewayConfig>;
   channels?: Record<string, Partial<FeishuGatewayConfig>>;
+  pairing?: {
+    version: 1;
+    channels?: Record<string, FeishuPairingChannelState>;
+  };
   config?: {
     appId?: string;
     appSecret?: string;
@@ -109,6 +119,10 @@ const FEISHU_GATEWAY_CONFIG_KEYS: Array<keyof FeishuGatewayConfig> = [
 
 function hasOwn<T extends object>(value: T, key: keyof T): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function isRecord(raw: unknown): raw is Record<string, unknown> {
+  return !!raw && typeof raw === "object" && !Array.isArray(raw);
 }
 
 function resolveText(raw: string | undefined): string {
@@ -373,6 +387,50 @@ function normalizeStorageLayer(raw: unknown): Partial<FeishuGatewayConfig> {
   return normalizeStoredConfig(raw);
 }
 
+function normalizePairingState(
+  raw: unknown,
+): { version: 1; channels?: Record<string, FeishuPairingChannelState> } {
+  const fallback = { version: CURRENT_VERSION };
+  if (!isRecord(raw)) {
+    return fallback;
+  }
+  if (raw.version !== CURRENT_VERSION) {
+    return fallback;
+  }
+  const channelsCandidate = isRecord(raw.channels) ? raw.channels : undefined;
+  if (!channelsCandidate) {
+    return { version: CURRENT_VERSION };
+  }
+
+  const channels: Record<string, {
+    requests: PairingRequest[];
+    allowFrom?: string[];
+    accountAllowFrom?: Record<string, string[]>;
+  }> = {};
+  for (const [rawChannel, rawScope] of Object.entries(channelsCandidate)) {
+    const normalizedScope = isRecord(rawScope)
+      ? {
+          ...(Array.isArray(rawScope.requests) ? { requests: rawScope.requests as PairingRequest[] } : { requests: [] }),
+          ...(Array.isArray(rawScope.allowFrom) ? { allowFrom: rawScope.allowFrom as string[] } : {}),
+          ...(isRecord(rawScope.accountAllowFrom)
+            ? { accountAllowFrom: rawScope.accountAllowFrom as Record<string, string[]> }
+            : {}),
+        }
+      : { requests: [], allowFrom: [], accountAllowFrom: {} };
+    if (
+      normalizedScope.requests.length > 0
+      || (normalizedScope.allowFrom?.length ?? 0) > 0
+      || (Object.keys(normalizedScope.accountAllowFrom ?? {}).length > 0)
+    ) {
+      channels[rawChannel] = normalizedScope;
+    }
+  }
+  if (Object.keys(channels).length === 0) {
+    return { version: CURRENT_VERSION };
+  }
+  return { version: CURRENT_VERSION, channels };
+}
+
 function isFeishuGatewayStorage(raw: unknown): raw is FeishuGatewayStorage {
   if (!raw || typeof raw !== "object") {
     return false;
@@ -386,6 +444,17 @@ function isFeishuGatewayStorage(raw: unknown): raw is FeishuGatewayStorage {
   }
   if (candidate.channels !== undefined) {
     if (!candidate.channels || typeof candidate.channels !== "object") {
+      return false;
+    }
+  }
+  if (candidate.pairing !== undefined) {
+    if (candidate.pairing === null || typeof candidate.pairing !== "object") {
+      return false;
+    }
+    if (candidate.pairing.version !== CURRENT_VERSION) {
+      return false;
+    }
+    if (candidate.pairing.channels !== undefined && (candidate.pairing.channels === null || typeof candidate.pairing.channels !== "object")) {
       return false;
     }
   }
@@ -409,15 +478,17 @@ async function loadFeishuGatewayStore(): Promise<FeishuGatewayStorage | null> {
         }
       }
     }
-    const normalizedDefault = normalizeStorageLayer(parsed.default);
-    const normalizedLegacyConfig = normalizeStorageLayer(
+  const normalizedDefault = normalizeStorageLayer(parsed.default);
+  const normalizedLegacyConfig = normalizeStorageLayer(
       Object.prototype.hasOwnProperty.call(parsed, "config") ? parsed.config : undefined,
     );
+  const normalizedPairing = normalizePairingState(parsed.pairing);
 
     return {
       version: CURRENT_VERSION,
       ...(Object.keys(normalizedDefault).length > 0 ? { default: normalizedDefault } : {}),
       ...(Object.keys(normalizedChannels).length > 0 ? { channels: normalizedChannels } : {}),
+      ...(Object.keys(normalizedPairing).length > 0 ? { pairing: normalizedPairing } : {}),
       ...(Object.keys(normalizedLegacyConfig).length > 0 ? { config: normalizedLegacyConfig } : {}),
     };
   } catch (error) {
@@ -508,6 +579,7 @@ async function writeFeishuGatewayStore(store: FeishuGatewayStorage): Promise<voi
     version: CURRENT_VERSION,
     ...(store.default && { default: store.default }),
     ...(store.channels && { channels: store.channels }),
+    ...(store.pairing && { pairing: store.pairing }),
   };
   await fs.mkdir(resolveAuthDirectory(), { recursive: true });
   await fs.writeFile(resolveConfigPath(), JSON.stringify(next, null, 2), "utf-8");
@@ -523,6 +595,14 @@ async function clearOrDeleteFeishuGatewayStore(): Promise<void> {
     }
     throw error;
   }
+}
+
+function hasPairingData(pairing?: FeishuGatewayStorage["pairing"]): boolean {
+  return !!(
+    pairing?.channels
+    && isRecord(pairing.channels)
+    && Object.keys(pairing.channels).length > 0
+  );
 }
 
 function firstString(...values: Array<string | undefined>): string | undefined {
@@ -794,6 +874,10 @@ export async function persistFeishuGatewayConfig(
   }
 
   if (!store.default && Object.keys(store.channels ?? {}).length === 0) {
+    if (hasPairingData(store.pairing)) {
+      await writeFeishuGatewayStore(store);
+      return;
+    }
     await clearOrDeleteFeishuGatewayStore();
     return;
   }
@@ -819,6 +903,10 @@ export async function clearFeishuGatewayConfig(channel: string = DEFAULT_CHANNEL
   }
 
   if (!store.default && (!store.channels || Object.keys(store.channels).length === 0)) {
+    if (hasPairingData(store.pairing)) {
+      await writeFeishuGatewayStore(store);
+      return;
+    }
     await clearOrDeleteFeishuGatewayStore();
     return;
   }
