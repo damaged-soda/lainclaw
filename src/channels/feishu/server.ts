@@ -272,9 +272,10 @@ interface FeishuGatewayServerOptions {
 export async function runFeishuGatewayServer(
   overrides: Partial<FeishuGatewayConfig> = {},
   options: FeishuGatewayServerOptions = {},
+  channel = "feishu",
 ): Promise<void> {
-  const config = await resolveFeishuGatewayConfig(overrides);
-  await persistFeishuGatewayConfig(overrides);
+  const config = await resolveFeishuGatewayConfig(overrides, channel);
+  await persistFeishuGatewayConfig(overrides, channel);
 
   if (!config.appId || !config.appSecret) {
     throw new Error("Missing FEISHU_APP_ID or FEISHU_APP_SECRET for websocket mode");

@@ -81,8 +81,7 @@ lainclaw ask 你好，帮我总结一下
 
 ## 飞书（Feishu）网关接入（WS-only）
 
-当前的 `feishu` 通道仅支持 **WebSocket 长连接模式**（不使用 Webhook）。统一入口为 `gateway` 命令，  
-`feishu` 命令保留为兼容入口，等价于 `gateway --channel feishu`。
+当前的 `feishu` 通道仅支持 **WebSocket 长连接模式**（不使用 Webhook）。统一入口为 `gateway` 命令，默认通道为 `feishu`，可通过 `--channel` 覆盖（当前实现仍仅支持 `feishu`）。
 
 ### 启动方式
 
@@ -90,14 +89,36 @@ lainclaw ask 你好，帮我总结一下
 cd <repo_root>/src/lainclaw
 npm install
 npm run build
-npm start -- gateway --channel feishu --app-id <AppID> --app-secret <AppSecret>
+npm start -- gateway start --app-id <AppID> --app-secret <AppSecret>
 ```
 
-兼容启动：
+### 长期服务化（后台运行）
+
+在需要长期接入时，使用服务化子命令：
 
 ```bash
-npm start -- feishu --app-id <AppID> --app-secret <AppSecret>
+npm start -- gateway start --daemon --app-id <AppID> --app-secret <AppSecret>
+npm start -- gateway status --channel feishu
+npm start -- gateway stop --channel feishu
 ```
+
+也可以先把启动参数写入配置，再直接 `start`：
+
+```bash
+npm start -- gateway config set --app-id <AppID> --app-secret <AppSecret> --provider openai-codex
+npm start -- gateway config show
+npm start -- gateway config clear
+```
+
+`gateway config set` 会把参数持久化到 `~/.lainclaw/` 下的对应频道配置文件（默认 `~/.lainclaw/feishu-gateway.json`），后续 `gateway start` 可省略重复参数；`config show` 用于核对，`config clear` 用于重置。
+
+如果你需要手动按频道持久化（当前只支持 `feishu` 运行时启动）：
+
+```bash
+npm start -- gateway config set --channel feishu --app-id <AppID> --app-secret <AppSecret>
+```
+
+默认会在 `~/.lainclaw/service/feishu-gateway-service.json` 记录运行状态（`pid/state/log` 文件路径会按该目录下 `feishu-gateway-service.*` 生成）。如果传入自定义 `--pid-file` / `--log-file`，服务状态与日志都会使用该路径。
 
 可选参数：
 
@@ -112,32 +133,26 @@ npm start -- feishu --app-id <AppID> --app-secret <AppSecret>
 示例（10秒超时）：
 
 ```bash
-npm start -- gateway --channel feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
+npm start -- gateway start --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
 ```
 
 或使用模型配置启动（会让飞书消息走模型）：
 
 ```bash
-npm start -- gateway --channel feishu --provider openai-codex --with-tools --app-id <AppID> --app-secret <AppSecret>
+npm start -- gateway start --provider openai-codex --with-tools --app-id <AppID> --app-secret <AppSecret>
 ```
 
 也可以直接使用全局命令（安装过 `npm link` 后）：
 
 ```bash
-lainclaw gateway --channel feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
+lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
 ```
 
 也可同时启动心跳：
 
 ```bash
-lainclaw gateway --channel feishu --app-id <AppID> --app-secret <AppSecret> \
+lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
   --heartbeat-enabled --heartbeat-target-open-id <openId> --heartbeat-interval-ms 300000
-```
-
-兼容方式：
-
-```bash
-lainclaw feishu --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
 ```
 
 参数会优先来自命令行，未传入时会从环境变量回退，最后从 `~/.lainclaw/feishu-gateway.json` 读取上次配置（如存在）。

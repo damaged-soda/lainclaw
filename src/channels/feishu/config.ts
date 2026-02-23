@@ -46,6 +46,9 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 const FEISHU_GATEWAY_CONFIG_FILE = "feishu-gateway.json";
 const CURRENT_VERSION = 1 as const;
+const DEFAULT_CHANNEL = "feishu";
+
+const CONFIG_FILE_SUFFIX = "-gateway.json";
 
 function resolveText(raw: string | undefined): string {
   if (typeof raw !== "string") {
@@ -127,8 +130,19 @@ function firstToolAllow(
   return undefined;
 }
 
-function resolveConfigPath(): string {
-  return path.join(resolveAuthDirectory(), FEISHU_GATEWAY_CONFIG_FILE);
+function normalizeGatewayChannel(rawChannel: string | undefined): string {
+  const trimmed = (rawChannel || "").trim().toLowerCase();
+  if (!trimmed) {
+    return DEFAULT_CHANNEL;
+  }
+  return trimmed.replace(/[^a-z0-9._-]+/g, "-");
+}
+
+function resolveConfigPath(rawChannel: string = DEFAULT_CHANNEL): string {
+  const channel = normalizeGatewayChannel(rawChannel);
+  const fileName =
+    channel === DEFAULT_CHANNEL ? FEISHU_GATEWAY_CONFIG_FILE : `${channel}${CONFIG_FILE_SUFFIX}`;
+  return path.join(resolveAuthDirectory(), fileName);
 }
 
 function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
@@ -265,9 +279,11 @@ function firstNumber(...values: Array<number | string | undefined>): number | un
   return undefined;
 }
 
-export async function loadCachedFeishuGatewayConfig(): Promise<Partial<FeishuGatewayConfig>> {
+export async function loadCachedFeishuGatewayConfig(
+  channel: string = DEFAULT_CHANNEL,
+): Promise<Partial<FeishuGatewayConfig>> {
   try {
-    const file = await fs.readFile(resolveConfigPath(), "utf-8");
+    const file = await fs.readFile(resolveConfigPath(channel), "utf-8");
     const parsed = JSON.parse(file) as Partial<FeishuGatewayStorage>;
     if (!parsed || parsed.version !== CURRENT_VERSION || !parsed.config || typeof parsed.config !== "object") {
       return {};
@@ -311,13 +327,16 @@ function filterPersistable(updates: Partial<FeishuGatewayConfig>): Partial<Feish
   };
 }
 
-export async function persistFeishuGatewayConfig(updates: Partial<FeishuGatewayConfig>): Promise<void> {
+export async function persistFeishuGatewayConfig(
+  updates: Partial<FeishuGatewayConfig>,
+  channel: string = DEFAULT_CHANNEL,
+): Promise<void> {
   const filtered = filterPersistable(updates);
   if (Object.keys(filtered).length === 0) {
     return;
   }
 
-  const cached = await loadCachedFeishuGatewayConfig();
+  const cached = await loadCachedFeishuGatewayConfig(channel);
   const next: FeishuGatewayStorage = {
     version: CURRENT_VERSION,
     config: {
@@ -326,13 +345,26 @@ export async function persistFeishuGatewayConfig(updates: Partial<FeishuGatewayC
     },
   };
   await fs.mkdir(resolveAuthDirectory(), { recursive: true });
-  await fs.writeFile(resolveConfigPath(), JSON.stringify(next, null, 2), "utf-8");
+  const filePath = resolveConfigPath(channel);
+  await fs.writeFile(filePath, JSON.stringify(next, null, 2), "utf-8");
+}
+
+export async function clearFeishuGatewayConfig(channel: string = DEFAULT_CHANNEL): Promise<void> {
+  try {
+    await fs.unlink(resolveConfigPath(channel));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function resolveFeishuGatewayConfig(
   overrides: Partial<FeishuGatewayConfig> = {},
+  channel: string = DEFAULT_CHANNEL,
 ): Promise<FeishuGatewayConfig> {
-  const cached = await loadCachedFeishuGatewayConfig();
+  const cached = await loadCachedFeishuGatewayConfig(channel);
 
   const envAppId = resolveText(process.env.LAINCLAW_FEISHU_APP_ID || process.env.FEISHU_APP_ID);
   const envAppSecret = resolveText(process.env.LAINCLAW_FEISHU_APP_SECRET || process.env.FEISHU_APP_SECRET);
