@@ -10,6 +10,7 @@ import {
 } from '../heartbeat/store.js';
 import { runFeishuGatewayServer } from '../channels/feishu/server.js';
 import { sendFeishuTextMessage } from '../channels/feishu/outbound.js';
+import { runPairingCommand } from '../pairing/cli.js';
 import {
   clearFeishuGatewayConfig,
   loadCachedFeishuGatewayConfig,
@@ -42,6 +43,21 @@ import {
 
 const VERSION = '0.1.0';
 
+function normalizePairingPolicy(
+  raw: string | undefined,
+): FeishuGatewayConfig["pairingPolicy"] {
+  const normalized = raw?.trim().toLowerCase();
+  if (
+    normalized === "open"
+    || normalized === "allowlist"
+    || normalized === "pairing"
+    || normalized === "disabled"
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
+
 export function printUsage(): string {
   return [
     'Usage:',
@@ -49,12 +65,15 @@ export function printUsage(): string {
     '  lainclaw --version',
     '  lainclaw ask <input>',
     '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
-  '  lainclaw gateway start [--channel <channel>] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]',
+    '  lainclaw gateway start [--channel <channel>] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway status [--channel <channel>] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway stop [--channel <channel>] [--pid-file <path>]',
-  '  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--request-timeout-ms <ms>]',
-  '  lainclaw gateway config show [--channel <channel>]',
-  '  lainclaw gateway config clear [--channel <channel>]',
+    '  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]',
+    '  lainclaw gateway config show [--channel <channel>]',
+    '  lainclaw gateway config clear [--channel <channel>]',
+    '  lainclaw pairing list [--channel <channel>] [--account <accountId>] [--json]',
+    '  lainclaw pairing approve [--channel <channel>] [--account <accountId>] <code>',
+    '  lainclaw pairing revoke [--channel <channel>] [--account <accountId>] <entry>',
     '  lainclaw tools list',
     '  lainclaw tools info <name>',
     '  lainclaw tools invoke <name> --args <json>',
@@ -521,6 +540,10 @@ function parseFeishuServerArgs(argv: string[]): {
   heartbeatIntervalMs?: number;
   heartbeatTargetOpenId?: string;
   heartbeatSessionKey?: string;
+  pairingPolicy?: FeishuGatewayConfig["pairingPolicy"];
+  pairingPendingTtlMs?: number;
+  pairingPendingMax?: number;
+  pairingAllowFrom?: string[];
 } {
   let appId: string | undefined;
   let appSecret: string | undefined;
@@ -535,6 +558,10 @@ function parseFeishuServerArgs(argv: string[]): {
   let heartbeatIntervalMs: number | undefined;
   let heartbeatTargetOpenId: string | undefined;
   let heartbeatSessionKey: string | undefined;
+  let pairingPolicy: string | undefined;
+  let pairingPendingTtlMs: number | undefined;
+  let pairingPendingMax: number | undefined;
+  let pairingAllowFrom: string[] | undefined;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -599,6 +626,58 @@ function parseFeishuServerArgs(argv: string[]): {
 
     if (arg === '--memory' || arg === '--no-memory' || arg.startsWith('--memory=')) {
       memory = parseMemoryFlag(arg, i);
+      continue;
+    }
+
+    if (arg === '--pairing-policy') {
+      throwIfMissingValue('pairing-policy', i + 1, argv);
+      pairingPolicy = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--pairing-policy=')) {
+      pairingPolicy = arg.slice('--pairing-policy='.length);
+      continue;
+    }
+
+    if (arg === '--pairing-pending-ttl-ms') {
+      throwIfMissingValue('pairing-pending-ttl-ms', i + 1, argv);
+      pairingPendingTtlMs = parsePositiveIntValue(argv[i + 1], i + 1, '--pairing-pending-ttl-ms');
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--pairing-pending-ttl-ms=')) {
+      pairingPendingTtlMs = parsePositiveIntValue(
+        arg.slice('--pairing-pending-ttl-ms='.length),
+        i + 1,
+        '--pairing-pending-ttl-ms',
+      );
+      continue;
+    }
+
+    if (arg === '--pairing-pending-max') {
+      throwIfMissingValue('pairing-pending-max', i + 1, argv);
+      pairingPendingMax = parsePositiveIntValue(argv[i + 1], i + 1, '--pairing-pending-max');
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--pairing-pending-max=')) {
+      pairingPendingMax = parsePositiveIntValue(
+        arg.slice('--pairing-pending-max='.length),
+        i + 1,
+        '--pairing-pending-max',
+      );
+      continue;
+    }
+
+    if (arg === '--pairing-allow-from') {
+      throwIfMissingValue('pairing-allow-from', i + 1, argv);
+      pairingAllowFrom = parseCsvOption(argv[i + 1]);
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--pairing-allow-from=')) {
+      pairingAllowFrom = parseCsvOption(arg.slice('--pairing-allow-from='.length));
       continue;
     }
 
@@ -694,6 +773,10 @@ function parseFeishuServerArgs(argv: string[]): {
     heartbeatIntervalMs,
     heartbeatTargetOpenId: heartbeatTargetOpenId?.trim(),
     heartbeatSessionKey: heartbeatSessionKey?.trim(),
+    pairingPolicy: normalizePairingPolicy(pairingPolicy),
+    pairingPendingTtlMs,
+    pairingPendingMax,
+    pairingAllowFrom,
   };
 }
 
@@ -713,6 +796,10 @@ function parseGatewayArgs(argv: string[]): {
   heartbeatIntervalMs?: number;
   heartbeatTargetOpenId?: string;
   heartbeatSessionKey?: string;
+  pairingPolicy?: FeishuGatewayConfig["pairingPolicy"];
+  pairingPendingTtlMs?: number;
+  pairingPendingMax?: number;
+  pairingAllowFrom?: string[];
   daemon?: boolean;
   statePath?: string;
   logPath?: string;
@@ -1675,6 +1762,15 @@ export async function runCli(argv: string[]): Promise<number> {
     }
   }
 
+  if (command === 'pairing') {
+    try {
+      return await runPairingCommand(argv.slice(1));
+    } catch (error) {
+      console.error("ERROR:", String(error instanceof Error ? error.message : error));
+      return 1;
+    }
+  }
+
   if (command === 'heartbeat') {
     try {
       return await runHeartbeatCommand(argv);
@@ -1718,10 +1814,10 @@ export async function runCli(argv: string[]): Promise<number> {
       }
       console.error(
         "Usage:",
-        "  lainclaw gateway start [--channel <channel>] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]",
+        "  lainclaw gateway start [--channel <channel>] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]",
         "  lainclaw gateway status [--channel <channel>] [--pid-file <path>]",
         "  lainclaw gateway stop [--channel <channel>] [--pid-file <path>]",
-        "  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--request-timeout-ms <ms>]",
+        "  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]",
         "  lainclaw gateway config show [--channel <channel>]",
         "  lainclaw gateway config clear [--channel <channel>]",
       );

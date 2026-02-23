@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
+import type { PairingPolicy } from "../../pairing/pairing-store.js";
+import { DEFAULT_PAIRING_PENDING_MAX, DEFAULT_PAIRING_PENDING_TTL_MS } from "../../pairing/pairing-store.js";
 
 export interface FeishuGatewayConfig {
   appId?: string;
@@ -16,6 +18,10 @@ export interface FeishuGatewayConfig {
   heartbeatSessionKey?: string;
   toolAllow?: string[];
   toolMaxSteps?: number;
+  pairingPolicy?: PairingPolicy;
+  pairingPendingTtlMs?: number;
+  pairingPendingMax?: number;
+  pairingAllowFrom?: string[];
 }
 
 interface FeishuGatewayStorage {
@@ -34,6 +40,10 @@ interface FeishuGatewayStorage {
     heartbeatSessionKey?: string;
     toolAllow?: string[];
     toolMaxSteps?: number;
+    pairingPolicy?: PairingPolicy;
+    pairingPendingTtlMs?: number;
+    pairingPendingMax?: number;
+    pairingAllowFrom?: string[];
   };
 }
 
@@ -44,6 +54,7 @@ const DEFAULT_MEMORY = false;
 const DEFAULT_HEARTBEAT_ENABLED = false;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
+const DEFAULT_PAIRING_POLICY = "open" as PairingPolicy;
 const FEISHU_GATEWAY_CONFIG_FILE = "feishu-gateway.json";
 const CURRENT_VERSION = 1 as const;
 const DEFAULT_CHANNEL = "feishu";
@@ -65,6 +76,14 @@ function isValidProvider(raw: string | undefined): string | undefined {
   return undefined;
 }
 
+function isValidPairingPolicy(raw: string | undefined): PairingPolicy | undefined {
+  const normalized = resolveText(raw).toLowerCase();
+  if (["open", "allowlist", "pairing", "disabled"].includes(normalized)) {
+    return normalized as PairingPolicy;
+  }
+  return undefined;
+}
+
 function resolveBoolean(raw: string | undefined): boolean | undefined {
   const normalized = resolveText(raw).toLowerCase();
   if (!normalized) {
@@ -77,6 +96,25 @@ function resolveBoolean(raw: string | undefined): boolean | undefined {
     return false;
   }
   return undefined;
+}
+
+function normalizeAllowFrom(raw: string[] | undefined): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((entry) => resolveText(String(entry)).toLowerCase())
+    .filter((entry) => entry.length > 0);
+}
+
+function normalizeAllowFromRaw(raw: unknown): string[] {
+  if (typeof raw === "string") {
+    return parseToolAllowRaw(raw) ?? [];
+  }
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return normalizeAllowFrom(raw);
 }
 
 function parseToolAllowRaw(raw: string | undefined): string[] | undefined {
@@ -195,6 +233,18 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
     typeof source.heartbeatSessionKey === "string" ? resolveText(source.heartbeatSessionKey) : undefined;
   const toolAllow = normalizeToolAllow(source.toolAllow as unknown);
   const toolMaxSteps = parseToolMaxStepsRaw(source.toolMaxSteps as unknown);
+  const pairingPolicy = isValidPairingPolicy(
+    typeof source.pairingPolicy === "string" ? source.pairingPolicy : undefined,
+  );
+  const pairingPendingTtlMs =
+    typeof source.pairingPendingTtlMs === "number" && Number.isFinite(source.pairingPendingTtlMs)
+      ? source.pairingPendingTtlMs
+      : undefined;
+  const pairingPendingMax =
+    typeof source.pairingPendingMax === "number" && Number.isFinite(source.pairingPendingMax)
+      ? source.pairingPendingMax
+      : undefined;
+  const pairingAllowFrom = normalizeAllowFromRaw(source.pairingAllowFrom as unknown);
 
   const normalized: Partial<FeishuGatewayConfig> = {};
   if (appId) {
@@ -232,6 +282,18 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
   }
   if (typeof toolMaxSteps === "number" && Number.isFinite(toolMaxSteps) && toolMaxSteps > 0) {
     normalized.toolMaxSteps = toolMaxSteps;
+  }
+  if (pairingPolicy) {
+    normalized.pairingPolicy = pairingPolicy;
+  }
+  if (typeof pairingPendingTtlMs === "number" && pairingPendingTtlMs > 0) {
+    normalized.pairingPendingTtlMs = pairingPendingTtlMs;
+  }
+  if (typeof pairingPendingMax === "number" && pairingPendingMax > 0) {
+    normalized.pairingPendingMax = pairingPendingMax;
+  }
+  if (pairingAllowFrom.length > 0) {
+    normalized.pairingAllowFrom = pairingAllowFrom;
   }
   if (typeof requestTimeoutMs === "number" && requestTimeoutMs > 0) {
     normalized.requestTimeoutMs = requestTimeoutMs;
@@ -324,6 +386,24 @@ function filterPersistable(updates: Partial<FeishuGatewayConfig>): Partial<Feish
     ...(typeof updates.heartbeatSessionKey === "string" && updates.heartbeatSessionKey.trim()
       ? { heartbeatSessionKey: updates.heartbeatSessionKey.trim() }
       : {}),
+    ...(typeof updates.pairingPolicy === "string"
+      ? { pairingPolicy: isValidPairingPolicy(updates.pairingPolicy) }
+      : {}),
+    ...(typeof updates.pairingPendingTtlMs === "number"
+      && Number.isFinite(updates.pairingPendingTtlMs)
+      && updates.pairingPendingTtlMs > 0
+      ? { pairingPendingTtlMs: updates.pairingPendingTtlMs }
+      : {}),
+    ...(typeof updates.pairingPendingMax === "number"
+      && Number.isFinite(updates.pairingPendingMax)
+      && updates.pairingPendingMax > 0
+      ? { pairingPendingMax: updates.pairingPendingMax }
+      : {}),
+    ...(Array.isArray(updates.pairingAllowFrom)
+      ? {
+          pairingAllowFrom: normalizeAllowFrom(updates.pairingAllowFrom),
+        }
+      : {}),
   };
 }
 
@@ -393,6 +473,18 @@ export async function resolveFeishuGatewayConfig(
   const envHeartbeatSessionKey = resolveText(
     process.env.LAINCLAW_FEISHU_HEARTBEAT_SESSION_KEY || process.env.FEISHU_HEARTBEAT_SESSION_KEY,
   );
+  const envPairingPolicy = isValidPairingPolicy(
+    process.env.LAINCLAW_FEISHU_PAIRING_POLICY || process.env.FEISHU_PAIRING_POLICY,
+  );
+  const envPairingPendingTtlMs = resolveText(
+    process.env.LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS || process.env.FEISHU_PAIRING_PENDING_TTL_MS,
+  );
+  const envPairingPendingMax = resolveText(
+    process.env.LAINCLAW_FEISHU_PAIRING_PENDING_MAX || process.env.FEISHU_PAIRING_PENDING_MAX,
+  );
+  const envPairingAllowFrom = parseToolAllowRaw(
+    process.env.LAINCLAW_FEISHU_PAIRING_ALLOW_FROM || process.env.FEISHU_PAIRING_ALLOW_FROM,
+  );
 
   return {
     appId: firstString(overrides.appId, cached.appId, envAppId),
@@ -441,5 +533,23 @@ export async function resolveFeishuGatewayConfig(
     ),
     toolAllow: firstToolAllow(overrides.toolAllow, cached.toolAllow, envToolAllow),
     toolMaxSteps: firstNumber(overrides.toolMaxSteps, cached.toolMaxSteps, envToolMaxSteps) || undefined,
+    pairingPolicy:
+      isValidPairingPolicy(overrides.pairingPolicy)
+      || isValidPairingPolicy(cached.pairingPolicy)
+      || envPairingPolicy
+      || DEFAULT_PAIRING_POLICY,
+    pairingPendingTtlMs:
+      firstNumber(
+        overrides.pairingPendingTtlMs,
+        cached.pairingPendingTtlMs,
+        envPairingPendingTtlMs,
+      ) || DEFAULT_PAIRING_PENDING_TTL_MS,
+    pairingPendingMax:
+      firstNumber(
+        overrides.pairingPendingMax,
+        cached.pairingPendingMax,
+        envPairingPendingMax,
+      ) || DEFAULT_PAIRING_PENDING_MAX,
+    pairingAllowFrom: firstToolAllow(overrides.pairingAllowFrom, cached.pairingAllowFrom, envPairingAllowFrom),
   };
 }

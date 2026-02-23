@@ -11,7 +11,8 @@
   "scripts": {
     "start": "node dist/index.js",
     "build": "rm -rf dist && tsc && chmod +x dist/index.js",
-    "bootstrap": "npm run build && npm link"
+    "bootstrap": "npm run build && npm link",
+    "test": "npm run build && node --test dist/test/pairing-store.test.js"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.59.0",

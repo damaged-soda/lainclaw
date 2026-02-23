@@ -6,6 +6,12 @@ import {
   type FeishuGatewayConfig,
   persistFeishuGatewayConfig,
 } from "./config.js";
+import {
+  buildPairingQueueFullReply,
+  buildPairingReply,
+} from "../../pairing/pairing-messages.js";
+import { readChannelAllowFromStore, upsertChannelPairingRequest } from "../../pairing/pairing-store.js";
+import { resolvePairingIdLabel } from "../../pairing/pairing-labels.js";
 
 interface FeishuWsMessageEvent {
   message?: {
@@ -40,9 +46,103 @@ interface FeishuInboundMessage {
 const FEISHU_DM_CHAT_TYPES = new Set(["p2p", "private", "direct"]);
 const EVENT_ID_TTL_MS = 10 * 60 * 1000;
 const FEISHU_TEXT_MESSAGE_TYPE = "text";
+const FEISHU_DENY_MESSAGE = "当前策略不允许当前用户发起会话，请联系管理员配置后重试。";
 
 const EVENT_HISTORY = new Map<string, number>();
 const REPLY_TIMEOUT_MS = 10000;
+
+function isMatchingPairingPolicy(value: string | undefined): value is FeishuGatewayConfig["pairingPolicy"] {
+  return value === "open" || value === "allowlist" || value === "pairing" || value === "disabled";
+}
+
+function normalizeAllowFrom(values: unknown): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values
+    .map((entry) => String(entry).trim())
+    .map((entry) => entry.toLowerCase())
+    .filter((entry) => entry.length > 0);
+}
+
+function isWildcardAllowFrom(allowFrom: string[]): boolean {
+  return allowFrom.includes("*");
+}
+
+function resolvePairingPolicy(policy: string | undefined, configPolicy: FeishuGatewayConfig["pairingPolicy"]): string {
+  if (isMatchingPairingPolicy(policy)) {
+    return policy;
+  }
+  if (isMatchingPairingPolicy(configPolicy)) {
+    return configPolicy;
+  }
+  return "open";
+}
+
+function buildDeniedReply() {
+  return FEISHU_DENY_MESSAGE;
+}
+
+async function assertFeishuDmAllowed(params: {
+  openId: string;
+  config: FeishuGatewayConfig;
+}): Promise<boolean> {
+  const { openId, config } = params;
+  const policy = resolvePairingPolicy(undefined, config.pairingPolicy);
+
+  if (policy === "open") {
+    return true;
+  }
+  if (policy === "disabled") {
+    return false;
+  }
+
+  const fileAllowFrom = await readChannelAllowFromStore("feishu");
+  const configAllowFrom = normalizeAllowFrom(config.pairingAllowFrom);
+  const allowFrom = Array.from(new Set([...configAllowFrom, ...fileAllowFrom.map((entry) => String(entry).toLowerCase())]));
+  if (isWildcardAllowFrom(allowFrom) && allowFrom.length > 0) {
+    return true;
+  }
+  const normalizedOpenId = openId.trim().toLowerCase();
+  if (!normalizedOpenId) {
+    return false;
+  }
+  if (allowFrom.includes(normalizedOpenId)) {
+    return true;
+  }
+
+  if (policy === "allowlist") {
+    return false;
+  }
+
+  const reply = await upsertChannelPairingRequest({
+    channel: "feishu",
+    id: normalizedOpenId,
+    limits: {
+      ttlMs: config.pairingPendingTtlMs,
+      maxPending: config.pairingPendingMax,
+    },
+  });
+  if (!reply.code) {
+    await sendFeishuTextMessage(config, {
+      openId,
+      text: buildPairingQueueFullReply(),
+    });
+    return false;
+  }
+  if (!reply.created) {
+    return false;
+  }
+  await sendFeishuTextMessage(config, {
+    text: buildPairingReply({
+      channel: "feishu",
+      idLine: `${resolvePairingIdLabel()}: ${openId}`,
+      code: reply.code,
+    }),
+    openId,
+  });
+  return false;
+}
 
 function createRequestId() {
   const now = Date.now();
@@ -219,6 +319,20 @@ async function handleWsPayload(
     }
 
     if (inbound.eventId && isReplay(inbound.eventId, EVENT_ID_TTL_MS)) {
+      return;
+    }
+
+    const allowed = await assertFeishuDmAllowed({
+      openId: inbound.openId,
+      config,
+    });
+    if (!allowed) {
+      if (config.pairingPolicy === "allowlist" || config.pairingPolicy === "disabled") {
+        await sendFeishuTextMessage(config, {
+          openId: inbound.openId,
+          text: buildDeniedReply(),
+        });
+      }
       return;
     }
 

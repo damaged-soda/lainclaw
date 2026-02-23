@@ -170,6 +170,39 @@ lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
 - `LAINCLAW_FEISHU_HEARTBEAT_INTERVAL_MS` / `FEISHU_HEARTBEAT_INTERVAL_MS`
 - `LAINCLAW_FEISHU_HEARTBEAT_TARGET_OPEN_ID` / `FEISHU_HEARTBEAT_TARGET_OPEN_ID`
 - `LAINCLAW_FEISHU_HEARTBEAT_SESSION_KEY` / `FEISHU_HEARTBEAT_SESSION_KEY`
+- `LAINCLAW_FEISHU_PAIRING_POLICY` / `FEISHU_PAIRING_POLICY`：`open|allowlist|pairing|disabled`（默认 `open`）
+- `LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS` / `FEISHU_PAIRING_PENDING_TTL_MS`：待审批请求 TTL（毫秒）
+- `LAINCLAW_FEISHU_PAIRING_PENDING_MAX` / `FEISHU_PAIRING_PENDING_MAX`：待审批最大未处理条数
+- `LAINCLAW_FEISHU_PAIRING_ALLOW_FROM` / `FEISHU_PAIRING_ALLOW_FROM`：默认配对放行列表（逗号分隔，`*` 表示全放行）
+
+### 配对鉴权（Pairing）使用说明
+
+飞书网关支持四种策略：
+
+- `open`（默认）：不拦截 DM。
+- `allowlist`：仅放行 `pairingAllowFrom` 白名单（`*` 表示全放行）。
+- `pairing`：未命中白名单则进入待审批流程，用户收到配对码后可由管理员批准。
+- `disabled`：拒绝所有 DM。
+
+网关启动示例：
+
+```bash
+lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
+  --pairing-policy pairing \
+  --pairing-allow-from ou_admin_001,ou_admin_002 \
+  --pairing-pending-ttl-ms 5400000 \
+  --pairing-pending-max 5
+
+lainclaw gateway start --pairing-policy allowlist --pairing-allow-from "ou_admin_001,ou_admin_002"
+```
+
+配对管理命令：
+
+```bash
+lainclaw pairing list [--channel feishu] [--json]
+lainclaw pairing approve [--channel feishu] <code> [--account <accountId>]
+lainclaw pairing revoke [--channel feishu] <openIdOrUserId> [--account <accountId>]
+```
 
 ## 心跳（Heartbeat）规则命令
 
