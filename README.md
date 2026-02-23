@@ -174,6 +174,7 @@ lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
 - `LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS` / `FEISHU_PAIRING_PENDING_TTL_MS`：待审批请求 TTL（毫秒）
 - `LAINCLAW_FEISHU_PAIRING_PENDING_MAX` / `FEISHU_PAIRING_PENDING_MAX`：待审批最大未处理条数
 - `LAINCLAW_FEISHU_PAIRING_ALLOW_FROM` / `FEISHU_PAIRING_ALLOW_FROM`：默认配对放行列表（逗号分隔，`*` 表示全放行）
+- `LAINCLAW_CODEX_PREFIX_RESPONSE`：全局调试开关，值为 `true/1/yes/on` 时在 openai-codex 文本结果前缀附加 `[openai-codex:<profileId>]`；默认关闭时不带前缀。
 
 ### 配对鉴权（Pairing）使用说明
 

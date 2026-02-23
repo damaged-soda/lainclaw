@@ -47,6 +47,21 @@ function extractTextFromResponse(response: { content?: unknown[] }): string {
   return JSON.stringify(response);
 }
 
+function resolveBooleanFlag(raw: string | undefined): boolean {
+  if (typeof raw !== "string") {
+    return false;
+  }
+  const value = raw.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function shouldPrefixResponse(profileId: string): string {
+  if (!resolveBooleanFlag(process.env.LAINCLAW_CODEX_PREFIX_RESPONSE)) {
+    return "";
+  }
+  return `[openai-codex:${profileId}] `;
+}
+
 function parseToolArguments(raw: unknown): unknown {
   if (typeof raw === "string") {
     try {
@@ -171,11 +186,13 @@ export async function runCodexAdapter(
     { apiKey },
   );
   const { canonicalByCodexName } = createToolNameMap(context.tools ?? []);
+  const responseText = extractTextFromResponse(response);
+  const responsePrefix = shouldPrefixResponse(profile.id);
 
   return {
     route: "codex",
     stage: `adapter.codex.${profile.id}`,
-    result: `[openai-codex:${profile.id}] ${extractTextFromResponse(response)}`,
+    result: `${responsePrefix}${responseText}`,
     provider: profile.provider,
     profileId: profile.id,
     toolCalls: parseToolCallsFromResponse(response, canonicalByCodexName),
