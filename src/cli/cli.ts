@@ -9,6 +9,7 @@ import {
   setHeartbeatRuleEnabled,
 } from '../heartbeat/store.js';
 import { runFeishuGatewayServer } from '../channels/feishu/server.js';
+import { runLocalGatewayServer, type LocalGatewayOverrides } from '../channels/local/server.js';
 import { sendFeishuTextMessage } from '../channels/feishu/outbound.js';
 import { runPairingCommand } from '../pairing/cli.js';
 import {
@@ -66,7 +67,7 @@ export function printUsage(): string {
     '  lainclaw --version',
     '  lainclaw ask <input>',
     '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
-    '  lainclaw gateway start [--channel <channel>] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]',
+    '  lainclaw gateway start [--channel <feishu|local>] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway status [--channel <channel>] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway stop [--channel <channel>] [--pid-file <path>]',
     '  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]',
@@ -783,8 +784,30 @@ function parseFeishuServerArgs(argv: string[]): {
   };
 }
 
+function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
+  const parsed = parseHeartbeatModelArgs(argv, true);
+  if (parsed.positional.length > 0) {
+    throw new Error(`Unknown argument for gateway start: ${parsed.positional[0]}`);
+  }
+
+  if (parsed.provider && parsed.provider !== "openai-codex") {
+    throw new Error(`Unsupported provider: ${parsed.provider}`);
+  }
+
+  return {
+    ...(parsed.provider ? { provider: parsed.provider } : {}),
+    ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
+    ...(typeof parsed.withTools === "boolean" ? { withTools: parsed.withTools } : {}),
+    ...(typeof parsed.memory === "boolean" ? { memory: parsed.memory } : {}),
+    ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
+    ...(typeof parsed.toolMaxSteps === "number" ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
+  };
+}
+
+type GatewayChannel = "feishu" | "local";
+
 function parseGatewayArgs(argv: string[]): {
-  channel: string;
+  channel: GatewayChannel;
   action: "start" | "status" | "stop";
   appId?: string;
   appSecret?: string;
@@ -809,7 +832,7 @@ function parseGatewayArgs(argv: string[]): {
   serviceChild?: boolean;
   serviceArgv: string[];
 } {
-  let channel = "feishu";
+  let channel: GatewayChannel = "feishu";
   let action: "start" | "status" | "stop" = "start";
   let daemon = false;
   let statePath: string | undefined;
@@ -879,20 +902,20 @@ function parseGatewayArgs(argv: string[]): {
     if (arg === '--channel') {
       throwIfMissingValue('channel', i + 1, argv);
       const next = argv[i + 1].trim().toLowerCase();
-      if (next !== "feishu") {
+      if (next !== "feishu" && next !== "local") {
         throw new Error(`Unsupported channel: ${argv[i + 1]}`);
       }
-      channel = "feishu";
+      channel = next;
       serviceArgv.push(arg, argv[i + 1]);
       i += 1;
       continue;
     }
     if (arg.startsWith('--channel=')) {
       const next = arg.slice('--channel='.length).trim().toLowerCase();
-      if (next !== "feishu") {
+      if (next !== "feishu" && next !== "local") {
         throw new Error(`Unsupported channel: ${arg.slice('--channel='.length)}`);
       }
-      channel = "feishu";
+      channel = next;
       serviceArgv.push(arg);
       continue;
     }
@@ -917,6 +940,20 @@ function parseGatewayArgs(argv: string[]): {
   }
 
   if (action === "start") {
+    if (channel === "local") {
+      const localConfig = parseLocalGatewayArgs(channelAwareArgs);
+      return {
+        channel,
+        action,
+        ...localConfig,
+        daemon,
+        statePath,
+        logPath,
+        serviceChild,
+        serviceArgv,
+      };
+    }
+
     const feishuConfig = parseFeishuServerArgs(channelAwareArgs);
     return {
       channel,
@@ -1360,7 +1397,7 @@ function buildHeartbeatMessage(ruleText: string, triggerMessage: string): string
 }
 
 interface GatewayServiceRunContext {
-  channel: "feishu";
+  channel: GatewayChannel;
   action?: "start" | "status" | "stop";
   daemon?: boolean;
   statePath?: string;
@@ -1703,6 +1740,74 @@ async function runFeishuGatewayWithHeartbeat(
   }
 }
 
+async function runLocalGatewayService(
+  overrides: Partial<LocalGatewayOverrides>,
+  serviceContext: GatewayServiceRunContext = {
+    channel: "local",
+    serviceArgv: [],
+  },
+): Promise<void> {
+  if (serviceContext.serviceChild) {
+    await runLocalGatewayServer(overrides);
+    return;
+  }
+
+  const paths = resolveGatewayServicePaths(serviceContext.channel, {
+    statePath: serviceContext.statePath,
+    logPath: serviceContext.logPath,
+  });
+
+  if (serviceContext.action === "status") {
+    await printGatewayServiceStatus(paths, serviceContext.channel);
+    return;
+  }
+
+  if (serviceContext.action === "stop") {
+    const snapshot = await resolveGatewayServiceState(paths);
+    if (!snapshot.state || !snapshot.running) {
+      console.log("gateway service already stopped");
+      if (snapshot.state) {
+        await clearGatewayServiceState(paths.statePath);
+      }
+      return;
+    }
+    await stopGatewayServiceIfRunning(paths, snapshot.state);
+    console.log(`gateway service stopped (pid=${snapshot.state.pid})`);
+    return;
+  }
+
+  if (serviceContext.daemon) {
+    const snapshot = await resolveGatewayServiceState(paths);
+    if (snapshot.running) {
+      throw new Error(`Gateway already running (pid=${snapshot.state?.pid})`);
+    }
+
+    const daemonArgv = ["gateway", "start", ...serviceContext.serviceArgv, "--service-child"];
+    const scriptPath = process.argv[1];
+    if (!scriptPath) {
+      throw new Error("Cannot locate service entrypoint");
+    }
+
+    const daemonPid = await spawnGatewayServiceProcess(scriptPath, daemonArgv, paths);
+    const daemonState: GatewayServiceState = {
+      channel: serviceContext.channel,
+      pid: daemonPid,
+      startedAt: new Date().toISOString(),
+      command: `${process.execPath} ${scriptPath} ${daemonArgv.join(" ")}`.trim(),
+      statePath: paths.statePath,
+      logPath: paths.logPath,
+      argv: [scriptPath, ...daemonArgv],
+    };
+    await writeGatewayServiceState(daemonState);
+    console.log(`gateway service started as daemon: pid=${daemonPid}`);
+    console.log(`status: ${paths.statePath}`);
+    console.log(`log: ${paths.logPath}`);
+    return;
+  }
+
+  await runLocalGatewayServer(overrides);
+}
+
 export async function runCli(argv: string[]): Promise<number> {
   const command = argv[0];
 
@@ -1797,20 +1902,35 @@ export async function runCli(argv: string[]): Promise<number> {
         return 0;
       }
       const options = parseGatewayArgs(argv.slice(1));
-      const { channel, action, serviceArgv, ...feishuOptions } = options;
-      if (channel !== "feishu") {
-        throw new Error(`Unsupported channel: ${channel}`);
+      const { channel, action, serviceArgv, ...gatewayOptions } = options;
+      if (channel === "feishu") {
+        await runFeishuGatewayWithHeartbeat(gatewayOptions, makeFeishuFailureHint, {
+          channel,
+          action,
+          serviceChild: options.serviceChild,
+          daemon: options.daemon,
+          statePath: options.statePath,
+          logPath: options.logPath,
+          serviceArgv,
+        });
+        return 0;
       }
-      await runFeishuGatewayWithHeartbeat(feishuOptions, makeFeishuFailureHint, {
-        channel,
-        action,
-        serviceChild: options.serviceChild,
-        daemon: options.daemon,
-        statePath: options.statePath,
-        logPath: options.logPath,
-        serviceArgv,
-      });
-      return 0;
+
+      if (channel === "local") {
+        await runLocalGatewayService(gatewayOptions, {
+          channel,
+          action,
+          serviceChild: options.serviceChild,
+          daemon: options.daemon,
+          statePath: options.statePath,
+          logPath: options.logPath,
+          serviceArgv,
+        });
+        return 0;
+      }
+
+      throw new Error(`Unsupported channel: ${channel}`);
+
     } catch (error) {
       if (error instanceof ValidationError) {
         console.error(`[${error.code}] ${error.message}`);
