@@ -5,6 +5,11 @@ import type { PairingPolicy } from "../../pairing/pairing-store.js";
 import { DEFAULT_PAIRING_PENDING_MAX, DEFAULT_PAIRING_PENDING_TTL_MS } from "../../pairing/pairing-store.js";
 
 export interface FeishuGatewayConfig {
+  /**
+   * Gateway-level runtime config for Feishu channel invocation.
+   * `channel` is only used to select which cache file stores this config;
+   * it is not a nested field inside FeishuGatewayConfig.
+   */
   appId?: string;
   appSecret?: string;
   requestTimeoutMs: number;
@@ -55,6 +60,8 @@ const DEFAULT_HEARTBEAT_ENABLED = false;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 const DEFAULT_PAIRING_POLICY = "open" as PairingPolicy;
+// Channel name is only a namespace for persisted configuration storage.
+// Default namespace `feishu` resolves to `feishu-gateway.json`.
 const FEISHU_GATEWAY_CONFIG_FILE = "feishu-gateway.json";
 const CURRENT_VERSION = 1 as const;
 const DEFAULT_CHANNEL = "feishu";
@@ -181,6 +188,10 @@ function resolveConfigPath(rawChannel: string = DEFAULT_CHANNEL): string {
   const fileName =
     channel === DEFAULT_CHANNEL ? FEISHU_GATEWAY_CONFIG_FILE : `${channel}${CONFIG_FILE_SUFFIX}`;
   return path.join(resolveAuthDirectory(), fileName);
+}
+
+export function resolveFeishuGatewayConfigPath(rawChannel: string = DEFAULT_CHANNEL): string {
+  return resolveConfigPath(rawChannel);
 }
 
 function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {

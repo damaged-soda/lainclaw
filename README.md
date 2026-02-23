@@ -110,7 +110,7 @@ npm start -- gateway config show
 npm start -- gateway config clear
 ```
 
-`gateway config set` 会把参数持久化到 `~/.lainclaw/` 下的对应频道配置文件（默认 `~/.lainclaw/feishu-gateway.json`），后续 `gateway start` 可省略重复参数；`config show` 用于核对，`config clear` 用于重置。
+`gateway config set` 会把参数持久化到 `~/.lainclaw/` 下的频道分片网关配置文件（当前默认命名空间 `feishu` 对应 `~/.lainclaw/feishu-gateway.json`，每个通道按 `~/.lainclaw/<channel>-gateway.json` 分片）；`provider` 与 `app-id/app-secret`、工具/配对/心跳配置同属于该文件内的网关级字段。后续 `gateway start` 可省略重复参数；`config show` 用于核对，`config clear` 用于重置。
 
 如果你需要手动按频道持久化（当前只支持 `feishu` 运行时启动）：
 
@@ -155,7 +155,7 @@ lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
   --heartbeat-enabled --heartbeat-target-open-id <openId> --heartbeat-interval-ms 300000
 ```
 
-参数会优先来自命令行，未传入时会从环境变量回退，最后从 `~/.lainclaw/feishu-gateway.json` 读取上次配置（如存在）。
+参数会优先来自命令行，未传入时会从环境变量回退，最后从当前频道对应分片文件（默认 `~/.lainclaw/feishu-gateway.json`）读取上次配置（如存在）。
 
 - `LAINCLAW_FEISHU_APP_ID` / `FEISHU_APP_ID`
 - `LAINCLAW_FEISHU_APP_SECRET` / `FEISHU_APP_SECRET`

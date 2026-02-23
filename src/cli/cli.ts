@@ -15,6 +15,7 @@ import {
   clearFeishuGatewayConfig,
   loadCachedFeishuGatewayConfig,
   persistFeishuGatewayConfig,
+  resolveFeishuGatewayConfigPath,
   resolveFeishuGatewayConfig,
   type FeishuGatewayConfig,
 } from '../channels/feishu/config.js';
@@ -233,11 +234,12 @@ function isPlaceholderLikely(raw: string | undefined): boolean {
 }
 
 function validateFeishuGatewayCredentials(config: { appId?: string; appSecret?: string }): void {
+  const configPath = resolveFeishuGatewayConfigPath("feishu");
   if (!config.appId || !config.appSecret) {
     throw new Error(
       "Missing FEISHU_APP_ID or FEISHU_APP_SECRET for websocket mode. "
       + "请执行 `lainclaw gateway start --app-id <真实AppID> --app-secret <真实AppSecret>` "
-      + "或先清理历史配置：`rm ~/.lainclaw/feishu-gateway.json` 后重试。",
+      + `或清理当前频道网关缓存后重试：` + "`rm " + `${configPath}` + "`。",
     );
   }
 
@@ -245,7 +247,8 @@ function validateFeishuGatewayCredentials(config: { appId?: string; appSecret?: 
     throw new Error(
       `Detected invalid/placeholder Feishu credentials (appId=${maskCredential(config.appId)}, `
       + `appSecret=${maskCredential(config.appSecret)}). `
-      + "请确认使用真实飞书应用凭据，再执行 `rm ~/.lainclaw/feishu-gateway.json` 清理旧缓存并重启 gateway。",
+      + "请确认使用真实飞书应用凭据，再清理当前频道网关缓存并重启 gateway。"
+      + `（路径：${configPath}）`,
     );
   }
 }
@@ -1038,9 +1041,11 @@ async function runGatewayConfigCommand(argv: string[]): Promise<void> {
   }
 
   const cached = await loadCachedFeishuGatewayConfig(parsed.channel);
+  const configPath = resolveFeishuGatewayConfigPath(parsed.channel);
   const masked = {
+    channel: parsed.channel,
+    configPath,
     ...cached,
-    ...(parsed.channel !== "feishu" ? { channel: parsed.channel } : {}),
     ...(cached.appId ? { appId: maskConfigValue(cached.appId) } : {}),
     ...(cached.appSecret ? { appSecret: maskConfigValue(cached.appSecret) } : {}),
   };
