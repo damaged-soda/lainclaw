@@ -41,6 +41,9 @@ const MEMORY_SUMMARY_MESSAGE_LIMIT = 16;
 const MEMORY_SUMMARY_LINE_LIMIT = 120;
 const TOOL_PARSE_PREFIX = "tool:";
 const DEFAULT_TOOL_MAX_STEPS = 3;
+const NEW_SESSION_COMMAND = "/new";
+const NEW_SESSION_ROUTE = "system";
+const NEW_SESSION_STAGE = "gateway.new_session";
 const ASSISTANT_FOLLOWUP_PROMPT = "请基于上述工具结果回答问题。";
 const PROMPT_AUDIT_ENV_KEYS = ["LAINCLAW_PROMPT_AUDIT", "LAINCLAW_ASK_PROMPT_AUDIT"];
 
@@ -558,6 +561,8 @@ export async function runAsk(
   }
 
   const input = rawInput.trim();
+  const requestId = createRequestId();
+  const createdAt = nowIso();
   const sessionKey = resolveSessionKey(opts.sessionKey);
   const provider = opts.provider?.trim();
   const profileId = opts.profileId?.trim();
@@ -565,6 +570,32 @@ export async function runAsk(
   const withTools = typeof opts.withTools === "boolean" ? opts.withTools : true;
   const toolAllow = normalizeToolAllow(opts.toolAllow);
   const toolMaxSteps = resolveToolMaxSteps(opts.toolMaxSteps);
+
+  if (input === NEW_SESSION_COMMAND) {
+    const newSession = await getOrCreateSession({
+      sessionKey,
+      provider,
+      profileId,
+      forceNew: true,
+      ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
+    });
+
+    return {
+      success: true,
+      requestId,
+      createdAt,
+      route: NEW_SESSION_ROUTE,
+      stage: NEW_SESSION_STAGE,
+      result: `New session started. sessionId=${newSession.sessionId}`,
+      sessionKey: newSession.sessionKey,
+      sessionId: newSession.sessionId,
+      memoryEnabled: !!newSession.memoryEnabled,
+      memoryUpdated: false,
+      ...(newSession.memoryEnabled ? { memoryFile: getSessionMemoryPath(newSession.sessionKey) } : {}),
+      sessionContextUpdated: false,
+    };
+  }
+
   const workspaceContext = await inspectWorkspaceContext(
     resolveWorkspaceDir(opts.cwd),
     nowIso(),
@@ -581,8 +612,6 @@ export async function runAsk(
 
   const memorySnippet = session.memoryEnabled ? await loadSessionMemorySnippet(session.sessionKey) : "";
   const priorMessages = trimContextMessages(await getRecentSessionMessages(session.sessionId));
-  const requestId = createRequestId();
-  const createdAt = nowIso();
   const promptAudit: PromptAudit | undefined = isPromptAuditEnabled()
     ? { enabled: true, records: [] }
     : undefined;
