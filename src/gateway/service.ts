@@ -64,7 +64,7 @@ function isGatewayServiceState(raw: unknown): raw is GatewayServiceState {
   if (typeof candidate.channel !== "string" || !candidate.channel.trim()) {
     return false;
   }
-  if (!Number.isInteger(candidate.pid) || candidate.pid <= 0) {
+  if (typeof candidate.pid !== "number" || !Number.isInteger(candidate.pid) || candidate.pid <= 0) {
     return false;
   }
   if (typeof candidate.startedAt !== "string" || candidate.startedAt.trim().length === 0) {

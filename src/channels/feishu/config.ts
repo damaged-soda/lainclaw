@@ -412,19 +412,19 @@ export async function resolveFeishuGatewayConfig(
       cached.withTools,
       envWithTools,
       DEFAULT_WITH_TOOLS,
-    ),
+    ) ?? DEFAULT_WITH_TOOLS,
     memory: firstBoolean(
       overrides.memory,
       cached.memory,
       envMemory,
       DEFAULT_MEMORY,
-    ),
+    ) ?? DEFAULT_MEMORY,
     heartbeatEnabled: firstBoolean(
       overrides.heartbeatEnabled,
       cached.heartbeatEnabled,
       resolveBoolean(envHeartbeatEnabled),
       DEFAULT_HEARTBEAT_ENABLED,
-    ),
+    ) ?? DEFAULT_HEARTBEAT_ENABLED,
     heartbeatIntervalMs:
       firstNumber(overrides.heartbeatIntervalMs, cached.heartbeatIntervalMs, envHeartbeatIntervalMs)
       || DEFAULT_HEARTBEAT_INTERVAL_MS,
