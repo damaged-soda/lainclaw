@@ -13,7 +13,7 @@ npm install
 npm run bootstrap
 
 lainclaw --help
-lainclaw ask 这是一个测试输入
+lainclaw agent 这是一个测试输入
 ```
 
 ### 会话模式（第一阶段）
@@ -23,9 +23,9 @@ lainclaw ask 这是一个测试输入
 - 强制新会话：`--new-session`
 
 ```bash
-lainclaw ask --session work 这是我的第一个任务
-lainclaw ask --session work 我接着说一件事
-lainclaw ask --new-session 重新开始新会话
+lainclaw agent --session work 这是我的第一个任务
+lainclaw agent --session work 我接着说一件事
+lainclaw agent --new-session 重新开始新会话
 ```
 
 每次成功调用会在 `~/.lainclaw/sessions/<sessionId>.jsonl` 中追加会话转写，并在输出中返回 `sessionKey` 与 `sessionId`。
@@ -38,12 +38,12 @@ lainclaw ask --new-session 重新开始新会话
 - compaction：当会话条目较多后自动把较早历史压缩到记忆文件，保留最近 12 条用于上下文重放。
 
 ```bash
-lainclaw ask --session work --memory 这是我希望长期记住的偏好
-lainclaw ask --session work --memory 今天我想复盘一下这个项目的背景
-lainclaw ask --session work --no-memory 这条消息不写记忆
+lainclaw agent --session work --memory 这是我希望长期记住的偏好
+lainclaw agent --session work --memory 今天我想复盘一下这个项目的背景
+lainclaw agent --session work --no-memory 这条消息不写记忆
 ```
 
-当触发 compaction 后，`ask` 输出会包含 `memoryEnabled: true` 与 `memoryUpdated: true/false`，便于确认是否写入记忆。
+当触发 compaction 后，`agent` 输出会包含 `memoryEnabled: true` 与 `memoryUpdated: true/false`，便于确认是否写入记忆。
 
 ## 直接运行编译产物（排错）
 
@@ -51,7 +51,7 @@ lainclaw ask --session work --no-memory 这条消息不写记忆
 cd <repo_root>/src/lainclaw
 npm run build
 node ./dist/index.js --help
-node ./dist/index.js ask 这是一个测试输入
+node ./dist/index.js agent 这是一个测试输入
 ```
 
 ## 本地全局命令安装（npm link）
@@ -67,7 +67,7 @@ global 命令：
 
 ```bash
 lainclaw
-lainclaw ask 这是一个测试输入
+lainclaw agent 这是一个测试输入
 ```
 
 ## 在任意目录使用
@@ -76,7 +76,7 @@ lainclaw ask 这是一个测试输入
 
 ```bash
 lainclaw
-lainclaw ask 你好，帮我总结一下
+lainclaw agent 你好，帮我总结一下
 ```
 
 ## 飞书（Feishu）网关接入（WS-only）

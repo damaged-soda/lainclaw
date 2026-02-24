@@ -40,7 +40,7 @@ export async function invokeToolByCli(
   );
 }
 
-export async function invokeToolsForAsk(
+export async function invokeToolsForAgent(
   calls: ToolCall[],
   context: ToolContext,
 ): Promise<ToolExecutionLog[]> {

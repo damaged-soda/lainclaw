@@ -1,7 +1,7 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
-import { runAsk } from "../../gateway/askGateway.js";
+import { runAgent } from "../../gateway/gateway.js";
 import { sendFeishuTextMessage } from "./outbound.js";
-import { writeAskAuditRecord } from "../../shared/askAudit.js";
+import { writeAgentAuditRecord } from "../../shared/agentAudit.js";
 import {
   resolveFeishuGatewayConfig,
   type FeishuGatewayConfig,
@@ -339,7 +339,7 @@ async function handleWsPayload(
     }
 
     const runResult = await Promise.race([
-      runAsk(inbound.input, {
+      runAgent(inbound.input, {
         sessionKey: `feishu:dm:${inbound.openId}`,
         provider: config.provider,
         ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
@@ -351,13 +351,13 @@ async function handleWsPayload(
       }),
       new Promise<never>((_, reject) => {
         setTimeout(() => {
-          reject(new Error(`ask timeout after ${REPLY_TIMEOUT_MS}ms`));
+          reject(new Error(`agent timeout after ${REPLY_TIMEOUT_MS}ms`));
         }, REPLY_TIMEOUT_MS);
       }),
     ]);
 
     if (runResult.promptAudit) {
-      await writeAskAuditRecord({
+          await writeAgentAuditRecord({
         channel: "feishu",
         requestId: runResult.requestId,
         requestSource: inbound.requestId,
@@ -365,7 +365,7 @@ async function handleWsPayload(
         input: inbound.input,
         result: runResult,
         emitToStdout: options.auditDebug,
-        auditStage: "runAsk.feishu.success",
+        auditStage: "runAgent.feishu.success",
         metadata: {
           inboundRequestId: inbound.requestId,
           openId: inbound.openId,
@@ -387,7 +387,7 @@ async function handleWsPayload(
     const message = error instanceof Error ? error.message : String(error);
     if (inbound?.openId && inbound.input) {
       const sessionKey = `feishu:dm:${inbound.openId}`;
-      await writeAskAuditRecord({
+        await writeAgentAuditRecord({
         channel: "feishu",
         requestId: inbound.requestId,
         requestSource: inbound.requestId,
@@ -395,7 +395,7 @@ async function handleWsPayload(
         input: inbound.input,
         error: message,
         emitToStdout: options.auditDebug,
-        auditStage: "runAsk.feishu.error",
+        auditStage: "runAgent.feishu.error",
         metadata: {
           inboundRequestId: inbound.requestId,
           openId: inbound.openId,
@@ -405,7 +405,7 @@ async function handleWsPayload(
           context: inbound,
         },
       }).catch((writeError) => {
-        console.warn(`[feishu] ${requestId} ask audit error-record failed: ${String(writeError)}`);
+        console.warn(`[feishu] ${requestId} agent audit error-record failed: ${String(writeError)}`);
       });
     }
     console.error(`[feishu] ${requestId} error: ${message}`);

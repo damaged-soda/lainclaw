@@ -22,12 +22,12 @@ import {
   updateSessionRecord,
 } from "../sessions/sessionStore.js";
 import type { ToolCall, ToolContext, ToolExecutionLog, ToolError } from "../tools/types.js";
-import { getToolInfo, invokeToolsForAsk, listToolsCatalog } from "../tools/gateway.js";
+import { getToolInfo, invokeToolsForAgent, listToolsCatalog } from "../tools/gateway.js";
 import { isToolAllowed } from "../tools/registry.js";
 import { OPENAI_CODEX_MODEL } from "../auth/authManager.js";
 import path from "node:path";
 import {
-  buildAskSystemPrompt,
+  buildAgentSystemPrompt,
   inspectWorkspaceContext,
   resolveWorkspaceDir,
 } from "../shared/workspaceContext.js";
@@ -221,7 +221,7 @@ function parseToolCallsFromPrompt(rawInput: string): ParseToolInput {
             : `tool-${Date.now()}-${index + 1}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`,
         name,
         args: normalized.args,
-        source: "ask",
+        source: "agent",
       };
     });
 
@@ -502,7 +502,7 @@ async function executeAllowedToolCalls(
     sessionKey,
     cwd: resolvedCwd,
   };
-  const logs = await invokeToolsForAsk(calls, toolContext);
+  const logs = await invokeToolsForAgent(calls, toolContext);
   const firstError = logs.find((log) => log.result.error)?.result.error;
   return { logs, toolError: firstError };
 }
@@ -527,7 +527,7 @@ function resolveStepLimitError(toolCalls: ToolCall[], toolMaxSteps: number): Too
   };
 }
 
-export async function runAsk(
+export async function runAgent(
   rawInput: string,
   opts: {
     provider?: string;
@@ -543,7 +543,7 @@ export async function runAsk(
   } = {},
 ): Promise<GatewayResult> {
   if (!rawInput || !rawInput.trim()) {
-    throw new ValidationError("ask command requires non-empty input", "ASK_INPUT_REQUIRED");
+    throw new ValidationError("agent command requires non-empty input", "AGENT_INPUT_REQUIRED");
   }
 
   const input = rawInput.trim();
@@ -586,7 +586,7 @@ export async function runAsk(
     resolveWorkspaceDir(opts.cwd),
     nowIso(),
   );
-  const requestSystemPrompt = buildAskSystemPrompt(workspaceContext);
+  const requestSystemPrompt = buildAgentSystemPrompt(workspaceContext);
 
   const session = await getOrCreateSession({
     sessionKey,
@@ -659,7 +659,7 @@ export async function runAsk(
             input,
             reason: parsedToolInput.parseError,
           },
-          source: "ask",
+          source: "agent",
         },
         parsedToolInput.parseError,
         "invalid_args",
@@ -807,7 +807,7 @@ export async function runAsk(
   }
 
   if (!finalResult) {
-    throw new Error("ask pipeline did not return result");
+    throw new Error("agent pipeline did not return result");
   }
 
   if (toolResults.length > 0) {

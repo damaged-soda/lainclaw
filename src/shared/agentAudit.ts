@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import type { GatewayResult, PromptAudit } from "./types.js";
 
-type AskChannel = "local" | "feishu";
+type AgentChannel = "local" | "feishu";
 
-interface AskAuditOutput {
+interface AgentAuditOutput {
   success: boolean;
   route?: string;
   stage?: string;
@@ -22,7 +22,7 @@ interface AskAuditOutput {
   timeoutMs?: number;
 }
 
-interface AskAuditMetadata {
+interface AgentAuditMetadata {
   inputLength: number;
   inputPreview: string;
   inputTruncated: boolean;
@@ -32,20 +32,20 @@ interface AskAuditMetadata {
   auditStage?: string;
 }
 
-export interface AskAuditRecord {
-  channel: AskChannel;
+export interface AgentAuditRecord {
+  channel: AgentChannel;
   recordedAt: string;
   requestId: string;
   requestSource: string;
   sessionKey: string;
   input: string;
-  output: AskAuditOutput;
-  metadata?: AskAuditMetadata | Record<string, unknown>;
+  output: AgentAuditOutput;
+  metadata?: AgentAuditMetadata | Record<string, unknown>;
 }
 
 const INPUT_PREVIEW_LIMIT = 1024;
 
-function buildAuditOutput(result: GatewayResult): AskAuditOutput {
+function buildAuditOutput(result: GatewayResult): AgentAuditOutput {
   return {
     success: result.success,
     ...(typeof result.route === "string" ? { route: result.route } : {}),
@@ -95,12 +95,12 @@ function checksumInput(input: string): string {
   return createHash("sha256").update(input).digest("hex").slice(0, 12);
 }
 
-function emitAuditRecord(record: AskAuditRecord): void {
+function emitAuditRecord(record: AgentAuditRecord): void {
   console.log(JSON.stringify(record));
 }
 
-export async function writeAskAuditRecord(params: {
-  channel: AskChannel;
+export async function writeAgentAuditRecord(params: {
+  channel: AgentChannel;
   requestId: string;
   requestSource: string;
   sessionKey: string;
@@ -119,7 +119,7 @@ export async function writeAskAuditRecord(params: {
   const { errorKind, timeoutMs } = parseAuditErrorMetadata(params.error);
   const inputPreview = makeInputPreview(params.input);
 
-  const metadata: AskAuditMetadata = {
+  const metadata: AgentAuditMetadata = {
     inputLength,
     inputPreview,
     inputTruncated: inputLength > INPUT_PREVIEW_LIMIT,
@@ -130,7 +130,7 @@ export async function writeAskAuditRecord(params: {
     ...(params.metadata ?? {}),
   };
 
-  const record: AskAuditRecord = {
+  const record: AgentAuditRecord = {
     channel: params.channel,
     recordedAt: nowIso(),
     requestId: params.requestId,

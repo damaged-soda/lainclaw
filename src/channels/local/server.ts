@@ -1,12 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { runAsk } from "../../gateway/askGateway.js";
+import { runAgent } from "../../gateway/gateway.js";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
 import { type PromptAudit } from "../../shared/types.js";
 import {
-  writeAskAuditRecord,
-} from "../../shared/askAudit.js";
+  writeAgentAuditRecord,
+} from "../../shared/agentAudit.js";
 
 export interface LocalGatewayOverrides {
   provider?: string;
@@ -178,7 +178,7 @@ function writeErrorRecordSafe(record: LocalErrorRecord): string {
 }
 
 function buildRunboxRecord(
-  response: Awaited<ReturnType<typeof runAsk>>,
+  response: Awaited<ReturnType<typeof runAgent>>,
   input: string,
   requestSource: string,
   sessionKey: string,
@@ -302,7 +302,7 @@ export async function runLocalGatewayServer(
         const requestSource = payload.requestId || `seq-${requestSeq++}`;
 
         try {
-          const result = await runAsk(input, {
+          const result = await runAgent(input, {
             ...(typeof opts.provider === "string" && opts.provider.length > 0 ? { provider: opts.provider } : {}),
             ...(typeof opts.profileId === "string" && opts.profileId.length > 0 ? { profileId: opts.profileId } : {}),
             ...(typeof opts.withTools === "boolean" ? { withTools: opts.withTools } : {}),
@@ -315,14 +315,14 @@ export async function runLocalGatewayServer(
 
           const record = buildRunboxRecord(result, input, requestSource, sessionKey);
           if (result.promptAudit) {
-            await writeAskAuditRecord({
+            await writeAgentAuditRecord({
               channel: "local",
               requestId: result.requestId,
               requestSource,
               sessionKey,
               input,
               emitToStdout: context.debug,
-              auditStage: "runAsk.local.success",
+              auditStage: "runAgent.local.success",
               result,
               metadata: {
                 channel: "local",
@@ -337,14 +337,14 @@ export async function runLocalGatewayServer(
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const requestId = `${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
-          await writeAskAuditRecord({
+            await writeAgentAuditRecord({
             channel: "local",
             requestId,
             requestSource,
             sessionKey,
             input,
             emitToStdout: context.debug,
-            auditStage: "runAsk.local.error",
+            auditStage: "runAgent.local.error",
             error: message,
             metadata: {
               channel: "local",
@@ -352,7 +352,7 @@ export async function runLocalGatewayServer(
               context: "local-gateway",
             },
           }).catch((writeError) => {
-            console.warn(`[local] ${requestId} ask audit error-record failed: ${String(writeError)}`);
+            console.warn(`[local] ${requestId} agent audit error-record failed: ${String(writeError)}`);
           });
           const record = buildErrorRecord(requestId, input, requestSource, sessionKey, message);
           await appendLine(outboxPath, writeErrorRecordSafe(record));

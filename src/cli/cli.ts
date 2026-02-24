@@ -1,5 +1,5 @@
 import { ValidationError } from '../shared/types.js';
-import { runAsk } from '../gateway/askGateway.js';
+import { runAgent } from '../gateway/gateway.js';
 import { runHeartbeatOnce, startHeartbeatLoop } from '../heartbeat/runner.js';
 import type { HeartbeatRunSummary } from '../heartbeat/runner.js';
 import {
@@ -68,8 +68,8 @@ export function printUsage(): string {
     'Usage:',
     '  lainclaw --help',
     '  lainclaw --version',
-    '  lainclaw ask <input>',
-    '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
+    '  lainclaw agent <input>',
+    '  lainclaw agent [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
     '  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--debug] [--daemon] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway status [--channel <channel>] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway stop [--channel <channel>] [--pid-file <path>]',
@@ -96,12 +96,12 @@ export function printUsage(): string {
     '  lainclaw auth logout [--all|<profile>]',
     '',
     'Examples:',
-    '  lainclaw ask 这是一段测试文本',
-    '  lainclaw ask --session work --provider openai-codex --profile default 这是一段测试文本',
-    '  lainclaw ask --session work --memory 这是一个长期记忆测试',
-    '  lainclaw ask --session work --memory=off 这是一条不写入记忆的消息',
-    '  lainclaw ask --tool-allow time.now,shell.pwd "tool:time.now"',
-    '  lainclaw ask --tool-max-steps 2 --provider openai-codex "请帮我看下时间"',
+    '  lainclaw agent 这是一段测试文本',
+    '  lainclaw agent --session work --provider openai-codex --profile default 这是一段测试文本',
+    '  lainclaw agent --session work --memory 这是一个长期记忆测试',
+    '  lainclaw agent --session work --memory=off 这是一条不写入记忆的消息',
+    '  lainclaw agent --tool-allow time.now,shell.pwd "tool:time.now"',
+    '  lainclaw agent --tool-max-steps 2 --provider openai-codex "请帮我看下时间"',
     '  lainclaw tools invoke fs.read_file --args "{\\"path\\":\\"README.md\\"}"',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
@@ -260,7 +260,7 @@ function validateFeishuGatewayCredentials(config: { appId?: string; appSecret?: 
 }
 
 function makeFeishuFailureHint(rawMessage: string): string {
-  if (rawMessage.includes("ask timeout")) {
+  if (rawMessage.includes("agent timeout")) {
     return "模型处理超时，请稍后重试；若持续超时请检查网络或加长 timeout 配置。";
   }
   if (isAuthError(rawMessage)) {
@@ -426,7 +426,7 @@ function throwIfMissingValue(label: string, index: number, args: string[]) {
   }
 }
 
-function parseAskArgs(argv: string[]): {
+function parseAgentArgs(argv: string[]): {
   input: string;
   provider?: string;
   profile?: string;
@@ -1283,7 +1283,7 @@ async function runAuthCommand(argv: string[]): Promise<number> {
     const profile = await loginOpenAICodexProfile();
     console.log(`Auth profile created: ${profile.id}`);
     console.log(`Credential expires: ${new Date(profile.credential.expires).toISOString()}`);
-    console.log(`Use this profile with: lainclaw ask --provider openai-codex --profile ${profile.id} <input>`);
+    console.log(`Use this profile with: lainclaw agent --provider openai-codex --profile ${profile.id} <input>`);
     return 0;
   }
 
@@ -2090,18 +2090,18 @@ export async function runCli(argv: string[]): Promise<number> {
     return 0;
   }
 
-  if (command === 'ask') {
+  if (command === 'agent') {
     try {
-      const { input, provider, profile, sessionKey, newSession, memory, withTools, toolAllow, toolMaxSteps } = parseAskArgs(
+      const { input, provider, profile, sessionKey, newSession, memory, withTools, toolAllow, toolMaxSteps } = parseAgentArgs(
         argv.slice(1),
       );
       if (provider && provider !== "openai-codex") {
         throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
       }
       if (!input) {
-        throw new ValidationError("ask command requires non-empty input", "ASK_INPUT_REQUIRED");
+        throw new ValidationError("agent command requires non-empty input", "AGENT_INPUT_REQUIRED");
       }
-      const response = await runAsk(input, {
+      const response = await runAgent(input, {
         ...(provider ? { provider } : {}),
         ...(profile ? { profileId: profile } : {}),
         ...(sessionKey ? { sessionKey } : {}),
@@ -2115,7 +2115,7 @@ export async function runCli(argv: string[]): Promise<number> {
     } catch (error) {
       if (error instanceof ValidationError) {
         console.error(`[${error.code}] ${error.message}`);
-        console.error("Usage: lainclaw ask <input>");
+        console.error("Usage: lainclaw agent <input>");
         return 1;
       }
       console.error("ERROR:", String(error instanceof Error ? error.message : error));

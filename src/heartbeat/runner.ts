@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { runAsk } from '../gateway/askGateway.js';
+import { runAgent } from '../gateway/gateway.js';
 import {
   type HeartbeatRule,
   loadHeartbeatRules,
@@ -371,7 +371,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
     const decisionPrompt = buildRulePrompt(rule, now, formatWorkspaceContextSummary(runContext));
     const ruleCtx = resolveRuleDecisionContext(rule, now);
     try {
-      const askResult = await runAsk(decisionPrompt, {
+      const agentResult = await runAgent(decisionPrompt, {
         sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
         provider: resolveText(options.provider) || ruleCtx.provider,
         profileId: resolveText(options.profileId) || ruleCtx.profileId,
@@ -382,7 +382,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         cwd: workspaceDir,
       });
 
-      const parsed = parseDecision(askResult.result);
+      const parsed = parseDecision(agentResult.result);
       void appendHeartbeatLog({
         eventType: "rule-result",
         runId,
@@ -394,7 +394,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
         toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
         toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
-        rawDecision: resolveLogPayloadLimit(askResult.result ?? ""),
+        rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
         parsedDecision: parsed.decision,
         parseError: parsed.parseError,
         sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
@@ -428,7 +428,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
           toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
           toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
-          rawDecision: resolveLogPayloadLimit(askResult.result ?? ""),
+          rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
           parsedDecision: parsed.decision,
           status: triggeredResult.status,
           reason: triggeredResult.message || triggeredResult.decisionRaw,
@@ -475,8 +475,8 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
               parsedDecision: "error",
               status: erroredResult.status,
               reason: failure,
-              rawDecision: resolveLogPayloadLimit(askResult.result ?? ""),
-              message: parseDecision(askResult.result).message,
+              rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
+              message: parseDecision(agentResult.result).message,
               sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
             });
             summary.results.push(erroredResult);
@@ -512,7 +512,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
           toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
           toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
-          rawDecision: resolveLogPayloadLimit(askResult.result ?? ""),
+          rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
           parsedDecision: parsed.decision,
           parseError: parsed.parseError,
           status: skippedResult.status,
