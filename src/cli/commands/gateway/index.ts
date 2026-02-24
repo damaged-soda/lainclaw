@@ -1,4 +1,4 @@
-import { printUsage } from '../../legacy.js';
+import { printUsage } from '../../usage.js';
 import { parseGatewayArgs } from '../../parsers/gateway.js';
 import { runGatewayConfigCommand } from './config.js';
 import { runGatewayStartCommand } from './start.js';

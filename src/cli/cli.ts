@@ -9,4 +9,4 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 }
 
-export { printUsage } from './legacy.js';
+export { printUsage } from './usage.js';

@@ -1,6 +1,5 @@
-import { printUsage } from './legacy.js';
-import { VERSION } from './legacy.js';
-import { runLegacyCli } from './legacy.js';
+import { printUsage } from './usage.js';
+import { VERSION } from './version.js';
 import type { CommandContext, CommandHandler } from './types.js';
 import { runAgentCommand } from './commands/agent.js';
 import { runAuthCommand } from './commands/auth.js';
@@ -38,7 +37,7 @@ export async function dispatchCommand(argv: string[]): Promise<number> {
 
   const handler = commandRoutes[command];
   if (!handler) {
-    return runLegacyCli(argv);
+    return runUnknownCommand(command);
   }
 
   const context: CommandContext = {
@@ -48,4 +47,9 @@ export async function dispatchCommand(argv: string[]): Promise<number> {
   };
 
   return handler(context);
+}
+
+async function runUnknownCommand(command: string): Promise<number> {
+  console.error(`Unknown command: ${command}`);
+  return 1;
 }
