@@ -12,4 +12,5 @@ export interface CommandRoute {
   command: string;
   handler: CommandHandler;
   description?: string;
+  usage?: string;
 }

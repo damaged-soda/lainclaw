@@ -1,10 +1,4 @@
-import {
-  parseBooleanFlag,
-  parseCsvOption,
-  parseMemoryFlag,
-  parsePositiveIntValue,
-  throwIfMissingValue,
-} from '../shared/args.js';
+import { parseModelCommandArgs, type ParsedModelCommandArgs } from '../shared/args.js';
 
 interface HeartbeatCommandOptions {
   provider?: string;
@@ -16,86 +10,8 @@ interface HeartbeatCommandOptions {
   positional: string[];
 }
 
-export function parseHeartbeatModelArgs(argv: string[], allowMemory = false): HeartbeatCommandOptions {
-  let provider: string | undefined;
-  let profileId: string | undefined;
-  let withTools: boolean | undefined;
-  let toolAllow: string[] | undefined;
-  let toolMaxSteps: number | undefined;
-  let memory: boolean | undefined;
-  const positional: string[] = [];
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-
-    if (arg === '--provider') {
-      throwIfMissingValue('provider', i + 1, argv);
-      provider = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--provider=')) {
-      provider = arg.slice('--provider='.length);
-      continue;
-    }
-    if (arg === '--profile') {
-      throwIfMissingValue('profile', i + 1, argv);
-      profileId = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--profile=')) {
-      profileId = arg.slice('--profile='.length);
-      continue;
-    }
-
-    if (arg === '--with-tools' || arg === '--no-with-tools' || arg.startsWith('--with-tools=')) {
-      withTools = parseBooleanFlag(arg, i);
-      continue;
-    }
-
-    if (arg === '--tool-allow') {
-      throwIfMissingValue('tool-allow', i + 1, argv);
-      toolAllow = parseCsvOption(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--tool-allow=')) {
-      toolAllow = parseCsvOption(arg.slice('--tool-allow='.length));
-      continue;
-    }
-
-    if (arg === '--tool-max-steps') {
-      throwIfMissingValue('tool-max-steps', i + 1, argv);
-      toolMaxSteps = parsePositiveIntValue(argv[i + 1], i + 1, '--tool-max-steps');
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--tool-max-steps=')) {
-      toolMaxSteps = parsePositiveIntValue(arg.slice('--tool-max-steps='.length), i + 1, '--tool-max-steps');
-      continue;
-    }
-
-    if (allowMemory && (arg === '--memory' || arg === '--no-memory' || arg.startsWith('--memory='))) {
-      memory = parseMemoryFlag(arg, i);
-      continue;
-    }
-
-    if (arg.startsWith('--')) {
-      throw new Error(`Unknown option: ${arg}`);
-    }
-    positional.push(arg);
-  }
-
-  return {
-    provider,
-    profileId,
-    withTools,
-    ...(toolAllow ? { toolAllow } : {}),
-    ...(typeof toolMaxSteps === 'number' ? { toolMaxSteps } : {}),
-    ...(typeof memory === 'boolean' ? { memory } : {}),
-    positional,
-  };
+function parseHeartbeatModelArgs(argv: string[], allowMemory = false): ParsedModelCommandArgs {
+  return parseModelCommandArgs(argv, { allowMemory, strictUnknown: true });
 }
 
 export function parseHeartbeatAddArgs(argv: string[]): {
@@ -107,6 +23,10 @@ export function parseHeartbeatAddArgs(argv: string[]): {
   toolMaxSteps?: number;
 } {
   const parsed = parseHeartbeatModelArgs(argv, false);
+  const unknownOption = parsed.positional.find((entry) => entry.startsWith('--'));
+  if (unknownOption) {
+    throw new Error(`Unknown option: ${unknownOption}`);
+  }
   const ruleText = parsed.positional.join(' ').trim();
   if (!ruleText) {
     throw new Error('Missing rule text.');

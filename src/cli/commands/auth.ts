@@ -8,9 +8,11 @@ import {
   setActiveProfile,
   logoutProfile,
 } from '../../auth/authManager.js';
+import { runCommand } from '../shared/result.js';
 
 export async function runAuthCommand(args: string[]): Promise<number> {
-  const parsed = parseAuthArgs(args);
+  return runCommand(async () => {
+    const parsed = parseAuthArgs(args);
 
   if (parsed.kind === 'missing') {
     console.error("Missing auth subcommand.");
@@ -86,5 +88,6 @@ export async function runAuthCommand(args: string[]): Promise<number> {
     return 0;
   }
 
-  return 1;
+    return 1;
+  });
 }

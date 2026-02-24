@@ -1,55 +1,53 @@
-import { printUsage } from './usage.js';
-import { VERSION } from './version.js';
-import type { CommandContext, CommandHandler } from './types.js';
 import { runAgentCommand } from './commands/agent.js';
 import { runAuthCommand } from './commands/auth.js';
 import { runHeartbeatCommand } from './commands/heartbeat.js';
-import { runPairingCommand } from './commands/pairing.js';
+import { runPairingCommand } from '../pairing/cli.js';
 import { runToolsCommand } from './commands/tools.js';
-import { runGatewayCommand } from './commands/gateway/index.js';
+import { runGatewayCommand } from './commands/gateway/runtime.js';
+import type { CommandContext, CommandRoute } from './types.js';
 
-const commandRoutes: Record<string, CommandHandler> = {
-  agent: (context) => runAgentCommand(context.args),
-  auth: (context) => runAuthCommand(context.args),
-  tools: (context) => runToolsCommand(context.args),
-  pairing: (context) => runPairingCommand(context.args),
-  heartbeat: (context) => runHeartbeatCommand(context.args),
-  gateway: (context) => runGatewayCommand(context.args),
-};
+export const commandRoutes: CommandRoute[] = [
+  {
+    command: 'agent',
+    description: 'Run agent command',
+    handler: (context: CommandContext) => runAgentCommand(context.args),
+  },
+  {
+    command: 'auth',
+    description: 'Run auth command',
+    handler: (context: CommandContext) => runAuthCommand(context.args),
+  },
+  {
+    command: 'tools',
+    description: 'Run tools command',
+    handler: (context: CommandContext) => runToolsCommand(context.args),
+  },
+  {
+    command: 'pairing',
+    description: 'Run pairing command',
+    handler: (context: CommandContext) => runPairingCommand(context.args),
+  },
+  {
+    command: 'heartbeat',
+    description: 'Run heartbeat command',
+    handler: (context: CommandContext) => runHeartbeatCommand(context.args),
+  },
+  {
+    command: 'gateway',
+    description: 'Run gateway command',
+    handler: (context: CommandContext) => runGatewayCommand(context.args),
+  },
+];
 
-export async function dispatchCommand(argv: string[]): Promise<number> {
-  const command = argv[0];
+const commandRouteLookup: Map<string, CommandRoute> = new Map(
+  commandRoutes.map((route) => [route.command, route]),
+);
 
-  if (!command) {
-    console.log(printUsage());
-    return 0;
-  }
-
-  if (command === 'help' || command === '-h' || command === '--help') {
-    console.log(printUsage());
-    return 0;
-  }
-
-  if (command === '-v' || command === '--version') {
-    console.log(`lainclaw v${VERSION}`);
-    return 0;
-  }
-
-  const handler = commandRoutes[command];
-  if (!handler) {
-    return runUnknownCommand(command);
-  }
-
-  const context: CommandContext = {
-    command,
-    args: argv.slice(1),
-    argv,
-  };
-
-  return handler(context);
+export function resolveCommandRoute(command: string): CommandRoute | undefined {
+  return commandRouteLookup.get(command);
 }
 
-async function runUnknownCommand(command: string): Promise<number> {
+export function runUnknownCommand(command: string): Promise<number> {
   console.error(`Unknown command: ${command}`);
-  return 1;
+  return Promise.resolve(1);
 }

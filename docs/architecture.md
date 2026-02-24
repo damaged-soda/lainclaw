@@ -20,8 +20,9 @@ CLI（node dist/index.js）
 ## 核心职责
 
 - `src/cli/cli.ts`
-  - 负责 CLI 参数解析、子命令分发。
-  - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口。
+  - 负责 CLI 参数解析、子命令分发与标准入口（`--help` / `--version`）输出。
+  - 通过 `src/cli/registry.ts` 维护 `CommandRoute` 注册表，由 `runCommand` 风格执行层统一处理错误与返回码。
+  - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口，但不变更命令语义与外部行为。
 - `src/gateway/gateway.ts`
   - 统一封装一次请求到模型的执行上下文。
   - 负责 session 获取、上下文注入、工具循环、回复输出组装。
@@ -55,6 +56,21 @@ CLI（node dist/index.js）
 3. `pipeline` 选择适配器；若为 codex 则调用模型。
 4. 返回中如出现 tool-call，`tools` 会执行并将结果回填给模型继续对话。
 5. 最终输出写入会话轨迹（JSONL）和记忆文件（可选）。
+
+## CLI 层重构说明（结构优化）
+
+- `src/cli/cli.ts`
+  - 负责前置参数分支与未知命令处理（`agent/gateway/...`）；
+- `src/cli/registry.ts`
+  - 定义命令路由（`commandRoutes`）与运行时查找；
+- `src/cli/parsers/*`
+  - 负责参数校验与标准化；
+- `src/cli/commands/*`
+  - 负责命令执行、日志与输出；
+- `src/cli/shared/result.ts`
+  - 负责统一错误出口和返回码策略（成功 0，失败 1，除特殊路径外）。
+
+该层改动只涉及组织形态与执行骨架，未新增参数语义。
 
 ## local 网关文件队列执行语义
 

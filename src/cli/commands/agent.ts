@@ -1,9 +1,10 @@
 import { parseAgentArgs } from '../parsers/agent.js';
 import { ValidationError } from '../../shared/types.js';
 import { runAgent } from '../../gateway/gateway.js';
+import { runCommand } from '../shared/result.js';
 
 export async function runAgentCommand(args: string[]): Promise<number> {
-  try {
+  return runCommand(async () => {
     const {
       input,
       provider,
@@ -37,13 +38,14 @@ export async function runAgentCommand(args: string[]): Promise<number> {
       return 0;
     }
     return 1;
-  } catch (error) {
-    if (error instanceof ValidationError) {
-      console.error(`[${error.code}] ${error.message}`);
-      console.error("Usage: lainclaw agent <input>");
-      return 1;
-    }
-    console.error("ERROR:", String(error instanceof Error ? error.message : error));
-    return 1;
-  }
+  }, {
+    renderError: (error) => {
+      if (error instanceof ValidationError) {
+        console.error(`[${error.code}] ${error.message}`);
+        console.error("Usage: lainclaw agent <input>");
+        return;
+      }
+      console.error("ERROR:", String(error instanceof Error ? error.message : error));
+    },
+  });
 }

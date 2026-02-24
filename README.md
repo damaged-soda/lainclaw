@@ -4,6 +4,8 @@ A tiny TypeScript playground entry for the Lainclaw project.
 
 ## 快速进入命令行
 
+> 本次 CLI 重构仅调整 `src/cli` 内部组织与分发层（命令注册、参数解析、执行封装），对外暴露的命令语义、返回码与文本输出保持兼容。
+
 ### 使用全局命令（推荐）
 
 ```bash

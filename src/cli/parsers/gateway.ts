@@ -1,9 +1,10 @@
 import {
   parseBooleanFlag,
   parseCsvOption,
-  parseMemoryFlag,
   parsePositiveIntValue,
   throwIfMissingValue,
+  parseModelCommandArgs,
+  type ParsedModelCommandArgs,
 } from '../shared/args.js';
 import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
 import type { LocalGatewayOverrides } from '../../channels/local/server.js';
@@ -65,6 +66,7 @@ export function parseFeishuServerArgs(argv: string[]): {
   let pairingPendingTtlMs: number | undefined;
   let pairingPendingMax: number | undefined;
   let pairingAllowFrom: string[] | undefined;
+  const modelArgv: string[] = [];
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -97,38 +99,6 @@ export function parseFeishuServerArgs(argv: string[]): {
     }
     if (arg.startsWith('--request-timeout-ms=')) {
       requestTimeoutMs = parsePositiveIntValue(arg.slice('--request-timeout-ms='.length), i + 1, '--request-timeout-ms');
-      continue;
-    }
-
-    if (arg === '--provider') {
-      throwIfMissingValue('provider', i + 1, argv);
-      provider = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--provider=')) {
-      provider = arg.slice('--provider='.length);
-      continue;
-    }
-
-    if (arg === '--profile') {
-      throwIfMissingValue('profile', i + 1, argv);
-      profileId = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--profile=')) {
-      profileId = arg.slice('--profile='.length);
-      continue;
-    }
-
-    if (arg === '--with-tools' || arg === '--no-with-tools' || arg.startsWith('--with-tools=')) {
-      withTools = parseBooleanFlag(arg, i);
-      continue;
-    }
-
-    if (arg === '--memory' || arg === '--no-memory' || arg.startsWith('--memory=')) {
-      memory = parseMemoryFlag(arg, i);
       continue;
     }
 
@@ -184,30 +154,6 @@ export function parseFeishuServerArgs(argv: string[]): {
       continue;
     }
 
-    if (arg === '--tool-allow') {
-      throwIfMissingValue('tool-allow', i + 1, argv);
-      toolAllow = parseCsvOption(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--tool-allow=')) {
-      toolAllow = parseCsvOption(arg.slice('--tool-allow='.length));
-      continue;
-    }
-
-    if (arg === '--tool-max-steps') {
-      throwIfMissingValue('tool-max-steps', i + 1, argv);
-      toolMaxSteps = parsePositiveIntValue(argv[i + 1], i + 1, '--tool-max-steps');
-      i += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--tool-max-steps=')) {
-      toolMaxSteps = parsePositiveIntValue(arg.slice('--tool-max-steps='.length), i + 1, '--tool-max-steps');
-      continue;
-    }
-
     if (arg === '--heartbeat-enabled' || arg === '--no-heartbeat-enabled' || arg.startsWith('--heartbeat-enabled=')) {
       heartbeatEnabled = parseBooleanFlag(arg, i, 'heartbeat-enabled');
       continue;
@@ -251,8 +197,42 @@ export function parseFeishuServerArgs(argv: string[]): {
     }
 
     if (arg.startsWith('--')) {
-      throw new Error(`Unknown option: ${arg}`);
+      modelArgv.push(arg);
+      if (!arg.includes('=') && i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
+        modelArgv.push(argv[i + 1]);
+        i += 1;
+      }
+      continue;
     }
+    modelArgv.push(arg);
+  }
+
+  const parsedModel: ParsedModelCommandArgs = parseModelCommandArgs(modelArgv, {
+    allowMemory: true,
+    strictUnknown: true,
+  });
+
+  if (parsedModel.positional.length > 0) {
+    throw new Error(`Unknown argument for gateway start: ${parsedModel.positional[0]}`);
+  }
+
+  if (parsedModel.provider) {
+    provider = parsedModel.provider;
+  }
+  if (parsedModel.profileId) {
+    profileId = parsedModel.profileId;
+  }
+  if (typeof parsedModel.withTools === 'boolean') {
+    withTools = parsedModel.withTools;
+  }
+  if (Array.isArray(parsedModel.toolAllow)) {
+    toolAllow = parsedModel.toolAllow;
+  }
+  if (typeof parsedModel.toolMaxSteps === 'number') {
+    toolMaxSteps = parsedModel.toolMaxSteps;
+  }
+  if (typeof parsedModel.memory === 'boolean') {
+    memory = parsedModel.memory;
   }
 
   if (provider) {
@@ -294,7 +274,7 @@ export function parseFeishuServerArgs(argv: string[]): {
 }
 
 export function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
-  const parsed = parseHeartbeatModelArgs(argv, true);
+  const parsed = parseModelCommandArgs(argv, { allowMemory: true, strictUnknown: true });
   if (parsed.positional.length > 0) {
     throw new Error(`Unknown argument for gateway start: ${parsed.positional[0]}`);
   }
@@ -544,95 +524,5 @@ export function parseGatewayArgs(argv: string[]): {
     serviceChild,
     serviceArgv,
     debug,
-  };
-}
-
-function parseHeartbeatModelArgs(argv: string[], allowMemory = false): {
-  provider?: string;
-  profileId?: string;
-  withTools?: boolean;
-  toolAllow?: string[];
-  toolMaxSteps?: number;
-  memory?: boolean;
-  positional: string[];
-} {
-  let provider: string | undefined;
-  let profileId: string | undefined;
-  let withTools: boolean | undefined;
-  let toolAllow: string[] | undefined;
-  let toolMaxSteps: number | undefined;
-  let memory: boolean | undefined;
-  const positional: string[] = [];
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-
-    if (arg === '--provider') {
-      throwIfMissingValue('provider', i + 1, argv);
-      provider = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--provider=')) {
-      provider = arg.slice('--provider='.length);
-      continue;
-    }
-    if (arg === '--profile') {
-      throwIfMissingValue('profile', i + 1, argv);
-      profileId = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--profile=')) {
-      profileId = arg.slice('--profile='.length);
-      continue;
-    }
-
-    if (arg === '--with-tools' || arg === '--no-with-tools' || arg.startsWith('--with-tools=')) {
-      withTools = parseBooleanFlag(arg, i);
-      continue;
-    }
-
-    if (arg === '--tool-allow') {
-      throwIfMissingValue('tool-allow', i + 1, argv);
-      toolAllow = parseCsvOption(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--tool-allow=')) {
-      toolAllow = parseCsvOption(arg.slice('--tool-allow='.length));
-      continue;
-    }
-
-    if (arg === '--tool-max-steps') {
-      throwIfMissingValue('tool-max-steps', i + 1, argv);
-      toolMaxSteps = parsePositiveIntValue(argv[i + 1], i + 1, '--tool-max-steps');
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--tool-max-steps=')) {
-      toolMaxSteps = parsePositiveIntValue(arg.slice('--tool-max-steps='.length), i + 1, '--tool-max-steps');
-      continue;
-    }
-
-    if (allowMemory && (arg === '--memory' || arg === '--no-memory' || arg.startsWith('--memory='))) {
-      memory = parseMemoryFlag(arg, i);
-      continue;
-    }
-
-    if (arg.startsWith('--')) {
-      throw new Error(`Unknown option: ${arg}`);
-    }
-    positional.push(arg);
-  }
-
-  return {
-    provider,
-    profileId,
-    withTools,
-    ...(toolAllow ? { toolAllow } : {}),
-    ...(typeof toolMaxSteps === 'number' ? { toolMaxSteps } : {}),
-    ...(typeof memory === 'boolean' ? { memory } : {}),
-    positional,
   };
 }
