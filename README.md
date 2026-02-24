@@ -79,6 +79,22 @@ lainclaw
 lainclaw agent 你好，帮我总结一下
 ```
 
+## 本地通道（local）全流程上手（无 Feishu 依赖）
+
+如果你只想完成本地验收，不想依赖飞书，可直接走 local 通道：
+
+```bash
+cd <repo_root>/src/lainclaw
+npm install
+npm run build
+
+node dist/index.js gateway start --channel local --provider openai-codex --profile <profileId> --with-tools --memory
+```
+
+更多完整步骤、inbox/outbox 示例、全流程验收清单见：
+
+- `docs/local-quickstart.md`
+
 ## 飞书（Feishu）网关接入（WS-only）
 
 当前的 `feishu` 通道仅支持 **WebSocket 长连接模式**（不使用 Webhook）。统一入口为 `gateway` 命令，默认通道为 `feishu`，可通过 `--channel` 覆盖（当前实现仍仅支持 `feishu`）。

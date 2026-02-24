@@ -56,6 +56,27 @@ CLI（node dist/index.js）
 4. 返回中如出现 tool-call，`tools` 会执行并将结果回填给模型继续对话。
 5. 最终输出写入会话轨迹（JSONL）和记忆文件（可选）。
 
+## local 网关文件队列执行语义
+
+- local 网关使用 `src/channels/local/server.ts` 轮询 `inbox`，按追加行读取并逐行处理。
+- 每条可解析消息会映射到 `runAgent`：
+  - 优先使用 payload 的 `sessionKey`；
+  - 其次使用 `accountId` 映射到 `local:<accountId>`；
+  - 再退化到 `LAINCLAW_LOCAL_SESSION_KEY`，否则为 `local:main`。
+- 接口格式兼容两种输入：
+  - 纯文本行（自动当作 `input`）。
+  - JSON 行（支持 `input`、`sessionKey`、`accountId`、`requestId`）。
+- 处理结果会写入 `outbox.jsonl`，关键可观测字段：
+  - `route`、`stage`、`result`、`provider`、`memoryEnabled`、`memoryUpdated`。
+- 对无效 JSON 或空内容会跳过，不会阻塞主循环。
+- 生命周期行为：
+  - `gateway start --channel local --daemon` 由 `gateway-service.json` 管理进程；
+  - `gateway status --channel local` 查询运行状态；
+  - `gateway stop --channel local` 回收服务。
+- 可通过环境变量定制运行路径与行为：
+  - `LAINCLAW_LOCAL_INBOX_PATH` / `LAINCLAW_LOCAL_OUTBOX_PATH`
+  - `LAINCLAW_LOCAL_SESSION_KEY` / `LAINCLAW_LOCAL_POLL_MS`
+
 ## 持久化路径（默认）
 
 路径来源：`~/.lainclaw` 根目录（`src/auth/configStore.ts`）。

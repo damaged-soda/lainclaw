@@ -6,6 +6,8 @@
 
 - `overview.md`：项目简介与定位（为何存在、适配哪些场景、边界与约束）。
 - `architecture.md`：架构说明（命令链路、核心模块、持久化、消息流）。
+- `local-quickstart.md`：本地通道（local）完整上手与全流程验收（不依赖 feishu）。
+- `test/README.md`：本地验收目录索引。
 - `wip`：提案与变更草案目录（参考 `docs/wip/<topic>/`）。
 
 ## 文档治理规则
