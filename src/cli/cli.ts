@@ -70,7 +70,7 @@ export function printUsage(): string {
     '  lainclaw --version',
     '  lainclaw ask <input>',
     '  lainclaw ask [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] <input>',
-    '  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]',
+    '  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--debug] [--daemon] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway status [--channel <channel>] [--pid-file <path>] [--log-file <path>]',
   '  lainclaw gateway stop [--channel <channel>] [--pid-file <path>]',
     '  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]',
@@ -891,6 +891,7 @@ function parseGatewayArgs(argv: string[]): {
   statePath?: string;
   logPath?: string;
   serviceChild?: boolean;
+  debug?: boolean;
   serviceArgv: string[];
 } {
   let channel: GatewayChannel = "feishu";
@@ -901,6 +902,7 @@ function parseGatewayArgs(argv: string[]): {
   let statePath: string | undefined;
   let logPath: string | undefined;
   let serviceChild = false;
+  let debug = false;
   const startArgs: string[] = [];
   const serviceArgv: string[] = [];
   let actionParsed = false;
@@ -922,6 +924,15 @@ function parseGatewayArgs(argv: string[]): {
         throw new Error(`--daemon is only valid for: lainclaw gateway start ...`);
       }
       daemon = true;
+      continue;
+    }
+
+    if (arg === "--debug") {
+      if (action !== "start") {
+        throw new Error(`--debug is only valid for: lainclaw gateway start ...`);
+      }
+      debug = true;
+      serviceArgv.push(arg);
       continue;
     }
 
@@ -1015,6 +1026,7 @@ function parseGatewayArgs(argv: string[]): {
         channel: normalizedChannel,
         channels: normalizedChannels,
         action,
+        debug,
         ...startConfig,
         daemon,
         statePath,
@@ -1029,30 +1041,32 @@ function parseGatewayArgs(argv: string[]): {
       channel: normalizedChannel,
       channels: normalizedChannels,
       action,
+      debug,
       ...startConfig,
       daemon,
       statePath,
       logPath,
       serviceChild,
+        serviceArgv,
+      };
+    }
+
+    const normalizedChannels = normalizeGatewayChannels(channels);
+    if (!hasChannel && normalizedChannels.length === 0) {
+      normalizedChannels.push(channel);
+    }
+    return {
+      channel: normalizedChannels[0],
+      channels: normalizedChannels,
+      action,
+      daemon: false,
+      statePath,
+      logPath,
+      serviceChild,
       serviceArgv,
+      debug,
     };
   }
-
-  const normalizedChannels = normalizeGatewayChannels(channels);
-  if (!hasChannel && normalizedChannels.length === 0) {
-    normalizedChannels.push(channel);
-  }
-  return {
-    channel: normalizedChannels[0],
-    channels: normalizedChannels,
-    action,
-    daemon: false,
-    statePath,
-    logPath,
-    serviceChild,
-    serviceArgv,
-  };
-}
 
 function parseGatewayConfigArgs(argv: string[]): {
   channel: string;
@@ -1632,6 +1646,7 @@ interface GatewayServiceRunContext {
   serviceChild?: boolean;
   serviceArgv: string[];
   channels?: GatewayChannel[];
+  debug?: boolean;
 }
 
 async function stopGatewayServiceIfRunning(paths: GatewayServicePaths, state: GatewayServiceState): Promise<void> {
@@ -1822,6 +1837,7 @@ async function runFeishuGatewayWithHeartbeat(
         overrides,
         {
           onFailureHint,
+          auditDebug: serviceContext.debug,
         },
         effectiveChannel,
       );
@@ -1936,14 +1952,15 @@ async function runFeishuGatewayWithHeartbeat(
       });
   }
 
-  try {
-    await runFeishuGatewayServer(
-      overrides,
-      {
-        onFailureHint,
-      },
-      effectiveChannel,
-    );
+    try {
+      await runFeishuGatewayServer(
+        overrides,
+        {
+          onFailureHint,
+          auditDebug: serviceContext.debug,
+        },
+        effectiveChannel,
+      );
   } finally {
     heartbeatHandle?.stop();
   }
@@ -2018,7 +2035,7 @@ async function runLocalGatewayService(
   },
 ): Promise<void> {
   if (serviceContext.serviceChild) {
-    await runLocalGatewayServer(overrides);
+    await runLocalGatewayServer(overrides, { debug: serviceContext.debug });
     return;
   }
 
@@ -2057,7 +2074,7 @@ async function runLocalGatewayService(
     return;
   }
 
-  await runLocalGatewayServer(overrides);
+  await runLocalGatewayServer(overrides, { debug: serviceContext.debug });
 }
 
 export async function runCli(argv: string[]): Promise<number> {
@@ -2159,6 +2176,7 @@ export async function runCli(argv: string[]): Promise<number> {
         channels,
         action,
         serviceArgv,
+        debug,
         daemon,
         statePath,
         logPath,
@@ -2177,16 +2195,17 @@ export async function runCli(argv: string[]): Promise<number> {
         });
         return 0;
       }
-      if (channels.length > 1) {
-        await runGatewayServiceForChannels(gatewayOptions, {
-          channel,
-          channels,
-          action,
-          serviceChild,
-          daemon,
-          statePath,
-          logPath,
-          serviceArgv,
+        if (channels.length > 1) {
+          await runGatewayServiceForChannels(gatewayOptions, {
+            channel,
+            channels,
+            action,
+            debug,
+            serviceChild,
+            daemon,
+            statePath,
+            logPath,
+            serviceArgv,
         }, channels);
         return 0;
       }
@@ -2194,6 +2213,7 @@ export async function runCli(argv: string[]): Promise<number> {
       await channelPlugin.run(gatewayOptions, {
         channel,
         action,
+        debug,
         serviceChild,
         daemon,
         statePath,
@@ -2210,7 +2230,7 @@ export async function runCli(argv: string[]): Promise<number> {
       }
       console.error(
         "Usage:",
-        "  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--daemon] [--pid-file <path>] [--log-file <path>]",
+        "  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--debug] [--daemon] [--pid-file <path>] [--log-file <path>]",
         "  lainclaw gateway status [--channel <channel>] [--pid-file <path>]",
         "  lainclaw gateway stop [--channel <channel>] [--pid-file <path>]",
         "  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--tool-max-steps <N>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]",

@@ -45,8 +45,6 @@ const NEW_SESSION_COMMAND = "/new";
 const NEW_SESSION_ROUTE = "system";
 const NEW_SESSION_STAGE = "gateway.new_session";
 const ASSISTANT_FOLLOWUP_PROMPT = "请基于上述工具结果回答问题。";
-const PROMPT_AUDIT_ENV_KEYS = ["LAINCLAW_PROMPT_AUDIT", "LAINCLAW_ASK_PROMPT_AUDIT"];
-
 interface DeniedToolCall {
   call: ToolCall;
   code: ToolError["code"];
@@ -276,19 +274,6 @@ function chooseFirstToolError(first: ToolError | undefined, next: ToolError | un
     return first;
   }
   return next;
-}
-
-function isPromptAuditEnabled(): boolean {
-  const rawValue = PROMPT_AUDIT_ENV_KEYS
-    .map((key) => process.env[key])
-    .find((value) => typeof value === "string" && value.trim().length > 0);
-
-  if (!rawValue) {
-    return false;
-  }
-
-  const normalized = rawValue.trim().toLowerCase();
-  return ["1", "true", "yes", "on", "enabled"].includes(normalized);
 }
 
 function buildPromptAuditRecord(
@@ -554,6 +539,7 @@ export async function runAsk(
     toolAllow?: string[];
     toolMaxSteps?: number;
     cwd?: string;
+    includePromptAudit?: boolean;
   } = {},
 ): Promise<GatewayResult> {
   if (!rawInput || !rawInput.trim()) {
@@ -612,9 +598,7 @@ export async function runAsk(
 
   const memorySnippet = session.memoryEnabled ? await loadSessionMemorySnippet(session.sessionKey) : "";
   const priorMessages = trimContextMessages(await getRecentSessionMessages(session.sessionId));
-  const promptAudit: PromptAudit | undefined = isPromptAuditEnabled()
-    ? { enabled: true, records: [] }
-    : undefined;
+  const promptAudit: PromptAudit | undefined = opts.includePromptAudit ? { enabled: true, records: [] } : undefined;
   let promptAuditStep = 1;
   const recordPromptAudit = (context: RequestContext, routeDecision: string) => {
     if (!promptAudit) {

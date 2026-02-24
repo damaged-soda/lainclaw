@@ -5,7 +5,6 @@ import { runAsk } from "../../gateway/askGateway.js";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
 import { type PromptAudit } from "../../shared/types.js";
 import {
-  ensureAskAuditDirectory,
   writeAskAuditRecord,
 } from "../../shared/askAudit.js";
 
@@ -240,6 +239,9 @@ async function readRawInbox(inboxPath: string): Promise<string> {
 
 export async function runLocalGatewayServer(
   overrides: Partial<LocalGatewayOverrides> = {},
+  context: {
+    debug?: boolean;
+  } = {},
 ): Promise<void> {
   const inboxPath = resolveInboxPath();
   const outboxPath = resolveOutboxPath();
@@ -272,10 +274,6 @@ export async function runLocalGatewayServer(
     toolAllow: overrides.toolAllow,
     toolMaxSteps: overrides.toolMaxSteps,
   };
-
-  await ensureAskAuditDirectory("local").catch((error) => {
-    console.warn(`[local] failed to prepare ask audit directory: ${String(error)}`);
-  });
 
   while (running) {
     const raw = await readRawInbox(inboxPath);
@@ -312,6 +310,7 @@ export async function runLocalGatewayServer(
             ...(typeof opts.toolMaxSteps === "number" ? { toolMaxSteps: opts.toolMaxSteps } : {}),
             ...(typeof opts.memory === "boolean" ? { memory: opts.memory } : {}),
             ...(typeof sessionKey === "string" && sessionKey.trim() ? { sessionKey } : {}),
+            includePromptAudit: context.debug,
           });
 
           const record = buildRunboxRecord(result, input, requestSource, sessionKey);
@@ -322,10 +321,13 @@ export async function runLocalGatewayServer(
               requestSource,
               sessionKey,
               input,
+              emitToStdout: context.debug,
+              auditStage: "runAsk.local.success",
               result,
               metadata: {
                 channel: "local",
                 requestSource,
+                auditMode: "stream",
               },
             });
           }
@@ -341,10 +343,13 @@ export async function runLocalGatewayServer(
             requestSource,
             sessionKey,
             input,
+            emitToStdout: context.debug,
+            auditStage: "runAsk.local.error",
             error: message,
             metadata: {
               channel: "local",
               requestSource,
+              context: "local-gateway",
             },
           }).catch((writeError) => {
             console.warn(`[local] ${requestId} ask audit error-record failed: ${String(writeError)}`);

@@ -1,10 +1,7 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { runAsk } from "../../gateway/askGateway.js";
 import { sendFeishuTextMessage } from "./outbound.js";
-import {
-  ensureAskAuditDirectory,
-  writeAskAuditRecord,
-} from "../../shared/askAudit.js";
+import { writeAskAuditRecord } from "../../shared/askAudit.js";
 import {
   resolveFeishuGatewayConfig,
   type FeishuGatewayConfig,
@@ -312,6 +309,7 @@ function parseFeishuInbound(raw: unknown, requestId: string): FeishuInboundMessa
 async function handleWsPayload(
   data: unknown,
   config: FeishuGatewayConfig,
+  options: FeishuGatewayServerOptions,
   onFailureHint?: (rawMessage: string) => string,
 ): Promise<void> {
   const requestId = createRequestId();
@@ -349,6 +347,7 @@ async function handleWsPayload(
         ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
         ...(typeof config.toolMaxSteps === "number" ? { toolMaxSteps: config.toolMaxSteps } : {}),
         memory: config.memory,
+        includePromptAudit: options.auditDebug,
       }),
       new Promise<never>((_, reject) => {
         setTimeout(() => {
@@ -365,6 +364,8 @@ async function handleWsPayload(
         sessionKey: runResult.sessionKey,
         input: inbound.input,
         result: runResult,
+        emitToStdout: options.auditDebug,
+        auditStage: "runAsk.feishu.success",
         metadata: {
           inboundRequestId: inbound.requestId,
           openId: inbound.openId,
@@ -393,6 +394,8 @@ async function handleWsPayload(
         sessionKey,
         input: inbound.input,
         error: message,
+        emitToStdout: options.auditDebug,
+        auditStage: "runAsk.feishu.error",
         metadata: {
           inboundRequestId: inbound.requestId,
           openId: inbound.openId,
@@ -424,6 +427,7 @@ export type FeishuFailureHintResolver = (rawMessage: string) => string;
 
 interface FeishuGatewayServerOptions {
   onFailureHint?: FeishuFailureHintResolver;
+  auditDebug?: boolean;
 }
 
 export async function runFeishuGatewayServer(
@@ -431,9 +435,6 @@ export async function runFeishuGatewayServer(
   options: FeishuGatewayServerOptions = {},
   channel = "feishu",
 ): Promise<void> {
-  await ensureAskAuditDirectory("feishu").catch((error) => {
-    console.warn(`[feishu] failed to prepare ask audit directory: ${String(error)}`);
-  });
   const config = await resolveFeishuGatewayConfig(overrides, channel);
   await persistFeishuGatewayConfig(overrides, channel);
 
@@ -444,7 +445,7 @@ export async function runFeishuGatewayServer(
   const eventDispatcher = new Lark.EventDispatcher({});
   eventDispatcher.register({
     "im.message.receive_v1": async (data) => {
-      await handleWsPayload(data, config, options.onFailureHint);
+      await handleWsPayload(data, config, options, options.onFailureHint);
     },
   });
 
