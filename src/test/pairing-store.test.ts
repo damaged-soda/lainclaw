@@ -123,25 +123,26 @@ test("pairing queue capacity is enforced before adding new request", async () =>
 
 test("expired pairing requests are pruned and revoked entries can be removed", async () => {
   await withTempHome(async (env) => {
+    const ttlMs = 25;
     const pending = await upsertChannelPairingRequest({
       channel: "feishu",
       id: "openF",
       accountId: "acc-f",
       limits: {
-        ttlMs: 1,
+        ttlMs,
       },
       env,
     });
 
     const immediate = await listChannelPairingRequests("feishu", env, "acc-f", {
-      ttlMs: 1,
+      ttlMs,
     });
     assert.equal(immediate.length, 1);
     assert.equal(immediate[0]?.id, "openF");
 
-    await delay(10);
+    await delay(ttlMs * 5);
     const afterTTL = await listChannelPairingRequests("feishu", env, "acc-f", {
-      ttlMs: 1,
+      ttlMs,
     });
     assert.equal(afterTTL.length, 0);
 

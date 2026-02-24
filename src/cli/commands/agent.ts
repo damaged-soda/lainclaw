@@ -1,0 +1,49 @@
+import { parseAgentArgs } from '../parsers/agent.js';
+import { ValidationError } from '../../shared/types.js';
+import { runAgent } from '../../gateway/gateway.js';
+
+export async function runAgentCommand(args: string[]): Promise<number> {
+  try {
+    const {
+      input,
+      provider,
+      profile,
+      sessionKey,
+      newSession,
+      memory,
+      withTools,
+      toolAllow,
+      toolMaxSteps,
+    } = parseAgentArgs(args);
+    if (provider && provider !== "openai-codex") {
+      throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
+    }
+    if (!input) {
+      throw new ValidationError("agent command requires non-empty input", "AGENT_INPUT_REQUIRED");
+    }
+    const response = await runAgent(input, {
+      ...(provider ? { provider } : {}),
+      ...(profile ? { profileId: profile } : {}),
+      ...(sessionKey ? { sessionKey } : {}),
+      ...(newSession ? { newSession } : {}),
+      ...(typeof memory === "boolean" ? { memory } : {}),
+      ...(typeof withTools === "boolean" ? { withTools } : {}),
+      ...(toolAllow ? { toolAllow } : {}),
+      ...(typeof toolMaxSteps === "number" ? { toolMaxSteps } : {}),
+    });
+
+    if (response.success) {
+      console.log(JSON.stringify(response, null, 2));
+      return 0;
+    }
+    return 1;
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      console.error(`[${error.code}] ${error.message}`);
+      console.error("Usage: lainclaw agent <input>");
+      return 1;
+    }
+    console.error("ERROR:", String(error instanceof Error ? error.message : error));
+    return 1;
+  }
+}
