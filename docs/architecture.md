@@ -6,8 +6,9 @@
 CLI（node dist/index.js）
   └─ src/index.ts
       └─ src/cli/cli.ts（参数路由）
-          ├─ src/gateway/gateway.ts（agent 主链路）
-          │   ├─ src/pipeline/pipeline.ts（路由决策）
+          ├─ src/gateway/gateway.ts（兼容入口）
+          │   ├─ src/gateway/runAgent.ts（agent 主链路）
+          │   │   ├─ src/pipeline/pipeline.ts（路由决策）
           │   │   ├─ src/adapters/codexAdapter.ts（openai-codex）
           │   │   └─ src/adapters/stubAdapter.ts（非 codex 回退）
           │   ├─ src/tools/gateway.ts / src/tools/registry.ts / executor.ts（工具执行）
@@ -24,6 +25,8 @@ CLI（node dist/index.js）
   - 通过 `src/cli/registry.ts` 维护 `CommandRoute` 注册表，由 `runCommand` 风格执行层统一处理错误与返回码。
   - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口，但不变更命令语义与外部行为。
 - `src/gateway/gateway.ts`
+  - 作为 `agent` 模块兼容入口，继续对外导出 `runAgent`。
+- `src/gateway/runAgent.ts`
   - 统一封装一次请求到模型的执行上下文。
   - 负责 session 获取、上下文注入、工具循环、回复输出组装。
 - `src/pipeline/pipeline.ts`
@@ -45,7 +48,13 @@ CLI（node dist/index.js）
 - `src/auth/*`
   - OAuth 登录、profile 选择、会话中 credential 读取与续期。
 - `src/gateway/service.ts`
-  - 网关服务的后台化启动、进程状态、日志与 stop/kill 生命周期。
+  - 作为服务对外边界，统一导出 `GatewayService` 配置与生命周期 API。
+- `src/gateway/servicePaths.ts`
+  - 解析 service state/log 路径。
+- `src/gateway/serviceState.ts`
+  - 管理 gateway service state 的读取/写入/清理。
+- `src/gateway/serviceProcess.ts`
+  - 管理 gateway 子进程启动与 stop/kill 生命周期。
 - `src/shared/*`
   - 公共上下文（工作区、提示词拼装、审计结构）。
 
