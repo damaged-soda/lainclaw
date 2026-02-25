@@ -44,7 +44,6 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
         ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
         ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
         ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
-        ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
       });
       console.log(`Added heartbeat rule: ${rule.id}`);
       console.log(JSON.stringify(rule, null, 2));
@@ -98,7 +97,6 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
         ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
         ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
         ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
-        ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
         ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
       });
       console.log(JSON.stringify(summary, null, 2));

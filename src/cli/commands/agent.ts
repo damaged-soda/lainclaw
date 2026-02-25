@@ -14,7 +14,6 @@ export async function runAgentCommand(args: string[]): Promise<number> {
       memory,
       withTools,
       toolAllow,
-      toolMaxSteps,
     } = parseAgentArgs(args);
     if (provider && provider !== "openai-codex") {
       throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
@@ -30,7 +29,6 @@ export async function runAgentCommand(args: string[]): Promise<number> {
       ...(typeof memory === "boolean" ? { memory } : {}),
       ...(typeof withTools === "boolean" ? { withTools } : {}),
       ...(toolAllow ? { toolAllow } : {}),
-      ...(typeof toolMaxSteps === "number" ? { toolMaxSteps } : {}),
       channel: "agent",
     });
 

@@ -22,7 +22,6 @@ export interface FeishuGatewayConfig {
   heartbeatTargetOpenId?: string;
   heartbeatSessionKey?: string;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   pairingPolicy?: PairingPolicy;
   pairingPendingTtlMs?: number;
   pairingPendingMax?: number;
@@ -42,7 +41,6 @@ export interface FeishuGatewayConfigSources {
   heartbeatTargetOpenId?: "default" | "override";
   heartbeatSessionKey?: "default" | "override";
   toolAllow?: "default" | "override";
-  toolMaxSteps?: "default" | "override";
   pairingPolicy?: "default" | "override";
   pairingPendingTtlMs?: "default" | "override";
   pairingPendingMax?: "default" | "override";
@@ -76,7 +74,6 @@ export interface FeishuGatewayStorage {
     heartbeatTargetOpenId?: string;
     heartbeatSessionKey?: string;
     toolAllow?: string[];
-    toolMaxSteps?: number;
     pairingPolicy?: PairingPolicy;
     pairingPendingTtlMs?: number;
     pairingPendingMax?: number;
@@ -112,7 +109,6 @@ const FEISHU_GATEWAY_CONFIG_KEYS: Array<keyof FeishuGatewayConfig> = [
   "heartbeatTargetOpenId",
   "heartbeatSessionKey",
   "toolAllow",
-  "toolMaxSteps",
   "pairingPolicy",
   "pairingPendingTtlMs",
   "pairingPendingMax",
@@ -201,23 +197,6 @@ function normalizeToolAllow(raw: unknown): string[] | undefined {
   }
   if (typeof raw === "string") {
     return parseToolAllowRaw(raw);
-  }
-  return undefined;
-}
-
-function parseToolMaxStepsRaw(raw: unknown): number | undefined {
-  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-    return raw;
-  }
-  if (typeof raw === "string") {
-    const normalized = raw.trim();
-    if (!normalized) {
-      return undefined;
-    }
-    const parsed = Number.parseInt(normalized, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
-      return parsed;
-    }
   }
   return undefined;
 }
@@ -313,7 +292,6 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
   const heartbeatSessionKey =
     typeof source.heartbeatSessionKey === "string" ? resolveText(source.heartbeatSessionKey) : undefined;
   const toolAllow = normalizeToolAllow(source.toolAllow as unknown);
-  const toolMaxSteps = parseToolMaxStepsRaw(source.toolMaxSteps as unknown);
   const pairingPolicy = isValidPairingPolicy(
     typeof source.pairingPolicy === "string" ? source.pairingPolicy : undefined,
   );
@@ -360,9 +338,6 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
   }
   if (Array.isArray(toolAllow)) {
     normalized.toolAllow = toolAllow;
-  }
-  if (typeof toolMaxSteps === "number" && Number.isFinite(toolMaxSteps) && toolMaxSteps > 0) {
-    normalized.toolMaxSteps = toolMaxSteps;
   }
   if (pairingPolicy) {
     normalized.pairingPolicy = pairingPolicy;
@@ -775,9 +750,6 @@ function filterPersistable(updates: Partial<FeishuGatewayConfig>): Partial<Feish
     ...(Array.isArray(updates.toolAllow)
       ? { toolAllow: updates.toolAllow.map((tool) => tool.trim()).filter((tool) => tool.length > 0) }
       : {}),
-    ...(typeof updates.toolMaxSteps === "number" && Number.isFinite(updates.toolMaxSteps) && updates.toolMaxSteps > 0
-      ? { toolMaxSteps: updates.toolMaxSteps }
-      : {}),
     ...(typeof updates.heartbeatEnabled === "boolean" ? { heartbeatEnabled: updates.heartbeatEnabled } : {}),
     ...(typeof updates.heartbeatIntervalMs === "number" && Number.isFinite(updates.heartbeatIntervalMs)
       ? { heartbeatIntervalMs: updates.heartbeatIntervalMs }
@@ -934,9 +906,6 @@ export async function resolveFeishuGatewayConfig(
   const envToolAllow = parseToolAllowRaw(
     process.env.LAINCLAW_FEISHU_TOOL_ALLOW || process.env.FEISHU_TOOL_ALLOW,
   );
-  const envToolMaxSteps = resolveText(
-    process.env.LAINCLAW_FEISHU_TOOL_MAX_STEPS || process.env.FEISHU_TOOL_MAX_STEPS,
-  );
   const envHeartbeatEnabled = resolveText(
     process.env.LAINCLAW_FEISHU_HEARTBEAT_ENABLED || process.env.FEISHU_HEARTBEAT_ENABLED,
   );
@@ -1016,11 +985,6 @@ export async function resolveFeishuGatewayConfig(
       DEFAULT_HEARTBEAT_SESSION_KEY,
     ),
     toolAllow: firstToolAllow(overrides.toolAllow, envToolAllow, cached.toolAllow) || DEFAULT_TOOL_ALLOW,
-    toolMaxSteps: firstNumber(
-      overrides.toolMaxSteps,
-      envToolMaxSteps,
-      cached.toolMaxSteps,
-    ) || undefined,
     pairingPolicy:
       isValidPairingPolicy(overrides.pairingPolicy)
       || envPairingPolicy

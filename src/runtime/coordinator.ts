@@ -16,7 +16,6 @@ import {
   normalizeToolAllow,
   resolveMemoryFlag,
   resolveSessionKey,
-  resolveToolMaxSteps,
   NEW_SESSION_COMMAND,
   NEW_SESSION_ROUTE,
   NEW_SESSION_STAGE,
@@ -37,7 +36,6 @@ type RunAgentOptions = {
   memory?: boolean;
   withTools?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   cwd?: string;
   channel?: string;
 };
@@ -60,7 +58,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const memoryEnabled = resolveMemoryFlag(opts.memory);
   const withTools = typeof opts.withTools === "boolean" ? opts.withTools : true;
   const toolAllow = normalizeToolAllow(opts.toolAllow);
-  const toolMaxSteps = resolveToolMaxSteps(opts.toolMaxSteps);
   const channel = resolveChannel(opts.channel);
 
   if (provider !== "openai-codex") {
@@ -126,7 +123,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     channel,
     withTools,
     toolAllow,
-    toolMaxSteps,
     cwd: opts.cwd,
     toolSpecs: withTools ? autoTools : undefined,
   });

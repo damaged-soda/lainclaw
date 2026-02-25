@@ -9,7 +9,6 @@ export function parseAgentArgs(argv: string[]): {
   memory?: boolean;
   withTools?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
 } {
   let sessionKey: string | undefined;
   let newSession = false;
@@ -57,6 +56,5 @@ export function parseAgentArgs(argv: string[]): {
     ...(typeof parsedModel.memory === 'boolean' ? { memory: parsedModel.memory } : {}),
     ...(typeof parsedModel.withTools === 'boolean' ? { withTools: parsedModel.withTools } : {}),
     ...(Array.isArray(parsedModel.toolAllow) ? { toolAllow: parsedModel.toolAllow } : {}),
-    ...(typeof parsedModel.toolMaxSteps === 'number' ? { toolMaxSteps: parsedModel.toolMaxSteps } : {}),
   };
 }

@@ -3,6 +3,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { parseAgentArgs } from "../cli/parsers/agent.js";
+import { parseHeartbeatAddArgs, parseHeartbeatRunArgs } from "../cli/parsers/heartbeat.js";
+import { parseModelCommandArgs } from "../cli/shared/args.js";
+import { resolveFeishuGatewayConfig } from "../channels/feishu/config.js";
 import {
   approveChannelPairingCode,
   listChannelPairingRequests,
@@ -28,6 +32,42 @@ async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function withTempHomeAndEnv<T>(
+  overrides: Record<string, string | undefined>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "lainclaw-feishu-"));
+  const keys = new Set<string>(["HOME", ...Object.keys(overrides)]);
+  const previous = new Map<string, string | undefined>();
+
+  for (const key of keys) {
+    previous.set(key, process.env[key]);
+  }
+
+  process.env.HOME = home;
+  for (const [key, value] of Object.entries(overrides)) {
+    if (typeof value === "undefined") {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    for (const key of keys) {
+      const value = previous.get(key);
+      if (typeof value === "undefined") {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    await fs.rm(home, { recursive: true, force: true });
+  }
 }
 
 test("pairing store isolates requests by account id", async () => {
@@ -162,5 +202,54 @@ test("expired pairing requests are pruned and revoked entries can be removed", a
     });
     assert.equal(revoked.changed, false);
     assert.equal(revoked.allowFrom.length, 0);
+  });
+});
+
+test("model command parser rejects removed tool max steps flag", () => {
+  assert.throws(
+    () => parseModelCommandArgs(["--tool-max-steps", "5"], { allowMemory: false, strictUnknown: true }),
+    /Unknown option: --tool-max-steps/,
+  );
+});
+
+test("agent args parser rejects removed tool max steps flag", () => {
+  assert.throws(() => parseAgentArgs(["--tool-max-steps", "5", "hello"]), /Unknown option: --tool-max-steps/);
+});
+
+test("heartbeat parser rejects removed tool max steps flag", () => {
+  assert.throws(() => parseHeartbeatRunArgs(["--tool-max-steps=5"]), /Unknown option: --tool-max-steps=5/);
+  assert.throws(() => parseHeartbeatAddArgs(["--tool-max-steps", "5", "summary"]), /Unknown option/);
+});
+
+test("feishu config ignores legacy tool max steps env vars", async () => {
+  await withTempHomeAndEnv({
+    LAINCLAW_FEISHU_TOOL_MAX_STEPS: "10",
+    FEISHU_TOOL_MAX_STEPS: "12",
+  }, async () => {
+    const config = await resolveFeishuGatewayConfig();
+    assert.equal(config.provider, "openai-codex");
+    assert.equal(Object.prototype.hasOwnProperty.call(config, "toolMaxSteps"), false);
+  });
+});
+
+test("feishu config drops legacy toolMaxSteps from stored config", async () => {
+  await withTempHomeAndEnv({}, async () => {
+    const file = path.join(process.env.HOME ?? "", ".lainclaw", "gateway.json");
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        default: {
+          withTools: false,
+          toolMaxSteps: 3,
+        },
+      }, null, 2),
+      "utf-8",
+    );
+
+    const config = await resolveFeishuGatewayConfig();
+    assert.equal(config.withTools, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(config, "toolMaxSteps"), false);
   });
 });

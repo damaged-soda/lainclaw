@@ -39,7 +39,6 @@ export function parseFeishuServerArgs(argv: string[]): {
   withTools?: boolean;
   memory?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   heartbeatEnabled?: boolean;
   heartbeatIntervalMs?: number;
   heartbeatTargetOpenId?: string;
@@ -57,7 +56,6 @@ export function parseFeishuServerArgs(argv: string[]): {
   let withTools: boolean | undefined;
   let memory: boolean | undefined;
   let toolAllow: string[] | undefined;
-  let toolMaxSteps: number | undefined;
   let heartbeatEnabled: boolean | undefined;
   let heartbeatIntervalMs: number | undefined;
   let heartbeatTargetOpenId: string | undefined;
@@ -228,9 +226,6 @@ export function parseFeishuServerArgs(argv: string[]): {
   if (Array.isArray(parsedModel.toolAllow)) {
     toolAllow = parsedModel.toolAllow;
   }
-  if (typeof parsedModel.toolMaxSteps === 'number') {
-    toolMaxSteps = parsedModel.toolMaxSteps;
-  }
   if (typeof parsedModel.memory === 'boolean') {
     memory = parsedModel.memory;
   }
@@ -255,7 +250,6 @@ export function parseFeishuServerArgs(argv: string[]): {
     ...(typeof withTools === 'boolean' ? { withTools } : {}),
     ...(typeof memory === 'boolean' ? { memory } : {}),
     ...(Array.isArray(toolAllow) ? { toolAllow } : {}),
-    ...(typeof toolMaxSteps === 'number' && Number.isFinite(toolMaxSteps) && toolMaxSteps > 0 ? { toolMaxSteps } : {}),
     ...(typeof heartbeatEnabled === 'boolean' ? { heartbeatEnabled } : {}),
     ...(typeof heartbeatIntervalMs === 'number' && Number.isFinite(heartbeatIntervalMs) && heartbeatIntervalMs > 0
       ? { heartbeatIntervalMs }
@@ -289,7 +283,6 @@ export function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
     ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
     ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
     ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
-    ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
   };
 }
 
@@ -335,7 +328,6 @@ export function parseGatewayArgs(argv: string[]): {
   withTools?: boolean;
   memory?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   heartbeatEnabled?: boolean;
   heartbeatIntervalMs?: number;
   heartbeatTargetOpenId?: string;

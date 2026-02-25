@@ -29,7 +29,6 @@ export interface HeartbeatRule {
   profileId?: string;
   withTools: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   createdAt: string;
   updatedAt: string;
   lastRunAt?: string;
@@ -44,7 +43,6 @@ export interface NewHeartbeatRule {
   profileId?: string;
   withTools?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   enabled?: boolean;
 }
 
@@ -117,17 +115,6 @@ function normalizeProvider(raw: unknown): string | undefined {
     return provider;
   }
   return undefined;
-}
-
-function normalizePositiveNumber(raw: unknown): number | undefined {
-  if (typeof raw !== "number" || !Number.isFinite(raw)) {
-    return undefined;
-  }
-  const n = Math.floor(raw);
-  if (n <= 0) {
-    return undefined;
-  }
-  return n;
 }
 
 function normalizeBoolean(raw: unknown): boolean | undefined {
@@ -335,7 +322,6 @@ export function buildHeartbeatRule(input: NewHeartbeatRule): HeartbeatRule {
   }
   const withTools = normalizeBoolean(input.withTools) ?? false;
   const toolAllow = normalizeStringArray(input.toolAllow);
-  const toolMaxSteps = normalizePositiveNumber(input.toolMaxSteps);
   const profileId = normalizeText(input.profileId);
   const provider = normalizeProvider(input.provider);
   const now = nowIso();
@@ -347,7 +333,6 @@ export function buildHeartbeatRule(input: NewHeartbeatRule): HeartbeatRule {
     ...(profileId ? { profileId } : {}),
     withTools,
     ...(toolAllow ? { toolAllow } : {}),
-    ...(toolMaxSteps ? { toolMaxSteps } : {}),
     createdAt: now,
     updatedAt: now,
   };

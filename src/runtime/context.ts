@@ -10,11 +10,9 @@ import {
   inspectWorkspaceContext,
   resolveWorkspaceDir,
 } from "../shared/workspaceContext.js";
-import { ValidationError } from "../shared/types.js";
 
 export const DEFAULT_SESSION_KEY = "main";
 export const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;
-export const DEFAULT_TOOL_MAX_STEPS = 3;
 export const NEW_SESSION_COMMAND = "/new";
 export const NEW_SESSION_ROUTE = "system";
 export const NEW_SESSION_STAGE = "gateway.new_session";
@@ -92,16 +90,6 @@ export function toTimestamp(raw: string): number {
 export function resolveSessionKey(rawSessionKey: string | undefined): string {
   const normalized = rawSessionKey?.trim();
   return normalized && normalized.length > 0 ? normalized : DEFAULT_SESSION_KEY;
-}
-
-export function resolveToolMaxSteps(raw: number | undefined): number {
-  if (typeof raw === "undefined") {
-    return DEFAULT_TOOL_MAX_STEPS;
-  }
-  if (!Number.isInteger(raw) || raw < 1) {
-    throw new ValidationError("tool max steps must be an integer >= 1", "INVALID_TOOL_MAX_STEPS");
-  }
-  return raw;
 }
 
 export function resolveMemoryFlag(value: boolean | undefined): boolean | undefined {

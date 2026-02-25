@@ -56,7 +56,6 @@ interface HeartbeatRunLogEntry {
   profileId?: string;
   withTools?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   rawDecision?: string;
   parsedDecision?: HeartbeatRuleDecision["decision"];
   parseError?: string;
@@ -72,7 +71,6 @@ export interface HeartbeatRunOptions {
   profileId?: string;
   withTools?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   sessionKey?: string;
   workspaceDir?: string;
   memory?: boolean;
@@ -293,7 +291,6 @@ function resolveRuleDecisionContext(rule: HeartbeatRule): {
   profileId?: string;
   withTools: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
 } {
   return {
     sessionKey: `${rule.id}`,
@@ -301,7 +298,6 @@ function resolveRuleDecisionContext(rule: HeartbeatRule): {
     profileId: rule.profileId,
     withTools: rule.withTools,
     toolAllow: rule.toolAllow,
-    toolMaxSteps: rule.toolMaxSteps,
   };
 }
 
@@ -356,7 +352,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         profileId: resolveText(options.profileId) || rule.profileId,
         withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
         toolAllow: options.toolAllow,
-        toolMaxSteps: options.toolMaxSteps,
         parsedDecision: "skip",
         status: skippedResult.status,
         reason: skippedResult.reason,
@@ -378,7 +373,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         channel: "heartbeat",
         withTools: typeof options.withTools === 'boolean' ? options.withTools : ruleCtx.withTools,
         toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-        toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
         memory: options.memory,
         cwd: workspaceDir,
       });
@@ -394,7 +388,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         profileId: resolveText(options.profileId) || ruleCtx.profileId,
         withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
         toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-        toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
         rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
         parsedDecision: parsed.decision,
         parseError: parsed.parseError,
@@ -428,7 +421,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           profileId: resolveText(options.profileId) || ruleCtx.profileId,
           withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
           toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-          toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
           rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
           parsedDecision: parsed.decision,
           status: triggeredResult.status,
@@ -472,7 +464,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
               profileId: resolveText(options.profileId) || ruleCtx.profileId,
               withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
               toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-              toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
               parsedDecision: "error",
               status: erroredResult.status,
               reason: failure,
@@ -512,7 +503,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           profileId: resolveText(options.profileId) || ruleCtx.profileId,
           withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
           toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-          toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
           rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
           parsedDecision: parsed.decision,
           parseError: parsed.parseError,
@@ -548,7 +538,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         profileId: resolveText(options.profileId) || ruleCtx.profileId,
         withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
         toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-        toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
         rawDecision: "",
         parsedDecision: "error",
         status: erroredResult.status,
@@ -581,7 +570,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         profileId: resolveText(options.profileId) || ruleCtx.profileId,
         withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
         toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-        toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,
         parsedDecision: "error",
         status: erroredResult.status,
         reason: erroredResult.reason,
@@ -599,7 +587,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
     profileId: resolveText(options.profileId),
     withTools: typeof options.withTools === "boolean" ? options.withTools : undefined,
     toolAllow: options.toolAllow,
-    toolMaxSteps: options.toolMaxSteps,
     status: summary.errors > 0 ? "errored" : summary.triggered > 0 ? "triggered" : "skipped",
     reason: `total=${summary.total} evaluated=${summary.evaluated} triggered=${summary.triggered} skipped=${summary.skipped} errors=${summary.errors}`,
   });

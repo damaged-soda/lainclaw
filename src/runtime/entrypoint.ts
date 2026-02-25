@@ -10,11 +10,9 @@ import {
   chooseFirstToolError,
   createToolAdapter,
   remapRuntimeMessages,
-  resolveStepLimitError,
   resolveTools,
   shouldFollowUpBeforeContinue,
 } from "./tools.js";
-import { resolveToolMaxSteps } from "./context.js";
 import { ToolSandbox, createDefaultToolSandboxOptions } from "./toolSandbox.js";
 import { createRuntimeRunId, loadRuntimeExecutionState, persistRuntimeExecutionState } from "./stateStore.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
@@ -25,7 +23,6 @@ interface RuntimeOptions {
   channel: string;
   withTools: boolean;
   toolAllow: string[];
-  toolMaxSteps?: number;
   cwd?: string;
   toolSpecs?: ContextToolSpec[];
   timeoutMs?: number;
@@ -129,7 +126,6 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   const requestContext = input.requestContext;
   const requestId = requestContext.requestId;
   const channel = input.channel || "agent";
-  const toolMaxSteps = resolveToolMaxSteps(input.toolMaxSteps);
   const toolSpecs = resolveTools(input.toolSpecs, input.withTools);
   const cwd = path.resolve(input.cwd || process.cwd());
   const toolNameMap = buildRuntimeToolNameMap(toolSpecs);
@@ -159,7 +155,6 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   const planId = runState.planId || `plan-${runId}`;
 
   let stepId = Number.isFinite(runState.stepId) ? Math.max(0, Math.floor(runState.stepId)) : 0;
-  let toolLoopCount = 0;
 
   const toolCalls: ToolCall[] = [];
   const toolResults: ToolExecutionLog[] = [];
@@ -235,7 +230,6 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   let lastError: string | undefined;
   let finalPhase: RuntimeExecutionState["phase"] = "running";
   let runErr: Error | undefined;
-  let limitExceeded = false;
   let eventSeq = 0;
   const persistBase = {
     channel,
@@ -287,18 +281,6 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
       }
     }
 
-    if (event.type === "turn_end") {
-      if (event.toolResults.length > 0) {
-        toolLoopCount += 1;
-        if (toolLoopCount >= toolMaxSteps) {
-          limitExceeded = true;
-          finalPhase = "suspended";
-          lastError = `tool call loop exceeded max steps (${toolMaxSteps})`;
-          agent.abort();
-        }
-      }
-    }
-
     if (event.type === "agent_end") {
       finalPhase = finalPhase === "suspended" ? "suspended" : "idle";
     }
@@ -335,11 +317,7 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
     }
   }
 
-  if (limitExceeded) {
-    finalPhase = "suspended";
-    const limitError = resolveStepLimitError(toolCalls, toolMaxSteps);
-    toolError = chooseFirstToolError(toolError, limitError);
-  } else if (finalPhase !== "suspended" && runErr && !toolError) {
+  if (finalPhase !== "suspended" && runErr && !toolError) {
     throw runErr;
   }
 

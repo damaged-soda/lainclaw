@@ -338,7 +338,7 @@ async function handleWsPayload(
       return;
     }
 
-      const runResult = await Promise.race([
+    const runResult = await Promise.race([
       runAgent(inbound.input, {
         sessionKey: `feishu:dm:${inbound.openId}`,
         channel: "feishu",
@@ -346,7 +346,6 @@ async function handleWsPayload(
         ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
         withTools: config.withTools,
         ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
-        ...(typeof config.toolMaxSteps === "number" ? { toolMaxSteps: config.toolMaxSteps } : {}),
         memory: config.memory,
       }),
       new Promise<never>((_, reject) => {

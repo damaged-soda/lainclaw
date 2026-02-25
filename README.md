@@ -152,8 +152,6 @@ npm start -- gateway config set --channel feishu --app-id <AppID> --app-secret <
 - `--with-tools` / `--no-with-tools`：是否允许模型发起 tool-call（默认打开）
 - `--memory` / `--no-memory`：是否启用会话记忆摘要合并（默认关闭）
 - `--tool-allow <tool1,tool2>`：限制允许的工具白名单（默认允许所有内置工具，`gateway.json` 不配置则等于放开全部）
-- `--tool-max-steps <N>`：限制模型自动 tool-call 循环次数（建议值 4~8）
-
 示例（10秒超时）：
 
 ```bash
@@ -196,7 +194,6 @@ rm ~/.lainclaw/<channel>-gateway.json
 - `LAINCLAW_FEISHU_PROVIDER` / `FEISHU_PROVIDER`：`openai-codex`
 - `LAINCLAW_FEISHU_PROFILE_ID` / `FEISHU_PROFILE_ID`
 - `LAINCLAW_FEISHU_TOOL_ALLOW` / `FEISHU_TOOL_ALLOW`（逗号分隔）
-- `LAINCLAW_FEISHU_TOOL_MAX_STEPS` / `FEISHU_TOOL_MAX_STEPS`
 - `LAINCLAW_FEISHU_WITH_TOOLS` / `FEISHU_WITH_TOOLS`：`true|false`
 - `LAINCLAW_FEISHU_MEMORY` / `FEISHU_MEMORY`：`true|false`
 - `LAINCLAW_FEISHU_HEARTBEAT_ENABLED` / `FEISHU_HEARTBEAT_ENABLED`：`true|false`

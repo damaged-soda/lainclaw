@@ -10,7 +10,6 @@ export function parseHeartbeatAddArgs(argv: string[]): {
   profileId?: string;
   withTools?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
 } {
   const parsed = parseHeartbeatModelArgs(argv, false);
   const unknownOption = parsed.positional.find((entry) => entry.startsWith('--'));
@@ -27,7 +26,6 @@ export function parseHeartbeatAddArgs(argv: string[]): {
     ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
     ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
     ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
-    ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
   };
 }
 
@@ -36,7 +34,6 @@ export function parseHeartbeatRunArgs(argv: string[]): {
   profileId?: string;
   withTools?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   memory?: boolean;
 } {
   const parsed = parseHeartbeatModelArgs(argv, true);
@@ -48,7 +45,6 @@ export function parseHeartbeatRunArgs(argv: string[]): {
     ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
     ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
     ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
-    ...(typeof parsed.toolMaxSteps === 'number' ? { toolMaxSteps: parsed.toolMaxSteps } : {}),
     ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
   };
 }

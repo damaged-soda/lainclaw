@@ -13,7 +13,6 @@ export interface LocalGatewayOverrides {
   withTools?: boolean;
   memory?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
 }
 
 interface LocalMessage {
@@ -269,7 +268,6 @@ export async function runLocalGatewayServer(
     withTools: overrides.withTools,
     memory: overrides.memory,
     toolAllow: overrides.toolAllow,
-    toolMaxSteps: overrides.toolMaxSteps,
   };
 
   while (running) {
@@ -304,7 +302,6 @@ export async function runLocalGatewayServer(
             ...(typeof opts.profileId === "string" && opts.profileId.length > 0 ? { profileId: opts.profileId } : {}),
             ...(typeof opts.withTools === "boolean" ? { withTools: opts.withTools } : {}),
             ...(Array.isArray(opts.toolAllow) ? { toolAllow: opts.toolAllow } : {}),
-            ...(typeof opts.toolMaxSteps === "number" ? { toolMaxSteps: opts.toolMaxSteps } : {}),
             ...(typeof opts.memory === "boolean" ? { memory: opts.memory } : {}),
             ...(typeof sessionKey === "string" && sessionKey.trim() ? { sessionKey } : {}),
             channel: "local",

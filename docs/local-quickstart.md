@@ -131,7 +131,6 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
 {"input":"tool:fs.pwd","sessionKey":"local:demo","requestId":"t-tool-pwd"}
 ```
 - 应有 outbox 记录且 `toolResults`、`toolCalls` 字段可见（若模型自动工具或手工工具路径生效）。
-- 工具执行在 sandbox 受限条件下进行，建议配合 `--tool-max-steps`（如 4~8）观察工具循环终止行为。
 
 ### 4.4 记忆（Memory）
 - 启动时附加 `--memory`。
@@ -139,7 +138,7 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
 
 ### 4.5 异常场景
 - 写入非法 JSON 到 inbox（例如单行 `{bad`），服务应不会阻塞主循环，可继续处理后续有效消息。
-- 触发 `tool-max-steps` 限制场景，确认输出包含错误信息并返回错误记录。
+- 触发工具链连续执行场景，确认输出含有可追溯错误并返回错误记录。
 
 ### 4.6 文档收口检查（可选）
 - 查看 `docs/wip/20260225-pi-agent-core-runtime-rewrite/verification.md`，确认本地恢复、运行态文件、tool sandbox 与文档更新都已完成归档。

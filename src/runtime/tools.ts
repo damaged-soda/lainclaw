@@ -231,15 +231,6 @@ export function buildToolMessages(calls: ToolCall[], results: ToolExecutionLog[]
   return JSON.stringify(normalized, null, 2);
 }
 
-export function resolveStepLimitError(toolCalls: ToolCall[], toolMaxSteps: number): ToolError {
-  const tool = toolCalls[0]?.name ?? "unknown";
-  return {
-    tool,
-    code: "execution_error",
-    message: `tool call loop exceeded max steps (${toolMaxSteps})`,
-  };
-}
-
 export function listAutoTools(toolAllow: string[]) {
   return listToolsCatalog(toolAllow);
 }

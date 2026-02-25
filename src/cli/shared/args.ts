@@ -72,7 +72,6 @@ export interface ParsedModelCommandArgs {
   profileId?: string;
   withTools?: boolean;
   toolAllow?: string[];
-  toolMaxSteps?: number;
   memory?: boolean;
   positional: string[];
 }
@@ -90,7 +89,6 @@ export function parseModelCommandArgs(
   let profileId: string | undefined;
   let withTools: boolean | undefined;
   let toolAllow: string[] | undefined;
-  let toolMaxSteps: number | undefined;
   let memory: boolean | undefined;
   const positional: string[] = [];
 
@@ -149,18 +147,6 @@ export function parseModelCommandArgs(
       continue;
     }
 
-    if (arg === '--tool-max-steps') {
-      throwIfMissingValue('tool-max-steps', i + 1, argv);
-      toolMaxSteps = parsePositiveIntValue(argv[i + 1], i + 1, '--tool-max-steps');
-      i += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--tool-max-steps=')) {
-      toolMaxSteps = parsePositiveIntValue(arg.slice('--tool-max-steps='.length), i + 1, '--tool-max-steps');
-      continue;
-    }
-
     if (arg.startsWith('--')) {
       if (strictUnknown) {
         throw new Error(`Unknown option: ${arg}`);
@@ -177,7 +163,6 @@ export function parseModelCommandArgs(
     ...(profileId ? { profileId } : {}),
     ...(typeof withTools === 'boolean' ? { withTools } : {}),
     ...(Array.isArray(toolAllow) ? { toolAllow } : {}),
-    ...(typeof toolMaxSteps === 'number' && Number.isFinite(toolMaxSteps) && toolMaxSteps > 0 ? { toolMaxSteps } : {}),
     ...(typeof memory === 'boolean' ? { memory } : {}),
     positional,
   };
