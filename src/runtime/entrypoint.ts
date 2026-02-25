@@ -1,7 +1,6 @@
 import path from "node:path";
 import { Agent, type AgentEvent } from "@mariozechner/pi-agent-core";
-import { getModel, type Message as PiMessage, type StopReason as PiStopReason } from "@mariozechner/pi-ai";
-import type { Message } from "@mariozechner/pi-ai";
+import { getModel, type Message, type StopReason as PiStopReason } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext, OPENAI_CODEX_MODEL } from "../auth/authManager.js";
 import { ContextToolSpec, RequestContext } from "../shared/types.js";
 import type { AdapterResult } from "../adapters/stubAdapter.js";
@@ -9,14 +8,11 @@ import {
   buildRuntimeToolNameMap,
   chooseFirstToolError,
   createToolAdapter,
-  remapRuntimeMessages,
   resolveTools,
-  shouldFollowUpBeforeContinue,
 } from "./tools.js";
-import { ToolSandbox, createDefaultToolSandboxOptions } from "./toolSandbox.js";
-import { createRuntimeRunId, loadRuntimeExecutionState, persistRuntimeExecutionState } from "./stateStore.js";
+import { isToolAllowed } from "../tools/registry.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
-import { RUNTIME_STATE_VERSION, type RuntimeExecutionState } from "./schema.js";
+import { executeTool } from "../tools/executor.js";
 
 interface RuntimeOptions {
   requestContext: RequestContext;
@@ -25,196 +21,196 @@ interface RuntimeOptions {
   toolAllow: string[];
   cwd?: string;
   toolSpecs?: ContextToolSpec[];
-  timeoutMs?: number;
-  maxConcurrentTools?: number;
-  retryAttempts?: number;
-  retryDelayMs?: number;
 }
 
 const RUNTIME_PROVIDER = "openai-codex";
-
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
-function isDefined<T>(value: T | undefined | null): value is T {
-  return value !== undefined && value !== null;
-}
+const RUNTIME_ADAPTER_STAGE_PREFIX = "adapter.codex";
+const RANDOM_ID_BASE = 16;
+const RANDOM_ID_PAD_LENGTH = 4;
 
 function toText(message: Message | undefined): string {
   if (!message) {
     return "";
   }
+
   if (typeof message.content === "string") {
     return message.content;
   }
+
   if (!Array.isArray(message.content)) {
     return "";
   }
+
   return message.content
     .map((block) => {
       if (!block || typeof block !== "object") {
         return "";
       }
+
       if (block.type === "text" && typeof (block as { text?: unknown }).text === "string") {
         return (block as { text: string }).text;
       }
+
       return "";
     })
     .filter((entry) => entry.length > 0)
     .join("\n");
 }
 
-function resolveStage(profileId: string, phase: RuntimeExecutionState["phase"]): string {
-  if (phase === "suspended") {
-    return `runtime.codex.${profileId}.suspended`;
-  }
-  if (phase === "failed") {
-    return `runtime.codex.${profileId}.failed`;
-  }
-  return `adapter.codex.${profileId}`;
+function randomHexSegment(): string {
+  return Math.floor(Math.random() * 10000).toString(RANDOM_ID_BASE).padStart(RANDOM_ID_PAD_LENGTH, "0");
 }
 
-function snapshotAgentState(agent: InstanceType<typeof Agent>, modelId: string): RuntimeExecutionState["agentState"] {
-  const state = agent.state;
+function createToolCallId(rawToolName: string): string {
+  return `lc-tool-${Date.now()}-${randomHexSegment()}-${randomHexSegment()}-${rawToolName}`;
+}
+
+function buildToolErrorLog(toolCall: ToolCall, message: string): ToolExecutionLog {
   return {
-    systemPrompt: state.systemPrompt,
-    model: {
-      provider: RUNTIME_PROVIDER,
-      id: modelId,
+    call: { ...toolCall, source: "agent-runtime" },
+    result: {
+      ok: false,
+      error: {
+        code: "execution_error",
+        tool: toolCall.name,
+        message,
+      },
+      meta: {
+        tool: toolCall.name,
+        durationMs: 0,
+      },
     },
-    thinkingLevel: state.thinkingLevel,
-    tools: state.tools.map((tool) => tool.name),
-    messages: state.messages as PiMessage[],
-    isStreaming: state.isStreaming,
-    streamMessage: state.streamMessage as PiMessage | null | undefined,
-    pendingToolCalls: Array.from(state.pendingToolCalls ?? []),
-    ...(state.error ? { error: state.error } : {}),
   };
 }
 
-function buildBaseRuntimeState(
-  channel: string,
-  sessionKey: string,
-  sessionId: string,
-  profileId: string,
-): RuntimeExecutionState {
-  const runId = createRuntimeRunId();
+function isAbortError(error: unknown): error is Error {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { name?: unknown }).name === "AbortError"
+  );
+}
+
+interface ToolExecutionState {
+  toolCalls: ToolCall[];
+  toolResults: ToolExecutionLog[];
+  readonly toolError: ToolError | undefined;
+  record(log: ToolExecutionLog): void;
+}
+
+function createToolExecutionState(): ToolExecutionState {
+  const toolCalls: ToolCall[] = [];
+  const toolResults: ToolExecutionLog[] = [];
+  const toolResultIndexById = new Map<string, number>();
+  const toolLogById = new Map<string, ToolExecutionLog>();
+  let toolError: ToolError | undefined;
+
   return {
-    version: RUNTIME_STATE_VERSION,
-    channel,
-    sessionKey,
-    sessionId,
-    provider: RUNTIME_PROVIDER,
-    profileId,
-    runId,
-    runCreatedAt: nowIso(),
-    runUpdatedAt: nowIso(),
-    phase: "running",
-    planId: `plan-${runId}`,
-    stepId: 0,
+    toolCalls,
+    toolResults,
+    get toolError() {
+      return toolError;
+    },
+    record(log: ToolExecutionLog): void {
+      const previousLog = toolLogById.get(log.call.id);
+      const mergedLog = previousLog ? { ...previousLog, ...log, call: log.call } : log;
+      const existingIndex = toolResultIndexById.get(log.call.id);
+
+      if (existingIndex === undefined) {
+        toolResultIndexById.set(log.call.id, toolResults.length);
+        toolCalls.push(mergedLog.call);
+        toolResults.push(mergedLog);
+      } else {
+        toolResults[existingIndex] = mergedLog;
+      }
+
+      toolLogById.set(log.call.id, mergedLog);
+
+      if (log.result.error) {
+        toolError = chooseFirstToolError(toolError, log.result.error);
+      }
+    },
   };
 }
 
 export interface RuntimeResult {
   adapter: AdapterResult;
-  restored: boolean;
 }
 
-// Core flow: 单次请求主流程从这里开始，后续步骤在该函数内顺序展开。
+function getAdapterStage(profileId: string, hasFailure: boolean): string {
+  return `${RUNTIME_ADAPTER_STAGE_PREFIX}.${profileId}${hasFailure ? ".failed" : ""}`;
+}
+
 export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<RuntimeResult> {
   const requestContext = input.requestContext;
   const requestId = requestContext.requestId;
-  const channel = input.channel || "agent";
   const toolSpecs = resolveTools(input.toolSpecs, input.withTools);
   const cwd = path.resolve(input.cwd || process.cwd());
+  const toolAllow = input.toolAllow || [];
   const toolNameMap = buildRuntimeToolNameMap(toolSpecs);
+  const toolState = createToolExecutionState();
 
   const { apiKey, profile } = await getOpenAICodexApiContext(requestContext.profileId);
   const model = getModel("openai-codex", OPENAI_CODEX_MODEL);
   if (!model) {
     throw new Error(`No model found: openai-codex/${OPENAI_CODEX_MODEL}`);
   }
-
   const profileId = profile.id;
-  const previous = await loadRuntimeExecutionState(channel, requestContext.sessionKey);
-  const shouldRestore = Boolean(
-    previous
-      && previous.phase !== "idle"
-      && previous.sessionId === requestContext.sessionId
-      && previous.profileId === profileId,
-  );
-
-  const runState = shouldRestore ? previous! : buildBaseRuntimeState(
-    channel,
-    requestContext.sessionKey,
-    requestContext.sessionId,
-    profileId,
-  );
-  const runId = runState.runId;
-  const planId = runState.planId || `plan-${runId}`;
-
-  let stepId = Number.isFinite(runState.stepId) ? Math.max(0, Math.floor(runState.stepId)) : 0;
-
-  const toolCalls: ToolCall[] = [];
-  const toolResults: ToolExecutionLog[] = [];
-  let toolError: ToolError | undefined;
-  const toolLogsById = new Map<string, ToolExecutionLog>();
-
-  const recordToolLog = (log: ToolExecutionLog) => {
-    const existing = toolLogsById.get(log.call.id);
-    if (!existing) {
-      toolCalls.push(log.call);
-      toolResults.push(log);
-      toolLogsById.set(log.call.id, log);
-    } else {
-      const merged = {
-        ...existing,
-        ...log,
-      };
-      toolLogsById.set(log.call.id, merged);
-      const index = toolResults.findIndex((entry) => entry.call.id === log.call.id);
-      if (index >= 0) {
-        toolResults[index] = merged;
-      }
-    }
-
-    if (isDefined(log.result.error)) {
-      toolError = chooseFirstToolError(toolError, log.result.error);
-    }
-  };
-
-  const sandbox = new ToolSandbox({
-    ...createDefaultToolSandboxOptions(),
-    ...(isDefined(input.timeoutMs) ? { timeoutMs: input.timeoutMs } : {}),
-    ...(isDefined(input.maxConcurrentTools) ? { maxConcurrentTools: input.maxConcurrentTools } : {}),
-    ...(isDefined(input.retryAttempts) ? { retryAttempts: input.retryAttempts } : {}),
-    ...(isDefined(input.retryDelayMs) ? { retryDelayMs: input.retryDelayMs } : {}),
-    ...(isDefined(input.toolAllow) && input.toolAllow.length > 0 ? { allowList: input.toolAllow } : {}),
-  });
 
   const runTool = async (toolCall: ToolCall, signal?: AbortSignal): Promise<ToolExecutionLog> => {
-    const log = await sandbox.execute(toolCall, {
-      requestId,
-      sessionId: requestContext.sessionId,
-      sessionKey: requestContext.sessionKey,
-      cwd,
-      signal,
-    });
-    recordToolLog(log);
-    return log;
+    const resolvedCall: ToolCall = {
+      ...toolCall,
+      id: toolCall.id || createToolCallId(toolCall.name || "unknown"),
+      source: "agent-runtime",
+    };
+
+    if (!isToolAllowed(resolvedCall.name, toolAllow)) {
+      const blocked = buildToolErrorLog(resolvedCall, `tool not allowed: ${resolvedCall.name}`);
+      toolState.record(blocked);
+      return blocked;
+    }
+
+    const startedAt = Date.now();
+    try {
+      const execution = await executeTool(resolvedCall, {
+        requestId,
+        sessionId: requestContext.sessionId,
+        sessionKey: requestContext.sessionKey,
+        cwd,
+        signal,
+      });
+      const log: ToolExecutionLog = {
+        call: {
+          ...execution.call,
+          id: resolvedCall.id,
+        },
+        result: {
+          ...execution.result,
+          meta: {
+            ...execution.result.meta,
+            tool: resolvedCall.name,
+            durationMs: Math.max(1, Date.now() - startedAt),
+          },
+        },
+      };
+      toolState.record(log);
+      return log;
+    } catch (error) {
+      const failed = buildToolErrorLog(
+        resolvedCall,
+        error instanceof Error ? error.message : "tool execution failed",
+      );
+      toolState.record(failed);
+      return failed;
+    }
   };
 
   const agentTools = createToolAdapter(toolSpecs, runTool, toolNameMap);
-  const initialMessages = (shouldRestore && runState.agentState?.messages?.length)
-    ? remapRuntimeMessages(runState.agentState.messages, toolNameMap.codexByCanonical)
-    : requestContext.messages;
-
   const agent = new Agent({
     initialState: {
       systemPrompt: requestContext.systemPrompt ?? "",
       model,
-      messages: initialMessages,
+      messages: requestContext.messages,
       tools: agentTools,
     },
     convertToLlm: (messages) =>
@@ -227,128 +223,45 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
 
   let finalMessage: Message | undefined;
   let finalStopReason: PiStopReason | undefined;
-  let lastError: string | undefined;
-  let finalPhase: RuntimeExecutionState["phase"] = "running";
   let runErr: Error | undefined;
-  let eventSeq = 0;
-  const persistBase = {
-    channel,
-    sessionKey: requestContext.sessionKey,
-    sessionId: requestContext.sessionId,
-    provider: RUNTIME_PROVIDER,
-    profileId,
-    runId,
-  };
-
-  const persistState = async (patch: Partial<RuntimeExecutionState>): Promise<void> => {
-    const eventId = `${requestId}-${++eventSeq}`;
-    await persistRuntimeExecutionState({
-      ...persistBase,
-      eventId,
-      patch,
-    });
-  };
-
-  const userMessage: Message = {
-    role: "user",
-    content: requestContext.input,
-    timestamp: Date.now(),
-  };
 
   const unsubscribe = agent.subscribe((event: AgentEvent) => {
-    if (event.type === "agent_start") {
-      finalPhase = "running";
-      void persistState({ phase: "running", stepId, planId, lastRequestId: requestId });
+    if (event.type === "message_end" && event.message.role === "assistant") {
+      finalMessage = event.message;
+      finalStopReason = event.message.stopReason;
     }
-
-    if (event.type === "turn_start") {
-      stepId += 1;
-      void persistState({ phase: "running", stepId, planId, lastRequestId: requestId });
-    }
-
-    if (event.type === "tool_execution_start") {
-      void persistState({ phase: "running", toolRunId: event.toolCallId, lastRequestId: requestId });
-    }
-
-    if (event.type === "tool_execution_end") {
-      void persistState({ phase: "running", toolRunId: undefined, lastRequestId: requestId });
-    }
-
-    if (event.type === "message_end") {
-      if (event.message.role === "assistant") {
-        finalMessage = event.message;
-        finalStopReason = event.message.stopReason;
-      }
-    }
-
-    if (event.type === "agent_end") {
-      finalPhase = finalPhase === "suspended" ? "suspended" : "idle";
-    }
-
-    const eventPhase: RuntimeExecutionState["phase"] = finalPhase;
-      void persistState({
-        phase: eventPhase,
-        stepId,
-        planId,
-        lastRequestId: requestId,
-        agentState: snapshotAgentState(agent, model.id),
-      });
   });
 
   try {
-    if (shouldRestore) {
-      if (shouldFollowUpBeforeContinue(previous!)) {
-        await agent.prompt(userMessage);
-      } else {
-        await agent.continue();
-        agent.followUp(userMessage);
-        await agent.continue();
-      }
-    } else {
-      await agent.prompt(userMessage);
-    }
+    await agent.prompt({
+      role: "user",
+      content: requestContext.input,
+      timestamp: Date.now(),
+    });
   } catch (error) {
     runErr = error instanceof Error ? error : new Error(String(error));
   } finally {
     unsubscribe();
-    if (runErr && isDefined((runErr as { name?: unknown }).name) && runErr.name === "AbortError") {
-      finalPhase = "suspended";
-      lastError = "agent runtime aborted while running tool steps";
-    }
   }
 
-  if (finalPhase !== "suspended" && runErr && !toolError) {
+  if (runErr && !toolState.toolError && !isAbortError(runErr)) {
     throw runErr;
   }
 
-  if (runErr && (toolError || finalPhase === "suspended")) {
-    finalPhase = finalPhase === "running" ? "failed" : finalPhase;
-    lastError = lastError || runErr.message;
-  }
-
+  const failed = Boolean(runErr);
   const finalAdapter: AdapterResult = {
     route: "codex",
-    stage: resolveStage(profileId, finalPhase),
+    stage: getAdapterStage(profileId, failed),
     result: toText(finalMessage) || requestContext.input,
-    toolCalls,
-    toolResults: toolResults.length > 0 ? toolResults : undefined,
+    toolCalls: toolState.toolCalls,
+    toolResults: toolState.toolResults.length > 0 ? toolState.toolResults : undefined,
     assistantMessage: finalMessage,
-    stopReason: finalStopReason,
+    stopReason: failed ? "tool_error_or_runtime_error" : finalStopReason,
     provider: RUNTIME_PROVIDER,
     profileId,
   };
 
-  await persistState({
-    phase: finalPhase,
-    stepId,
-    planId,
-    lastRequestId: requestId,
-    lastError,
-    agentState: snapshotAgentState(agent, model.id),
-  });
-
   return {
-    restored: shouldRestore,
     adapter: finalAdapter,
   };
 }

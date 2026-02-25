@@ -1,90 +1,107 @@
-import type { Message } from "@mariozechner/pi-ai";
 import { AgentTool } from "@mariozechner/pi-agent-core";
 import { ContextToolSpec } from "../shared/types.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
 import { listToolsCatalog } from "../tools/gateway.js";
-import type { RuntimeExecutionState } from "./schema.js";
+
+const TOOL_NAME_FALLBACK_PREFIX = "tool_";
+const RUNTIME_NAME_NORMALIZER = /[^a-zA-Z0-9_-]+/g;
 
 export interface RuntimeToolNameMap {
   codexByCanonical: Map<string, string>;
   canonicalByCodex: Map<string, string>;
 }
 
-// Core flow: createToolAdapter 是 runtime 的工具闭环入口，外层只负责协作，细节在内部函数里分解。
 export function createToolAdapter(
   tools: ContextToolSpec[],
   runTool: (call: ToolCall, signal?: AbortSignal) => Promise<ToolExecutionLog>,
   toolNameMap: RuntimeToolNameMap,
-  onToolRun?: () => void,
 ): AgentTool[] {
-  const normalizedTools = Array.isArray(tools)
-    ? tools.filter((tool): tool is ContextToolSpec => !!tool && typeof tool.name === "string")
-    : [];
+  const normalizedTools = Array.isArray(tools) ? tools.filter(isNamedToolSpec) : [];
 
-  return normalizedTools.map((spec) => ({
-    name: toolNameMap.codexByCanonical.get(spec.name) ?? toRuntimeToolName(spec.name),
-    label: spec.name,
-    description: spec.description,
-    parameters: spec.inputSchema as unknown as AgentTool["parameters"],
-    execute: async (toolCallId, params, signal) => {
-      onToolRun?.();
-      const codexName = toolNameMap.codexByCanonical.get(spec.name) ?? toRuntimeToolName(spec.name);
-      const canonicalName = toolNameMap.canonicalByCodex.get(codexName) ?? spec.name;
-      const log = await runTool(
-        {
-          id: toolCallId,
-          name: canonicalName,
-          args: params,
-          source: "agent-runtime",
-        },
-        signal,
-      );
-      if (!log.result.ok) {
-        throw new Error(log.result.error?.message ?? `tool ${spec.name} failed`);
-      }
+  return normalizedTools.map((spec) => {
+    const codexToolName = resolveRuntimeToolName(spec.name, toolNameMap);
+    const canonicalToolName = toolNameMap.canonicalByCodex.get(codexToolName) ?? spec.name;
 
-      return {
-        content: normalizeToolContent(log.result.content)
-          ? [{ type: "text", text: normalizeToolContent(log.result.content) }]
-          : [],
-        details: {
-          tool: canonicalName,
-          toolCallId: log.call.id,
-          meta: log.result.meta,
-        },
-      };
-    },
-  }));
+    return {
+      name: codexToolName,
+      label: spec.name,
+      description: spec.description,
+      parameters: spec.inputSchema as unknown as AgentTool["parameters"],
+      execute: async (toolCallId, params, signal) => {
+        const log = await runTool(
+          {
+            id: toolCallId,
+            name: canonicalToolName,
+            args: params,
+            source: "agent-runtime",
+          },
+          signal,
+        );
+
+        if (!log.result.ok) {
+          throw new Error(log.result.error?.message ?? `tool ${spec.name} failed`);
+        }
+
+        const contentText = normalizeToolContent(log.result.content);
+        return {
+          content: contentText ? [{ type: "text", text: contentText }] : [],
+          details: {
+            tool: canonicalToolName,
+            toolCallId: log.call.id,
+            meta: log.result.meta,
+          },
+        };
+      },
+    };
+  });
+}
+
+export function resolveTools(input: ContextToolSpec[] | undefined, withTools: boolean): ContextToolSpec[] {
+  if (!withTools || !Array.isArray(input)) {
+    return [];
+  }
+
+  return input.filter(isNamedToolSpec);
+}
+
+function isNamedToolSpec(tool: ContextToolSpec | undefined): tool is ContextToolSpec {
+  return Boolean(tool && typeof tool.name === "string" && tool.name.trim().length > 0);
 }
 
 function randomSuffix(): string {
   return Math.floor(Math.random() * 10000).toString(16).padStart(4, "0");
 }
 
-function toRuntimeToolName(raw: string): string {
-  const normalized = raw.trim().replace(/[^a-zA-Z0-9_-]+/g, "_");
-  return normalized.length > 0 ? normalized : `tool_${randomSuffix()}`;
+function resolveRuntimeToolName(rawName: string, map: RuntimeToolNameMap): string {
+  const normalized = toRuntimeToolName(rawName);
+  return map.codexByCanonical.get(rawName) ?? normalized;
+}
+
+function toRuntimeToolName(rawName: string): string {
+  const normalized = rawName.trim().replace(RUNTIME_NAME_NORMALIZER, "_");
+  return normalized.length > 0 ? normalized : `${TOOL_NAME_FALLBACK_PREFIX}${randomSuffix()}`;
 }
 
 export function buildRuntimeToolNameMap(toolSpecs: ContextToolSpec[]): RuntimeToolNameMap {
-  const used = new Set<string>();
+  const usedNames = new Set<string>();
   const codexByCanonical = new Map<string, string>();
   const canonicalByCodex = new Map<string, string>();
 
   for (const spec of toolSpecs) {
-    if (!spec || typeof spec.name !== "string" || !spec.name.trim()) {
+    if (!isNamedToolSpec(spec)) {
       continue;
     }
 
     const canonical = spec.name;
-    let preferred = toRuntimeToolName(canonical);
+    const preferred = toRuntimeToolName(canonical);
     let candidate = preferred;
     let suffix = 1;
-    while (used.has(candidate)) {
+    while (usedNames.has(candidate)) {
       suffix += 1;
       candidate = `${preferred}_${suffix}`;
     }
-    used.add(candidate);
+
+    usedNames.add(candidate);
     codexByCanonical.set(canonical, candidate);
     canonicalByCodex.set(candidate, canonical);
   }
@@ -92,99 +109,8 @@ export function buildRuntimeToolNameMap(toolSpecs: ContextToolSpec[]): RuntimeTo
   return { codexByCanonical, canonicalByCodex };
 }
 
-function sanitizeRuntimeToolName(raw: string, codexByCanonical: Map<string, string>): string {
-  return codexByCanonical.get(raw) ?? raw;
-}
-
-function remapToolNameInContent(content: unknown, codexByCanonical: Map<string, string>): unknown {
-  if (!content || typeof content !== "object") {
-    return content;
-  }
-
-  const candidate = content as Record<string, unknown>;
-  const type = typeof candidate.type === "string" ? candidate.type : "";
-  if (type !== "toolCall" && type !== "tool_call" && type !== "toolResult") {
-    return content;
-  }
-
-  const toolName =
-    typeof candidate.name === "string"
-      ? candidate.name
-      : typeof candidate.toolName === "string"
-        ? candidate.toolName
-        : "";
-  if (!toolName) {
-    return content;
-  }
-
-  const mapped = sanitizeRuntimeToolName(toolName, codexByCanonical);
-  if (type === "toolResult") {
-    return { ...candidate, toolName: mapped };
-  }
-  return { ...candidate, name: mapped };
-}
-
-export function remapRuntimeMessages(rawMessages: unknown, codexByCanonical: Map<string, string>): Message[] {
-  if (!Array.isArray(rawMessages)) {
-    return [];
-  }
-
-  return rawMessages
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return undefined;
-      }
-
-      const message = item as Record<string, unknown>;
-      const normalized: Record<string, unknown> = { ...message };
-
-      if (Array.isArray(message.content)) {
-        normalized.content = message.content.map((block) => remapToolNameInContent(block, codexByCanonical));
-      }
-
-      if (typeof message.toolName === "string") {
-        normalized.toolName = sanitizeRuntimeToolName(message.toolName, codexByCanonical);
-      }
-
-      return normalized as unknown as Message;
-    })
-    .filter((item): item is Message => item !== undefined);
-}
-
-export function shouldFollowUpBeforeContinue(previous: RuntimeExecutionState): boolean {
-  if (!previous) {
-    return false;
-  }
-
-  if (previous.phase !== "running" && previous.phase !== "failed") {
-    return false;
-  }
-
-  const hasPendingToolCalls =
-    Array.isArray(previous.agentState?.pendingToolCalls) && previous.agentState.pendingToolCalls.length > 0;
-  const hasInProgressTool = typeof previous.toolRunId === "string" && previous.toolRunId.length > 0;
-  const lastMessage = (Array.isArray(previous.agentState?.messages) ? previous.agentState.messages : [])
-    .at(-1);
-
-  if (hasInProgressTool || hasPendingToolCalls) {
-    return false;
-  }
-
-  return !!lastMessage && lastMessage.role !== "user";
-}
-
-export function resolveTools(input: ContextToolSpec[] | undefined, withTools: boolean): ContextToolSpec[] {
-  if (!withTools || !Array.isArray(input)) {
-    return [];
-  }
-  return input.filter((item) => item && typeof item.name === "string" && item.name.trim().length > 0);
-}
-
 export function chooseFirstToolError(first: ToolError | undefined, next: ToolError | undefined): ToolError | undefined {
-  if (first) {
-    return first;
-  }
-  return next;
+  return first ?? next;
 }
 
 export function firstToolErrorFromLogs(logs: ToolExecutionLog[] | undefined): ToolError | undefined {
@@ -192,22 +118,28 @@ export function firstToolErrorFromLogs(logs: ToolExecutionLog[] | undefined): To
     return undefined;
   }
 
-  let found: ToolError | undefined;
   for (const entry of logs) {
     if (entry?.result?.error) {
-      found = chooseFirstToolError(found, entry.result.error);
-      if (found) {
-        return found;
-      }
+      return entry.result.error;
     }
   }
 
-  return found;
+  return undefined;
 }
 
 export function buildToolMessages(calls: ToolCall[], results: ToolExecutionLog[]): string {
+  const resultById = new Map<string, ToolExecutionLog>();
+  const resultByName = new Map<string, ToolExecutionLog>();
+
+  for (const result of results) {
+    resultById.set(result.call.id, result);
+    if (!resultByName.has(result.call.name)) {
+      resultByName.set(result.call.name, result);
+    }
+  }
+
   const normalized = calls.map((call) => {
-    const matched = results.find((result) => result.call.id === call.id || result.call.name === call.name);
+    const matched = resultById.get(call.id) || resultByName.get(call.name);
     if (!matched) {
       return {
         call,

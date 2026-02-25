@@ -2,7 +2,7 @@
 
 本指南用于在不依赖飞书（`feishu`）的情况下完成 `lainclaw` 本地全流程运行与验收。
 
-> 说明：当前实现基于 `pi-agent-core` 运行时重写，`agent` 与 `gateway` 本地入口共享同一运行态执行模型，逻辑集中在顶层 `src/runtime`，支持 `run/plan/step` 中间态持久化、tool-call 沙箱和按 channel 的恢复机制。
+> 说明：当前实现基于 `pi-agent-core` 运行时重写，`agent` 与 `gateway` 本地入口共享同一执行模型，逻辑集中在顶层 `src/runtime`，按会话上下文单次执行，不依赖 `run/plan/step` 恢复机制。
 
 ## 1. 快速准备
 
@@ -117,9 +117,8 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
   - 第一次：`你好，我要测试上下文`
   - 第二次：`上面我刚才说了什么`
 - outbox 中第二次响应应体现已读取上下文（若 provider 为 openai-codex 且记忆可用）。
-- 运行态恢复核验：
-  - 观察 `~/.lainclaw/runtime/local--<sessionKey>.json` 的 `current.phase`，应在完成后落到可恢复状态（`idle`/`completed`）。
-  - 若把 `current.phase` 人工改为 `running` 再重启，后续同 session 请求应仍能继续执行，不应出现历史消息角色错误。
+- 单次执行核验：
+  - 同一 `sessionKey` 的多轮消息应在返回中可见上下文影响，且不依赖 `~/.lainclaw/runtime` 中的恢复文件。
 
 ### 4.3 工具调用
 - 在 local 模式下发送：
@@ -141,7 +140,7 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
 - 触发工具链连续执行场景，确认输出含有可追溯错误并返回错误记录。
 
 ### 4.6 文档收口检查（可选）
-- 查看 `docs/wip/20260225-pi-agent-core-runtime-rewrite/verification.md`，确认本地恢复、运行态文件、tool sandbox 与文档更新都已完成归档。
+- 查看当前 WIP 文档中的提案与实施计划，确认 runtime 行为与文档说明保持一致。
 
 ## 5. 环境变量（排障与定制）
 

@@ -17,9 +17,7 @@ CLI（node dist/index.js）
           │   ├─ context.ts（上下文与请求基元）
           │   ├─ tools.ts（工具白名单/结果组装）
           │   ├─ persistence.ts（会话与记忆持久化）
-          │   ├─ entrypoint.ts（pi-agent-core 运行时编排）
-          │   ├─ stateStore.ts / schema.ts / migration.ts（运行态持久化）
-          │   └─ toolSandbox.ts（工具隔离/超时/重试）
+          │   └─ entrypoint.ts（pi-agent-core 运行时编排，单次执行）
           ├─ src/adapters/codexAdapter.ts（openai-codex）
           ├─ src/adapters/stubAdapter.ts（非 codex 回退）
           ├─ src/tools/gateway.ts / src/tools/registry.ts / executor.ts（工具执行）
@@ -47,23 +45,17 @@ CLI（node dist/index.js）
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与审计记录构建。
 - `src/runtime/tools.ts`
-  - 封装工具白名单与工具名映射、tool-call 映射与执行日志归并。
+  - 封装工具白名单与工具名映射、执行日志归并；工具真实执行由 `tools/executor` 完成。
 - `src/runtime/coordinator.ts` 与 `src/runtime/entrypoint.ts` 的数据流
   - `coordinator` 负责输入准备（会话/系统提示/工具列表）与执行结果收口；
-  - `entrypoint` 负责运行时生命周期推进、恢复策略与状态快照持久化。
+  - `entrypoint` 负责单次执行流程调度、工具回调与结果归并。
 - `runtime` 可观测统一字段
-  - `entrypoint` 与 `toolSandbox` 采用 `stage` 维度打点，字段包含 `stage`、`sessionKey`、`runId/planId`、`toolRunId`（可选）、`durationMs`、`errorCode`（可选）。
+  - `entrypoint` 采用 `stage` 维度打点，核心字段保留 `stage`、`sessionKey`、`durationMs`、`errorCode`（可选）。
   - `LAINCLAW_RUNTIME_TRACE=1|true` 时记录标准化调试事件；默认保持原有日志语义。
 - `src/runtime/persistence.ts`
   - 封装会话轨迹、路由记录、记忆压缩相关的持久化写入。
 - `src/runtime/entrypoint.ts`
-  - 基于 `pi-agent-core` 的统一执行入口；维护运行时生命周期（`running/suspended/failed/idle`）、恢复检查点与步骤推进。
-- `src/runtime/schema.ts`
-- `src/runtime/migration.ts`
-- `src/runtime/stateStore.ts`
-  - 持久化运行状态（`runId/planId/stepId/phase/toolRunId`）并支持跨请求恢复。
-- `src/runtime/toolSandbox.ts`
-  - 统一工具执行隔离策略（超时、并发、重试、错误策略），并执行权限白名单与工具运行日志。
+  - 基于 `pi-agent-core` 的统一执行入口；维护单次执行的工具回调与错误归并。
 
 ## 运行入口收口说明（新增）
 
@@ -100,10 +92,10 @@ CLI（node dist/index.js）
 
 1. 用户输入通过 `agent` 或网关（Feishu/本地）进入 `runAgent`。
 2. `runAgent` 合并上下文：`SessionRecord` -> 最近对话 -> 历史/长期记忆提示。
-3. `runAgent` 进入 `runtime` 层；`entrypoint` 基于 `pi-agent-core` 建立/恢复 plan 执行状态。
+3. `runAgent` 进入 `runtime` 层；`entrypoint` 基于 `pi-agent-core` 按会话上下文执行单次会话流程。
 4. `runAgent` 与 `runtime` 协同选择执行策略；若为 codex 路径则调用模型。
-5. 返回中如出现 tool-call，`pi-agent-core` 触发工具执行，`toolSandbox` 与 `executor` 联动后再把结果回填给模型。
-6. 最终输出写入会话轨迹（JSONL）和记忆文件（可选）；运行时状态写入 `~/.lainclaw/runtime` 以供下一次恢复。
+5. 返回中如出现 tool-call，`pi-agent-core` 触发工具执行，`executor` 回填结果后继续对话。
+6. 最终输出写入会话轨迹（JSONL）和记忆文件（可选）；不保留运行态恢复文件。
 
 ## CLI 层重构说明（结构优化）
 
@@ -153,7 +145,6 @@ CLI（node dist/index.js）
 - Gateway 配置：`~/.lainclaw/gateway.json`
 - Gateway 服务状态：`~/.lainclaw/service/gateway-service.json`
 - Gateway 日志：`~/.lainclaw/service/gateway-service.log`
-- Runtime 状态文件：`~/.lainclaw/runtime/<channel>--<sessionKey>.json`
 - Heartbeat 运行日志：`~/.lainclaw/heartbeat-run.log`
 - Local Gateway 文件队列：`~/.lainclaw/local-gateway/local-gateway-inbox.jsonl` 与 `~/.lainclaw/local-gateway/local-gateway-outbox.jsonl`
 - 配对与网关配置兼容历史文件：`~/.lainclaw/<channel>-gateway.json`（迁移场景下存在）
