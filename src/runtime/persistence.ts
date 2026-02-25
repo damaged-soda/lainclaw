@@ -1,6 +1,6 @@
-import type { SessionHistoryMessage } from "../../shared/types.js";
-import type { AdapterResult } from "../../adapters/stubAdapter.js";
-import type { ToolCall, ToolExecutionLog } from "../../tools/types.js";
+import type { SessionHistoryMessage } from "../shared/types.js";
+import type { AdapterResult } from "../adapters/stubAdapter.js";
+import type { ToolCall, ToolExecutionLog } from "../tools/types.js";
 import {
   appendSessionMessage,
   appendSessionMemory,
@@ -8,7 +8,7 @@ import {
   getSessionMemoryPath,
   recordSessionRoute,
   updateSessionRecord,
-} from "../../sessions/sessionStore.js";
+} from "../sessions/sessionStore.js";
 import { createMessageId } from "./context.js";
 import { buildToolMessages } from "./tools.js";
 

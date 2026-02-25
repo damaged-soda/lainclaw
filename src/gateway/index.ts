@@ -1,1 +1,1 @@
-export { runAgent } from "./gateway.js";
+export { runAgent } from "./runAgent.js";

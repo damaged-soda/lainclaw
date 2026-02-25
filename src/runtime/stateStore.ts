@@ -6,7 +6,7 @@ import {
   RuntimeStateEnvelope,
   RUNTIME_STATE_VERSION,
 } from "./schema.js";
-import { resolveAuthDirectory } from "../../../auth/configStore.js";
+import { resolveAuthDirectory } from "../auth/configStore.js";
 import { migrateRuntimeStateEnvelope } from "./migration.js";
 
 interface RuntimeStateStoreParams {

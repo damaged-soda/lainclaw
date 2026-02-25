@@ -1,1 +1,1 @@
-export { runAgent } from "./agent/coordinator.js";
+export { runAgent } from "../runtime/coordinator.js";

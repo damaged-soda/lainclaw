@@ -7,19 +7,23 @@ CLI（node dist/index.js）
   └─ src/index.ts
       └─ src/cli/cli.ts（参数路由）
           ├─ src/gateway/gateway.ts（兼容入口）
-          │   ├─ src/gateway/agent/
-          │   │   ├─ coordinator.ts（runAgent 顶层编排透传）
-          │   │   ├─ context.ts（上下文与请求基元）
-          │   │   ├─ tools.ts（工具白名单/结果组装）
-          │   │   └─ persistence.ts（会话与记忆持久化）
-          │   ├─ src/gateway/runtime/
-          │   │   ├─ entrypoint.ts（pi-agent-core 运行时编排）
-          │   │   ├─ state/schema.ts / state/migration.ts / state/stateStore.ts（运行态持久化）
-          │   │   └─ sandbox/toolSandbox.ts（工具隔离/超时/重试）
-          │   ├─ src/adapters/codexAdapter.ts（openai-codex）
-          │   └─ src/adapters/stubAdapter.ts（非 codex 回退）
-          │   ├─ src/tools/gateway.ts / src/tools/registry.ts / executor.ts（工具执行）
-          │   └─ src/sessions/sessionStore.ts（会话与记忆）
+          │   ├─ src/gateway/service.ts（服务生命周期）
+          │   ├─ src/gateway/servicePaths.ts（服务路径）
+          │   ├─ src/gateway/serviceState.ts（服务状态）
+          │   ├─ src/gateway/serviceProcess.ts（子进程）
+          ├─ src/runtime/
+          │   ├─ index.ts（稳定 API 导出）
+          │   ├─ coordinator.ts（runAgent 顶层编排）
+          │   ├─ context.ts（上下文与请求基元）
+          │   ├─ tools.ts（工具白名单/结果组装）
+          │   ├─ persistence.ts（会话与记忆持久化）
+          │   ├─ entrypoint.ts（pi-agent-core 运行时编排）
+          │   ├─ stateStore.ts / schema.ts / migration.ts（运行态持久化）
+          │   └─ toolSandbox.ts（工具隔离/超时/重试）
+          ├─ src/adapters/codexAdapter.ts（openai-codex）
+          ├─ src/adapters/stubAdapter.ts（非 codex 回退）
+          ├─ src/tools/gateway.ts / src/tools/registry.ts / executor.ts（工具执行）
+          ├─ src/sessions/sessionStore.ts（会话与记忆）
           ├─ src/channels/feishu/server.ts（飞书网关）
           ├─ src/channels/local/server.ts（本地网关）
           └─ src/heartbeat/*.ts（定时任务与运行日志）
@@ -32,22 +36,26 @@ CLI（node dist/index.js）
   - 通过 `src/cli/registry.ts` 维护 `CommandRoute` 注册表，由 `runCommand` 风格执行层统一处理错误与返回码。
   - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口，但不变更命令语义与外部行为。
 - `src/gateway/gateway.ts`
-  - 作为 `agent` 模块兼容入口，继续对外导出 `runAgent`。
+  - 作为通道边界入口，接受 agent/gateway 输入并向下分发到 `runtime`。
 - `src/gateway/runAgent.ts`
-  - 仅保留 `runAgent` 导出与参数透传。
-- `src/gateway/agent/coordinator.ts`
+  - 仅保留 `runAgent` 的桥接导出。
+- `src/runtime/index.ts`
+  - 暴露稳定的 `runAgent` API，并保持对 `gateway` 的兼容导出协议。
+- `src/runtime/coordinator.ts`
   - 组织 `runAgent` 的顶层流程：新建会话、手工/自动工具路径选择、模型执行、结果汇总。
-- `src/gateway/agent/context.ts`
+- `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与审计记录构建。
-- `src/gateway/agent/tools.ts`
+- `src/runtime/tools.ts`
   - 封装工具白名单校验、tool-call 结果渲染与执行日志归并。
-- `src/gateway/agent/persistence.ts`
+- `src/runtime/persistence.ts`
   - 封装会话轨迹、路由记录、记忆压缩相关的持久化写入。
-- `src/gateway/runtime/entrypoint.ts`
+- `src/runtime/entrypoint.ts`
   - 基于 `pi-agent-core` 的统一执行入口；维护运行时生命周期（`running/suspended/failed/idle`）、恢复检查点与步骤推进。
-- `src/gateway/runtime/state/*`
+- `src/runtime/schema.ts`
+- `src/runtime/migration.ts`
+- `src/runtime/stateStore.ts`
   - 持久化运行状态（`runId/planId/stepId/phase/toolRunId`）并支持跨请求恢复。
-- `src/gateway/runtime/sandbox/toolSandbox.ts`
+- `src/runtime/toolSandbox.ts`
   - 统一工具执行隔离策略（超时、并发、重试、错误策略），并执行权限白名单与工具运行日志。
 - `src/adapters/codexAdapter.ts`
   - 对接模型 SDK（`@mariozechner/pi-ai`），处理工具 schema 映射与 tool-call 解析。

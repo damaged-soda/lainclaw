@@ -1,7 +1,7 @@
-import { executeTool } from "../../../tools/executor.js";
-import type { ToolCall, ToolExecutionLog, ToolErrorCode } from "../../../tools/types.js";
-import type { ToolContext } from "../../../tools/types.js";
-import { isToolAllowed } from "../../../tools/registry.js";
+import { executeTool } from "../tools/executor.js";
+import type { ToolCall, ToolExecutionLog, ToolErrorCode } from "../tools/types.js";
+import type { ToolContext } from "../tools/types.js";
+import { isToolAllowed } from "../tools/registry.js";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_CONCURRENT = 2;

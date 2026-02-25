@@ -2,7 +2,7 @@
 
 本指南用于在不依赖飞书（`feishu`）的情况下完成 `lainclaw` 本地全流程运行与验收。
 
-> 说明：当前实现基于 `pi-agent-core` 运行时重写，`agent` 与 `gateway` 本地入口共享同一运行态执行模型，支持 `run/plan/step` 中间态持久化、tool-call 沙箱和按 channel 的恢复机制。
+> 说明：当前实现基于 `pi-agent-core` 运行时重写，`agent` 与 `gateway` 本地入口共享同一运行态执行模型，逻辑集中在顶层 `src/runtime`，支持 `run/plan/step` 中间态持久化、tool-call 沙箱和按 channel 的恢复机制。
 
 ## 1. 快速准备
 

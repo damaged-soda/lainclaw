@@ -4,14 +4,14 @@ import {
   PromptAuditRecord,
   RequestContext,
   SessionHistoryMessage,
-} from "../../shared/types.js";
-import { OPENAI_CODEX_MODEL } from "../../auth/authManager.js";
+} from "../shared/types.js";
+import { OPENAI_CODEX_MODEL } from "../auth/authManager.js";
 import {
   buildAgentSystemPrompt,
   inspectWorkspaceContext,
   resolveWorkspaceDir,
-} from "../../shared/workspaceContext.js";
-import { ValidationError } from "../../shared/types.js";
+} from "../shared/workspaceContext.js";
+import { ValidationError } from "../shared/types.js";
 
 export const DEFAULT_SESSION_KEY = "main";
 export const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;

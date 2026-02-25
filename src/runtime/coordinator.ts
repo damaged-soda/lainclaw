@@ -1,7 +1,7 @@
-import { type GatewayResult } from "../../shared/types.js";
-import { ValidationError, type RequestContext } from "../../shared/types.js";
-import type { ToolExecutionLog, ToolError } from "../../tools/types.js";
-import { runOpenAICodexRuntime } from "../runtime/entrypoint.js";
+import { type GatewayResult } from "../shared/types.js";
+import { ValidationError, type RequestContext } from "../shared/types.js";
+import type { ToolExecutionLog, ToolError } from "../tools/types.js";
+import { runOpenAICodexRuntime } from "./entrypoint.js";
 import {
   appendTurnMessages,
   appendToolSummaryToHistory,
@@ -32,7 +32,7 @@ import {
   getRecentSessionMessages,
   getSessionMemoryPath,
   loadSessionMemorySnippet,
-} from "../../sessions/sessionStore.js";
+} from "../sessions/sessionStore.js";
 
 type RunAgentOptions = {
   provider?: string;

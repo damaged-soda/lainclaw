@@ -2,19 +2,19 @@ import path from "node:path";
 import { Agent, type AgentEvent, type AgentTool } from "@mariozechner/pi-agent-core";
 import { getModel, type Message as PiMessage, type StopReason as PiStopReason } from "@mariozechner/pi-ai";
 import type { Message } from "@mariozechner/pi-ai";
-import { getOpenAICodexApiContext, OPENAI_CODEX_MODEL } from "../../auth/authManager.js";
-import { ContextToolSpec, RequestContext } from "../../shared/types.js";
-import type { AdapterResult } from "../../adapters/stubAdapter.js";
-import { chooseFirstToolError, resolveStepLimitError } from "../agent/tools.js";
-import { resolveToolMaxSteps } from "../agent/context.js";
-import { ToolSandbox, createDefaultToolSandboxOptions } from "./sandbox/toolSandbox.js";
+import { getOpenAICodexApiContext, OPENAI_CODEX_MODEL } from "../auth/authManager.js";
+import { ContextToolSpec, RequestContext } from "../shared/types.js";
+import type { AdapterResult } from "../adapters/stubAdapter.js";
+import { chooseFirstToolError, resolveStepLimitError } from "./tools.js";
+import { resolveToolMaxSteps } from "./context.js";
+import { ToolSandbox, createDefaultToolSandboxOptions } from "./toolSandbox.js";
 import {
   createRuntimeRunId,
   loadRuntimeExecutionState,
   persistRuntimeExecutionState,
-} from "./state/stateStore.js";
-import type { ToolCall, ToolExecutionLog, ToolError } from "../../tools/types.js";
-import type { RuntimeExecutionState } from "./state/schema.js";
+} from "./stateStore.js";
+import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
+import type { RuntimeExecutionState } from "./schema.js";
 
 interface RuntimeOptions {
   requestContext: RequestContext;

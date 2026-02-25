@@ -102,7 +102,7 @@ node dist/index.js gateway start --channel local --provider openai-codex --profi
 ## 飞书（Feishu）网关接入（WS-only）
 
 当前的 `feishu` 通道仅支持 **WebSocket 长连接模式**（不使用 Webhook）。统一入口为 `gateway` 命令，默认通道为 `feishu`，可通过 `--channel` 覆盖（当前实现仍仅支持 `feishu`）。
-> 内部说明：`gateway` 相关实现已拆分为 `src/gateway` 的 `gateway.ts`（兼容入口）、`runtime/`（`pi-agent-core` 适配与运行态持久化）、`agent/`（`coordinator/context/tools/persistence` 四层）与 `service*.ts`（服务生命周期），外部行为保持不变。
+> 内部说明：当前 `agent` 与 `gateway` 的运行编排已统一到顶层 `src/runtime`（`coordinator/context/tools/persistence/entrypoint/state` 等），`gateway` 层保留通道与服务边界，外部行为保持不变。
 
 ### 启动方式
 

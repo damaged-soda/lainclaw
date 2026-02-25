@@ -1,9 +1,9 @@
 import type { Message } from "@mariozechner/pi-ai";
 import path from "node:path";
-import { OPENAI_CODEX_MODEL } from "../../auth/authManager.js";
-import type { ToolCall, ToolContext, ToolExecutionLog, ToolError } from "../../tools/types.js";
-import { getToolInfo, invokeToolsForAgent, listToolsCatalog } from "../../tools/gateway.js";
-import { isToolAllowed } from "../../tools/registry.js";
+import { OPENAI_CODEX_MODEL } from "../auth/authManager.js";
+import type { ToolCall, ToolContext, ToolExecutionLog, ToolError } from "../tools/types.js";
+import { getToolInfo, invokeToolsForAgent, listToolsCatalog } from "../tools/gateway.js";
+import { isToolAllowed } from "../tools/registry.js";
 
 const TOOL_PARSE_PREFIX = "tool:";
 
