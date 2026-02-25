@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GatewayResult, PromptAudit } from "./types.js";
+import type { GatewayResult } from "./types.js";
 
 type AgentChannel = "local" | "feishu";
 
@@ -16,7 +16,6 @@ interface AgentAuditOutput {
   toolResults?: unknown;
   toolError?: unknown;
   sessionContextUpdated?: boolean;
-  promptAudit?: PromptAudit;
   error?: string;
   errorKind?: string;
   timeoutMs?: number;
@@ -59,7 +58,6 @@ function buildAuditOutput(result: GatewayResult): AgentAuditOutput {
     ...(result.toolResults ? { toolResults: result.toolResults } : {}),
     ...(result.toolError ? { toolError: result.toolError } : {}),
     ...(typeof result.sessionContextUpdated === "boolean" ? { sessionContextUpdated: result.sessionContextUpdated } : {}),
-    ...(result.promptAudit ? { promptAudit: result.promptAudit } : {}),
   };
 }
 

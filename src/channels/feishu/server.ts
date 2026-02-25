@@ -348,7 +348,6 @@ async function handleWsPayload(
         ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
         ...(typeof config.toolMaxSteps === "number" ? { toolMaxSteps: config.toolMaxSteps } : {}),
         memory: config.memory,
-        includePromptAudit: options.auditDebug,
       }),
       new Promise<never>((_, reject) => {
         setTimeout(() => {
@@ -357,25 +356,23 @@ async function handleWsPayload(
       }),
     ]);
 
-    if (runResult.promptAudit) {
-          await writeAgentAuditRecord({
-        channel: "feishu",
-        requestId: runResult.requestId,
-        requestSource: inbound.requestId,
-        sessionKey: runResult.sessionKey,
-        input: inbound.input,
-        result: runResult,
-        emitToStdout: options.auditDebug,
-        auditStage: "runAgent.feishu.success",
-        metadata: {
-          inboundRequestId: inbound.requestId,
-          openId: inbound.openId,
-          chatId: inbound.chatId,
-          chatType: inbound.chatType,
-          messageId: inbound.messageId,
-        },
-      });
-    }
+    await writeAgentAuditRecord({
+      channel: "feishu",
+      requestId: runResult.requestId,
+      requestSource: inbound.requestId,
+      sessionKey: runResult.sessionKey,
+      input: inbound.input,
+      result: runResult,
+      emitToStdout: options.auditDebug,
+      auditStage: "runAgent.feishu.success",
+      metadata: {
+        inboundRequestId: inbound.requestId,
+        openId: inbound.openId,
+        chatId: inbound.chatId,
+        chatType: inbound.chatType,
+        messageId: inbound.messageId,
+      },
+    });
 
     await sendFeishuTextMessage(config, {
       openId: inbound.openId,

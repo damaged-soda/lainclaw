@@ -28,30 +28,6 @@ export interface RequestContext {
   memoryEnabled?: boolean;
 }
 
-export interface PromptAuditContext {
-  requestId: string;
-  createdAt: string;
-  input: string;
-  sessionKey: string;
-  sessionId: string;
-  provider?: string;
-  profileId?: string;
-  systemPrompt: string;
-  messages: Message[];
-  tools?: ContextToolSpec[];
-}
-
-export interface PromptAuditRecord {
-  step: number;
-  routeDecision?: string;
-  requestContext: PromptAuditContext;
-}
-
-export interface PromptAudit {
-  enabled: boolean;
-  records: PromptAuditRecord[];
-}
-
 export interface PipelineResult {
   requestId: string;
   createdAt: string;
@@ -90,7 +66,6 @@ export interface GatewayResult {
   memoryEnabled: boolean;
   memoryUpdated: boolean;
   memoryFile?: string;
-  promptAudit?: PromptAudit;
 }
 
 export class ValidationError extends Error {

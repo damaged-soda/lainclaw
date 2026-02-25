@@ -1,7 +1,6 @@
 import type { Message } from "@mariozechner/pi-ai";
 import {
   ContextToolSpec,
-  PromptAuditRecord,
   RequestContext,
   SessionHistoryMessage,
 } from "../shared/types.js";
@@ -26,7 +25,7 @@ interface RuntimeContextMessages {
   historyContext: Message[];
 }
 
-// Core flow: 上下文构建与审计记录放在文件开头，主流程先见。
+// Core flow: 上下文构建与主流程入参准备
 export function buildRuntimeRequestContext(params: {
   requestId: string;
   createdAt: string;
@@ -67,33 +66,6 @@ export function buildRuntimeRequestContext(params: {
   );
 
   return { requestContext, contextMessages, historyContext };
-}
-
-export function buildPromptAuditRecord(
-  step: number,
-  requestContext: RequestContext,
-  routeDecision?: string,
-): PromptAuditRecord {
-  const clonedMessages = JSON.parse(JSON.stringify(requestContext.messages)) as Message[];
-  const clonedTools = Array.isArray(requestContext.tools) && requestContext.tools.length > 0
-    ? (JSON.parse(JSON.stringify(requestContext.tools)) as ContextToolSpec[])
-    : undefined;
-  return {
-    step,
-    ...(typeof routeDecision === "string" && routeDecision.trim() ? { routeDecision } : {}),
-    requestContext: {
-      requestId: requestContext.requestId,
-      createdAt: requestContext.createdAt,
-      input: requestContext.input,
-      sessionKey: requestContext.sessionKey,
-      sessionId: requestContext.sessionId,
-      ...(requestContext.provider ? { provider: requestContext.provider } : {}),
-      ...(requestContext.profileId ? { profileId: requestContext.profileId } : {}),
-      systemPrompt: requestContext.systemPrompt ?? "",
-      messages: clonedMessages,
-      ...(clonedTools ? { tools: clonedTools } : {}),
-    },
-  };
 }
 
 function nowTs() {

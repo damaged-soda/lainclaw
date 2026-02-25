@@ -9,7 +9,6 @@ import {
 } from "./persistence.js";
 import { listAutoTools } from "./tools.js";
 import {
-  buildPromptAuditRecord,
   buildWorkspaceSystemPrompt,
   buildRuntimeRequestContext,
   createRequestId,
@@ -40,7 +39,6 @@ type RunAgentOptions = {
   toolAllow?: string[];
   toolMaxSteps?: number;
   cwd?: string;
-  includePromptAudit?: boolean;
   channel?: string;
 };
 
@@ -105,14 +103,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
 
   const memorySnippet = session.memoryEnabled ? await loadSessionMemorySnippet(session.sessionKey) : "";
   const priorMessages = await getRecentSessionMessages(session.sessionId);
-  const promptAudit = opts.includePromptAudit ? { enabled: true, records: [] } : undefined;
-
-  const recordPromptAudit = (requestContext: RequestContext, routeDecision: string) => {
-    if (!promptAudit) {
-      return;
-    }
-    promptAudit.records.push(buildPromptAuditRecord(promptAudit.records.length + 1, requestContext, routeDecision));
-  };
 
   const autoTools = listAutoTools(toolAllow);
   const { requestContext } = buildRuntimeRequestContext({
@@ -147,7 +137,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const toolError = firstToolErrorFromLogs(toolResults);
   const sessionContextUpdated = toolResults.length > 0;
 
-  recordPromptAudit(requestContext, runtimeResult.restored ? "runtime.restore" : "runtime.new");
   if (toolResults.length > 0) {
     await appendToolSummaryToHistory(
       session.sessionId,
@@ -187,7 +176,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     toolResults: toolResults.length > 0 ? toolResults : undefined,
     ...(toolError ? { toolError } : {}),
     sessionContextUpdated,
-    ...(promptAudit ? { promptAudit } : {}),
   };
 }
 

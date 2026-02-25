@@ -3,7 +3,6 @@ import path from "node:path";
 import os from "node:os";
 import { runAgent } from "../../gateway/gateway.js";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
-import { type PromptAudit } from "../../shared/types.js";
 import {
   writeAgentAuditRecord,
 } from "../../shared/agentAudit.js";
@@ -44,7 +43,6 @@ interface LocalRunboxRecord {
     toolResults?: unknown;
     toolError?: unknown;
     sessionContextUpdated?: boolean;
-    promptAudit?: PromptAudit;
   };
 }
 
@@ -203,7 +201,6 @@ function buildRunboxRecord(
       ...(response.toolResults ? { toolResults: response.toolResults } : {}),
       ...(response.toolError ? { toolError: response.toolError } : {}),
       ...(response.sessionContextUpdated ? { sessionContextUpdated: response.sessionContextUpdated } : {}),
-      ...(response.promptAudit ? { promptAudit: response.promptAudit } : {}),
     },
   };
 }
@@ -311,27 +308,24 @@ export async function runLocalGatewayServer(
             ...(typeof opts.memory === "boolean" ? { memory: opts.memory } : {}),
             ...(typeof sessionKey === "string" && sessionKey.trim() ? { sessionKey } : {}),
             channel: "local",
-            includePromptAudit: context.debug,
           });
 
           const record = buildRunboxRecord(result, input, requestSource, sessionKey);
-          if (result.promptAudit) {
-            await writeAgentAuditRecord({
+          await writeAgentAuditRecord({
+            channel: "local",
+            requestId: result.requestId,
+            requestSource,
+            sessionKey,
+            input,
+            emitToStdout: context.debug,
+            auditStage: "runAgent.local.success",
+            result,
+            metadata: {
               channel: "local",
-              requestId: result.requestId,
               requestSource,
-              sessionKey,
-              input,
-              emitToStdout: context.debug,
-              auditStage: "runAgent.local.success",
-              result,
-              metadata: {
-                channel: "local",
-                requestSource,
-                auditMode: "stream",
-              },
-            });
-          }
+              auditMode: "stream",
+            },
+          });
           await appendLine(outboxPath, writeRunboxRecordSafe(record));
           console.log(`[local] ${requestSource} route=${result.route} stage=${result.stage}`);
           continue;
