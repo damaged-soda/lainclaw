@@ -375,6 +375,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
         provider: resolveText(options.provider) || ruleCtx.provider,
         profileId: resolveText(options.profileId) || ruleCtx.profileId,
+        channel: "heartbeat",
         withTools: typeof options.withTools === 'boolean' ? options.withTools : ruleCtx.withTools,
         toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
         toolMaxSteps: options.toolMaxSteps ?? ruleCtx.toolMaxSteps,

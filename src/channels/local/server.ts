@@ -310,6 +310,7 @@ export async function runLocalGatewayServer(
             ...(typeof opts.toolMaxSteps === "number" ? { toolMaxSteps: opts.toolMaxSteps } : {}),
             ...(typeof opts.memory === "boolean" ? { memory: opts.memory } : {}),
             ...(typeof sessionKey === "string" && sessionKey.trim() ? { sessionKey } : {}),
+            channel: "local",
             includePromptAudit: context.debug,
           });
 

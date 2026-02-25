@@ -3,6 +3,7 @@ export interface ToolContext {
   sessionId: string;
   sessionKey: string;
   cwd: string;
+  signal?: AbortSignal;
 }
 
 export interface ToolInputProperty {

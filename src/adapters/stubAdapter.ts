@@ -1,11 +1,13 @@
 import type { Message } from "@mariozechner/pi-ai";
 import { RequestContext } from "../shared/types.js";
+import type { ToolExecutionLog } from "../tools/types.js";
 
 export interface AdapterResult {
   route: string;
   stage: string;
   result: string;
   toolCalls?: import("../tools/types.js").ToolCall[];
+  toolResults?: ToolExecutionLog[];
   assistantMessage?: Message;
   stopReason?: string;
   provider?: string;

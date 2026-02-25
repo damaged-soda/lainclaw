@@ -31,6 +31,7 @@ export async function runAgentCommand(args: string[]): Promise<number> {
       ...(typeof withTools === "boolean" ? { withTools } : {}),
       ...(toolAllow ? { toolAllow } : {}),
       ...(typeof toolMaxSteps === "number" ? { toolMaxSteps } : {}),
+      channel: "agent",
     });
 
     if (response.success) {

@@ -8,10 +8,14 @@ CLI（node dist/index.js）
       └─ src/cli/cli.ts（参数路由）
           ├─ src/gateway/gateway.ts（兼容入口）
           │   ├─ src/gateway/agent/
-          │   │   ├─ coordinator.ts（runAgent 顶层编排）
+          │   │   ├─ coordinator.ts（runAgent 顶层编排透传）
           │   │   ├─ context.ts（上下文与请求基元）
-          │   │   ├─ tools.ts（工具解析/调用/结果组装）
+          │   │   ├─ tools.ts（工具白名单/结果组装）
           │   │   └─ persistence.ts（会话与记忆持久化）
+          │   ├─ src/gateway/runtime/
+          │   │   ├─ entrypoint.ts（pi-agent-core 运行时编排）
+          │   │   ├─ state/schema.ts / state/migration.ts / state/stateStore.ts（运行态持久化）
+          │   │   └─ sandbox/toolSandbox.ts（工具隔离/超时/重试）
           │   ├─ src/pipeline/pipeline.ts（路由决策）
           │   ├─ src/adapters/codexAdapter.ts（openai-codex）
           │   └─ src/adapters/stubAdapter.ts（非 codex 回退）
@@ -37,9 +41,15 @@ CLI（node dist/index.js）
 - `src/gateway/agent/context.ts`
   - 封装 request/session 上下文、时间戳与审计记录构建。
 - `src/gateway/agent/tools.ts`
-  - 封装工具解析、白名单校验、执行与工具消息渲染。
+  - 封装工具白名单校验、tool-call 结果渲染与执行日志归并。
 - `src/gateway/agent/persistence.ts`
   - 封装会话轨迹、路由记录、记忆压缩相关的持久化写入。
+- `src/gateway/runtime/entrypoint.ts`
+  - 基于 `pi-agent-core` 的统一执行入口；维护运行时生命周期（`running/suspended/failed/idle`）、恢复检查点与步骤推进。
+- `src/gateway/runtime/state/*`
+  - 持久化运行状态（`runId/planId/stepId/phase/toolRunId`）并支持跨请求恢复。
+- `src/gateway/runtime/sandbox/toolSandbox.ts`
+  - 统一工具执行隔离策略（超时、并发、重试、错误策略），并执行权限白名单与工具运行日志。
 - `src/pipeline/pipeline.ts`
   - 当前主要按 `provider` 与输入特征决定路由（如 openai-codex / summary / echo）。
 - `src/adapters/codexAdapter.ts`
@@ -73,9 +83,10 @@ CLI（node dist/index.js）
 
 1. 用户输入通过 `agent` 或网关（Feishu/本地）进入 `runAgent`。
 2. `runAgent` 合并上下文：`SessionRecord` -> 最近对话 -> 历史/长期记忆提示。
-3. `pipeline` 选择适配器；若为 codex 则调用模型。
-4. 返回中如出现 tool-call，`tools` 会执行并将结果回填给模型继续对话。
-5. 最终输出写入会话轨迹（JSONL）和记忆文件（可选）。
+3. `runAgent` 进入 `runtime` 层；`entrypoint` 基于 `pi-agent-core` 建立/恢复 plan 执行状态。
+4. `pipeline` 与 `runAgent` 协同选择运行策略；若为 codex 路径则调用模型。
+5. 返回中如出现 tool-call，`pi-agent-core` 触发工具执行，`toolSandbox` 与 `executor` 联动后再把结果回填给模型。
+6. 最终输出写入会话轨迹（JSONL）和记忆文件（可选）；运行时状态写入 `~/.lainclaw/runtime` 以供下一次恢复。
 
 ## CLI 层重构说明（结构优化）
 
@@ -125,6 +136,7 @@ CLI（node dist/index.js）
 - Gateway 配置：`~/.lainclaw/gateway.json`
 - Gateway 服务状态：`~/.lainclaw/service/gateway-service.json`
 - Gateway 日志：`~/.lainclaw/service/gateway-service.log`
+- Runtime 状态文件：`~/.lainclaw/runtime/<channel>--<sessionKey>.json`
 - Heartbeat 运行日志：`~/.lainclaw/heartbeat-run.log`
 - Local Gateway 文件队列：`~/.lainclaw/local-gateway/local-gateway-inbox.jsonl` 与 `~/.lainclaw/local-gateway/local-gateway-outbox.jsonl`
 - 配对与网关配置兼容历史文件：`~/.lainclaw/<channel>-gateway.json`（迁移场景下存在）

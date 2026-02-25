@@ -1,8 +1,7 @@
 import { type GatewayResult } from "../../shared/types.js";
 import { ValidationError, type RequestContext } from "../../shared/types.js";
-import type { AdapterResult } from "../../adapters/stubAdapter.js";
-import type { ToolCall, ToolExecutionLog, ToolError } from "../../tools/types.js";
-import { runPipeline } from "../../pipeline/pipeline.js";
+import type { ToolExecutionLog, ToolError } from "../../tools/types.js";
+import { runOpenAICodexRuntime } from "../runtime/entrypoint.js";
 import {
   appendTurnMessages,
   appendToolSummaryToHistory,
@@ -10,20 +9,8 @@ import {
   persistRouteUsage,
   resolveSessionMemoryPath,
 } from "./persistence.js";
+import { chooseFirstToolError, listAutoTools } from "./tools.js";
 import {
-  appendToolCallContextMessages,
-  chooseFirstToolError,
-  classifyToolCalls,
-  executeAllowedToolCalls,
-  listAutoTools,
-  makeToolExecutionError,
-  makeToolResultContextMessage,
-  normalizeToolCall,
-  parseToolCallsFromPrompt,
-  resolveStepLimitError,
-} from "./tools.js";
-import {
-  ASSISTANT_FOLLOWUP_PROMPT,
   buildPromptAuditRecord,
   buildWorkspaceSystemPrompt,
   contextMessagesFromHistory,
@@ -58,7 +45,37 @@ type RunAgentOptions = {
   toolMaxSteps?: number;
   cwd?: string;
   includePromptAudit?: boolean;
+  channel?: string;
 };
+
+const DEFAULT_RUNTIME_PROVIDER = "openai-codex";
+const DEFAULT_CHANNEL = "agent";
+
+function resolveChannel(raw: string | undefined): string {
+  const normalized = raw?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : DEFAULT_CHANNEL;
+}
+
+function resolveProvider(raw: string | undefined): string {
+  const normalized = raw?.trim();
+  return normalized && normalized.length > 0 ? normalized : DEFAULT_RUNTIME_PROVIDER;
+}
+
+function firstToolError(logs: ToolExecutionLog[] | undefined): ToolError | undefined {
+  if (!Array.isArray(logs)) {
+    return undefined;
+  }
+  let found: ToolError | undefined;
+  for (const entry of logs) {
+    if (entry?.result?.error) {
+      found = chooseFirstToolError(found, entry.result.error);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return found;
+}
 
 export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Promise<GatewayResult> {
   if (!rawInput || !rawInput.trim()) {
@@ -69,12 +86,17 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const requestId = createRequestId();
   const createdAt = nowIso();
   const sessionKey = resolveSessionKey(opts.sessionKey);
-  const provider = opts.provider?.trim();
+  const provider = resolveProvider(opts.provider);
   const profileId = opts.profileId?.trim();
   const memoryEnabled = resolveMemoryFlag(opts.memory);
   const withTools = typeof opts.withTools === "boolean" ? opts.withTools : true;
   const toolAllow = normalizeToolAllow(opts.toolAllow);
   const toolMaxSteps = resolveToolMaxSteps(opts.toolMaxSteps);
+  const channel = resolveChannel(opts.channel);
+
+  if (provider !== "openai-codex") {
+    throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
+  }
 
   if (input === NEW_SESSION_COMMAND) {
     const newSession = await getOrCreateSession({
@@ -113,13 +135,12 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const memorySnippet = session.memoryEnabled ? await loadSessionMemorySnippet(session.sessionKey) : "";
   const priorMessages = trimContextMessages(await getRecentSessionMessages(session.sessionId));
   const promptAudit = opts.includePromptAudit ? { enabled: true, records: [] } : undefined;
-  let promptAuditStep = 1;
+
   const recordPromptAudit = (requestContext: RequestContext, routeDecision: string) => {
     if (!promptAudit) {
       return;
     }
-    promptAudit.records.push(buildPromptAuditRecord(promptAuditStep, requestContext, routeDecision));
-    promptAuditStep += 1;
+    promptAudit.records.push(buildPromptAuditRecord(promptAudit.records.length + 1, requestContext, routeDecision));
   };
 
   const historyContext = contextMessagesFromHistory(priorMessages);
@@ -127,208 +148,51 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     historyContext.push(makeUserContextMessage(`[memory]\n${memorySnippet}`));
   }
 
-  const parsedToolInput = parseToolCallsFromPrompt(input);
-  const manualToolPath = parsedToolInput.toolCalls.length > 0 || !!parsedToolInput.parseError;
-  const toolAllowForSession = toolAllow;
-
-  const toolCalls: ToolCall[] = [];
-  const toolResults: ToolExecutionLog[] = [];
-  let toolError: ToolError | undefined;
-  let sessionContextUpdated = false;
-  let finalResult: AdapterResult | undefined;
-  let finalUserContextInput = input;
-
-  if (manualToolPath) {
-    const split = classifyToolCalls(parsedToolInput.toolCalls, toolAllowForSession);
-    for (const denied of split.denied) {
-      const log = makeToolExecutionError(denied.call, denied.message, denied.code);
-      toolCalls.push(log.call);
-      toolResults.push(log);
-      toolError = chooseFirstToolError(toolError, log.result.error);
-    }
-
-    if (split.allowed.length > 0) {
-      const executed = await executeAllowedToolCalls(
-        requestId,
-        session.sessionId,
-        sessionKey,
-        split.allowed,
-        opts.cwd,
-      );
-      toolCalls.push(...split.allowed.map((call) => call));
-      toolResults.push(...executed.logs);
-      toolError = chooseFirstToolError(toolError, executed.toolError);
-    }
-
-    if (parsedToolInput.parseError) {
-      const parseError = makeToolExecutionError(
-        {
-          id: `tool-parse-${Date.now()}`,
-          name: "tool",
-          args: {
-            input,
-            reason: parsedToolInput.parseError,
-          },
-          source: "agent",
-        },
-        parsedToolInput.parseError,
-        "invalid_args",
-      );
-      toolCalls.push(parseError.call);
-      toolResults.push(parseError);
-      toolError = chooseFirstToolError(toolError, parseError.result.error);
-    }
-
-    if (toolResults.length > 0) {
-      sessionContextUpdated = true;
-    }
-
-    if (parsedToolInput.residualInput.trim()) {
-      finalUserContextInput = `${parsedToolInput.residualInput.trim()}\n\n${ASSISTANT_FOLLOWUP_PROMPT}`;
-    } else if (toolCalls.length > 0 || parsedToolInput.parseError) {
-      finalUserContextInput = ASSISTANT_FOLLOWUP_PROMPT;
-    }
-  }
-
-  if (manualToolPath) {
-    const contextMessages = [...historyContext];
-    if (provider === "openai-codex") {
-      appendToolCallContextMessages(
-        contextMessages,
-        {
-          roundCalls: toolCalls,
-          roundResults: toolResults,
-        },
-        "",
-        "toolUse",
-        provider,
-      );
-    } else {
-      for (const log of toolResults) {
-        contextMessages.push(makeToolResultContextMessage(log));
-      }
-    }
-    contextMessages.push(makeUserContextMessage(finalUserContextInput));
-
-    const requestContext = makeBaseRequestContext(
-      requestId,
-      createdAt,
-      finalUserContextInput,
-      sessionKey,
-      session.sessionId,
-      contextMessages,
-      provider,
-      profileId,
-      undefined,
-      requestSystemPrompt,
-      session.memoryEnabled,
-    );
-    recordPromptAudit(requestContext, "manual_tool_path");
-    finalResult = (await runPipeline(requestContext)).adapter;
-  } else {
-    const shouldAutoCall = provider === "openai-codex" && withTools;
-
-    if (shouldAutoCall) {
-      const autoTools = listAutoTools(toolAllowForSession);
-      const contextMessages = [...historyContext, makeUserContextMessage(input)];
-      const requestContext = makeBaseRequestContext(
-        requestId,
-        createdAt,
-        input,
-        sessionKey,
-        session.sessionId,
-        contextMessages,
-        provider,
-        profileId,
-        autoTools,
-        requestSystemPrompt,
-        session.memoryEnabled,
-      );
-      recordPromptAudit(requestContext, "auto_tool_path_step_1");
-
-      for (let step = 0; step < toolMaxSteps; step += 1) {
-        const output = await runPipeline(requestContext);
-        finalResult = output.adapter;
-        const roundCalls = finalResult.toolCalls?.map((call) => normalizeToolCall(call)) ?? [];
-        if (roundCalls.length === 0) {
-          break;
-        }
-
-        const split = classifyToolCalls(roundCalls, toolAllowForSession);
-        const deniedLogs = split.denied.map((entry) =>
-          makeToolExecutionError(entry.call, entry.message, entry.code),
-        );
-        const executed = await executeAllowedToolCalls(
-          requestId,
-          session.sessionId,
-          sessionKey,
-          split.allowed,
-          opts.cwd,
-        );
-
-        const roundState = {
-          roundCalls,
-          roundResults: [...deniedLogs, ...executed.logs],
-        };
-        toolCalls.push(...roundCalls);
-        toolResults.push(...roundState.roundResults);
-        toolError = chooseFirstToolError(toolError, deniedLogs[0]?.result.error);
-        toolError = chooseFirstToolError(toolError, executed.toolError);
-
-        appendToolCallContextMessages(
-          requestContext.messages,
-          roundState,
-          finalResult.result,
-          finalResult.stopReason,
-          provider,
-        );
-        if (step < toolMaxSteps - 1) {
-          recordPromptAudit(requestContext, `auto_tool_path_step_${step + 2}`);
-        }
-
-        if (toolResults.length > 0) {
-          sessionContextUpdated = true;
-        }
-
-        if (step === toolMaxSteps - 1) {
-          toolError = chooseFirstToolError(toolError, resolveStepLimitError(roundCalls, toolMaxSteps));
-          break;
-        }
-      }
-    } else {
-      const contextMessages = [...historyContext, makeUserContextMessage(input)];
-      const requestContext = makeBaseRequestContext(
-        requestId,
-        createdAt,
-        input,
-        sessionKey,
-        session.sessionId,
-        contextMessages,
-        provider,
-        profileId,
-        undefined,
-        requestSystemPrompt,
-        session.memoryEnabled,
-      );
-      recordPromptAudit(requestContext, "single_pass");
-      finalResult = (await runPipeline(requestContext)).adapter;
-    }
-  }
-
-  if (!finalResult) {
-    throw new Error("agent pipeline did not return result");
-  }
-
-  await appendToolSummaryToHistory(
+  const autoTools = listAutoTools(toolAllow);
+  const contextMessages = [...historyContext, makeUserContextMessage(input)];
+  const requestContext = makeBaseRequestContext(
+    requestId,
+    createdAt,
+    input,
+    sessionKey,
     session.sessionId,
-    toolCalls,
-    toolResults,
-    finalResult.route,
-    finalResult.stage,
-    finalResult.provider,
-    finalResult.profileId,
+    contextMessages,
+    provider,
+    profileId,
+    withTools ? autoTools : undefined,
+    requestSystemPrompt,
+    session.memoryEnabled,
   );
-  await appendTurnMessages(session.sessionId, manualToolPath ? finalUserContextInput : input, finalResult);
+
+  const runtimeResult = await runOpenAICodexRuntime({
+    requestContext,
+    channel,
+    withTools,
+    toolAllow,
+    toolMaxSteps,
+    cwd: opts.cwd,
+    toolSpecs: withTools ? autoTools : undefined,
+  });
+
+  const finalResult = runtimeResult.adapter;
+  const toolCalls = finalResult.toolCalls ?? [];
+  const toolResults = finalResult.toolResults ?? [];
+  const toolError = firstToolError(finalResult.toolResults);
+  const sessionContextUpdated = toolResults.length > 0;
+
+  recordPromptAudit(requestContext, runtimeResult.restored ? "runtime.restore" : "runtime.new");
+  if (toolResults.length > 0) {
+    await appendToolSummaryToHistory(
+      session.sessionId,
+      toolCalls,
+      toolResults,
+      finalResult.route,
+      finalResult.stage,
+      finalResult.provider,
+      finalResult.profileId,
+    );
+  }
+  await appendTurnMessages(session.sessionId, input, finalResult);
   await persistRouteUsage(sessionKey, finalResult);
 
   const memoryUpdated = await compactSessionMemoryIfNeeded({
@@ -354,8 +218,8 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     memoryFile: session.memoryEnabled ? resolveSessionMemoryPath(session.sessionKey) : undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     toolResults: toolResults.length > 0 ? toolResults : undefined,
-    toolError,
-    ...(promptAudit ? { promptAudit } : {}),
+    ...(toolError ? { toolError } : {}),
     sessionContextUpdated,
+    ...(promptAudit ? { promptAudit } : {}),
   };
 }
