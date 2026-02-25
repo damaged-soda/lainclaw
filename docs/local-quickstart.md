@@ -14,19 +14,19 @@ npm run build
 ```
 
 - 说明：本地通道可用于两种模式
-  - `openai-codex` 模式：完整模型 + 工具链路（需有效的 `auth` profile）
+  - `provider` 模式：完整模型 + 工具链路（需有效的 `auth` profile）
   - `stub` 模式：不走模型，使用内置回显逻辑（仅用于流程联通性验证）
 
 ## 2. 启动 local gateway（推荐两种）
 
 - 前台启动（便于观察）：
 ```bash
-node dist/index.js gateway start --channel local --provider openai-codex --profile <profileId> --with-tools --memory
+node dist/index.js gateway start --channel local --provider <provider> --profile <profileId> --with-tools --memory
 ```
 
 - 后台启动：
 ```bash
-node dist/index.js gateway start --channel local --provider openai-codex --profile <profileId> --daemon
+node dist/index.js gateway start --channel local --provider <provider> --profile <profileId> --daemon
 ```
 
 - 查询状态：
@@ -39,7 +39,7 @@ node dist/index.js gateway status --channel local
 node dist/index.js gateway stop --channel local
 ```
 
-说明：若无 `feishu` 凭据，仅做流程验证，可先去掉 `--provider openai-codex --profile <profileId>`，或保留默认 provider（进入 `stub` 回路）。  
+说明：若无 `feishu` 凭据，仅做流程验证，可先去掉 `--provider`，或显式使用 `--provider stub`（进入 `stub` 回路）。  
 `stub` 模式不依赖模型与远端服务，但可验证消息队列、会话持久化与响应格式。
 
 ## 3. 消息入口与响应出口（inbox / outbox）
@@ -79,10 +79,10 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
   "input": "请告诉我当前时间",
   "output": {
     "success": true,
-    "route": "codex",
-    "stage": "pipeline",
+    "route": "adapter.<provider>",
+    "stage": "adapter.<provider>.<profileId>",
     "result": "...真实回复...",
-    "provider": "openai-codex",
+    "provider": "<provider>",
     "memoryEnabled": false,
     "memoryUpdated": true,
     "sessionContextUpdated": true
@@ -118,7 +118,7 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
 - 固定 `sessionKey` 连续发送两条消息：
   - 第一次：`你好，我要测试上下文`
   - 第二次：`上面我刚才说了什么`
-- outbox 中第二次响应应体现已读取上下文（若 provider 为 openai-codex 且记忆可用）。
+- outbox 中第二次响应应体现已读取上下文（若 provider 有记忆配置且可用）。
 - 单次执行核验：
   - 同一 `sessionKey` 的多轮消息应在返回中可见上下文影响，且不依赖 `~/.lainclaw/runtime` 中的恢复文件。
 

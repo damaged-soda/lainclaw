@@ -1,6 +1,6 @@
 import type { Message } from "@mariozechner/pi-ai";
-import { RequestContext } from "../shared/types.js";
 import type { ToolExecutionLog } from "../tools/types.js";
+import type { AdapterRunInput } from "./registry.js";
 
 export interface AdapterResult {
   route: string;
@@ -14,8 +14,11 @@ export interface AdapterResult {
   profileId?: string;
 }
 
-export function runStubAdapter(context: RequestContext, route: string): AdapterResult {
-  const normalizedInput = context.input.trim();
+export async function runStubAdapter(input: AdapterRunInput): Promise<AdapterResult> {
+  const context = input.requestContext;
+  const route = input.route;
+  const provider = (input.requestContext.provider || "stub").trim();
+  const normalizedInput = input.requestContext.input.trim();
   const historyCount = Array.isArray(context.messages) ? context.messages.length : 0;
   const shortHistory = `context=${historyCount}条消息`;
   const assistantMessage: Message = {
@@ -26,9 +29,9 @@ export function runStubAdapter(context: RequestContext, route: string): AdapterR
         text: context.input,
       },
     ],
-    api: "openai-codex-responses",
-    provider: context.provider || "openai-codex",
-    model: context.provider === "openai-codex" ? "codex-stub" : "stub",
+    api: `${provider}-responses`,
+    provider,
+    model: `${provider}-stub`,
     usage: {
       input: 0,
       output: 0,
@@ -47,10 +50,10 @@ export function runStubAdapter(context: RequestContext, route: string): AdapterR
     timestamp: Date.now(),
   };
 
-  if (route === 'summary') {
+  if (route === "summary") {
     return {
       route,
-      stage: 'adapter.stub.summary',
+      stage: "adapter.stub.summary",
       result: `[stub-summary] ${shortHistory}：我已接收到你的内容：${normalizedInput}`,
       assistantMessage,
       stopReason: assistantMessage.stopReason,
@@ -59,7 +62,7 @@ export function runStubAdapter(context: RequestContext, route: string): AdapterR
 
   return {
     route,
-    stage: 'adapter.stub.echo',
+    stage: "adapter.stub.echo",
     result: `[stub-echo][${context.sessionId}] ${shortHistory}，已接收到输入：${normalizedInput}`,
     assistantMessage,
     stopReason: assistantMessage.stopReason,

@@ -15,9 +15,6 @@ export async function runAgentCommand(args: string[]): Promise<number> {
       withTools,
       toolAllow,
     } = parseAgentArgs(args);
-    if (provider && provider !== "openai-codex") {
-      throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
-    }
     if (!input) {
       throw new ValidationError("agent command requires non-empty input", "AGENT_INPUT_REQUIRED");
     }

@@ -1,5 +1,5 @@
 import { ValidationError, type GatewayResult, type RequestContext } from "../shared/types.js";
-import { runOpenAICodexRuntime } from "./entrypoint.js";
+import { runRuntime } from "./entrypoint.js";
 import {
   appendTurnMessages,
   appendToolSummaryToHistory,
@@ -39,8 +39,6 @@ type RunAgentOptions = {
   cwd?: string;
 };
 
-const DEFAULT_RUNTIME_PROVIDER = "openai-codex";
-
 // Core flow: runAgent 是 runtime 的主入口，参数解析与 runtime 协同在下方统一落地
 export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Promise<GatewayResult> {
   if (!rawInput || !rawInput.trim()) {
@@ -56,10 +54,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const memoryEnabled = resolveMemoryFlag(opts.memory);
   const withTools = typeof opts.withTools === "boolean" ? opts.withTools : true;
   const toolAllow = normalizeToolAllow(opts.toolAllow);
-
-  if (provider !== "openai-codex") {
-    throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
-  }
 
   if (input === NEW_SESSION_COMMAND) {
     const newSession = await getOrCreateSession({
@@ -115,7 +109,7 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     memoryEnabled: session.memoryEnabled,
   });
 
-  const runtimeResult = await runOpenAICodexRuntime({
+  const runtimeResult = await runRuntime({
     requestContext,
     withTools,
     toolAllow,
@@ -173,5 +167,11 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
 
 function resolveProvider(raw: string | undefined): string {
   const normalized = raw?.trim();
-  return normalized && normalized.length > 0 ? normalized : DEFAULT_RUNTIME_PROVIDER;
+  if (!normalized || normalized.length === 0) {
+    throw new ValidationError(
+      "Missing provider. Set --provider in command args or runtime config.",
+      "MISSING_PROVIDER",
+    );
+  }
+  return normalized;
 }

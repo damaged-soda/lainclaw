@@ -32,13 +32,13 @@ export function printUsage(): string {
     '',
     'Examples:',
     '  lainclaw agent 这是一段测试文本',
-    '  lainclaw agent --session work --provider openai-codex --profile default 这是一段测试文本',
+    '  lainclaw agent --session work --provider <provider> --profile default 这是一段测试文本',
     '  lainclaw agent --session work --memory 这是一个长期记忆测试',
     '  lainclaw agent --session work --memory=off 这是一条不写入记忆的消息',
     '  lainclaw tools invoke fs.read_file --args "{\\"path\\":\\"README.md\\"}"',
     '  lainclaw auth login openai-codex',
     '  lainclaw auth status',
     '',
-    'Notes: model defaults to openai-codex when `provider` is set; other providers still return stub result.',
+    'Notes: `provider` 决定运行适配器；未配置或配置错误会直接报错。provider 与 profile 用于查找对应运行配置。',
   ].join('\n');
 }

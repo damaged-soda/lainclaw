@@ -230,13 +230,6 @@ export function parseFeishuServerArgs(argv: string[]): {
     memory = parsedModel.memory;
   }
 
-  if (provider) {
-    const normalizedProvider = provider.trim().toLowerCase();
-    if (normalizedProvider.length > 0 && normalizedProvider !== 'openai-codex') {
-      throw new Error(`Unsupported feishu provider: ${provider}`);
-    }
-  }
-
   const normalizedPairingPolicy = normalizePairingPolicy(pairingPolicy);
 
   return {
@@ -271,10 +264,6 @@ export function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
   const parsed = parseModelCommandArgs(argv, { allowMemory: true, strictUnknown: true });
   if (parsed.positional.length > 0) {
     throw new Error(`Unknown argument for gateway start: ${parsed.positional[0]}`);
-  }
-
-  if (parsed.provider && parsed.provider !== 'openai-codex') {
-    throw new Error(`Unsupported provider: ${parsed.provider}`);
   }
 
   return {

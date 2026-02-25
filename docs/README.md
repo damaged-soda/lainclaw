@@ -15,6 +15,7 @@
 1. 文档目录结构长期遵循 `docs/<category>.md`。
 2. 行为、接口、配置、流程变更必须在提交前同步到相关文档。
    - 运行时职责边界变更同步到 `architecture.md`，必要时同步 `overview.md` 的能力描述。
+   - Provider/运行适配层变更需同步 `README.md` 示例、`local-quickstart.md` 和 `overview.md` 的配置说明。
 3. `docs/wip/<topic>/` 用于一次提案的增量链路（`intent.md`/`spec_delta.md`/`tasks.md`）。
 4. 非 WIP 文档更新优先采用小步增量，避免与功能发布不同步。
 

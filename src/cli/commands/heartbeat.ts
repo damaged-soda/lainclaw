@@ -35,9 +35,6 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
 
     if (subcommand === "add") {
       const parsed = parseHeartbeatAddArgs(rest);
-      if (parsed.provider && parsed.provider !== "openai-codex") {
-        throw new Error(`Unsupported provider: ${parsed.provider}`);
-      }
       const rule = await addHeartbeatRule({
         ruleText: parsed.ruleText,
         ...(parsed.provider ? { provider: parsed.provider } : {}),
@@ -89,9 +86,6 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
 
     if (subcommand === "run") {
       const parsed = parseHeartbeatRunArgs(rest);
-      if (parsed.provider && parsed.provider !== "openai-codex") {
-        throw new Error(`Unsupported provider: ${parsed.provider}`);
-      }
       const summary = await runHeartbeatOnce({
         ...(parsed.provider ? { provider: parsed.provider } : {}),
         ...(parsed.profileId ? { profileId: parsed.profileId } : {}),

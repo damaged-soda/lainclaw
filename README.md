@@ -92,7 +92,7 @@ cd <repo_root>/src/lainclaw
 npm install
 npm run build
 
-node dist/index.js gateway start --channel local --provider openai-codex --profile <profileId> --with-tools --memory
+node dist/index.js gateway start --channel local --provider <provider> --profile <profileId> --with-tools --memory
 ```
 
 更多完整步骤、inbox/outbox 示例、全流程验收清单见：
@@ -126,7 +126,7 @@ npm start -- gateway stop --channel feishu
 也可以先把启动参数写入配置，再直接 `start`：
 
 ```bash
-npm start -- gateway config set --app-id <AppID> --app-secret <AppSecret> --provider openai-codex
+npm start -- gateway config set --app-id <AppID> --app-secret <AppSecret> --provider <provider>
 npm start -- gateway config show
 npm start -- gateway config clear
 ```
@@ -147,8 +147,8 @@ npm start -- gateway config set --channel feishu --app-id <AppID> --app-secret <
 可选参数：
 
 - `--request-timeout-ms <ms>`：飞书 API 请求超时（默认 10000）
-- `--provider <provider>`：模型提供商，当前支持 `openai-codex`（默认） 
-- `--profile <profileId>`：使用指定 openai-codex 登录 Profile（默认走当前 active profile）
+ - `--provider <provider>`：模型提供商，按 runtime 配置路由到对应适配器
+- `--profile <profileId>`：使用指定登录 Profile，若不提供可使用当前 active profile
 - `--with-tools` / `--no-with-tools`：是否允许模型发起 tool-call（默认打开）
 - `--memory` / `--no-memory`：是否启用会话记忆摘要合并（默认关闭）
 - `--tool-allow <tool1,tool2>`：限制允许的工具白名单（默认允许所有内置工具，`gateway.json` 不配置则等于放开全部）
@@ -161,7 +161,7 @@ npm start -- gateway start --app-id <AppID> --app-secret <AppSecret> --request-t
 或使用模型配置启动（会让飞书消息走模型）：
 
 ```bash
-npm start -- gateway start --provider openai-codex --with-tools --app-id <AppID> --app-secret <AppSecret>
+npm start -- gateway start --provider <provider> --with-tools --app-id <AppID> --app-secret <AppSecret>
 ```
 
 也可以直接使用全局命令（安装过 `npm link` 后）：
@@ -191,7 +191,7 @@ rm ~/.lainclaw/<channel>-gateway.json
 - `LAINCLAW_FEISHU_APP_ID` / `FEISHU_APP_ID`
 - `LAINCLAW_FEISHU_APP_SECRET` / `FEISHU_APP_SECRET`
 - `LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS` / `FEISHU_REQUEST_TIMEOUT_MS`
-- `LAINCLAW_FEISHU_PROVIDER` / `FEISHU_PROVIDER`：`openai-codex`
+- `LAINCLAW_FEISHU_PROVIDER` / `FEISHU_PROVIDER`：运行时 provider 标识（默认不回退）
 - `LAINCLAW_FEISHU_PROFILE_ID` / `FEISHU_PROFILE_ID`
 - `LAINCLAW_FEISHU_TOOL_ALLOW` / `FEISHU_TOOL_ALLOW`（逗号分隔）
 - `LAINCLAW_FEISHU_WITH_TOOLS` / `FEISHU_WITH_TOOLS`：`true|false`
@@ -204,7 +204,7 @@ rm ~/.lainclaw/<channel>-gateway.json
 - `LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS` / `FEISHU_PAIRING_PENDING_TTL_MS`：待审批请求 TTL（毫秒）
 - `LAINCLAW_FEISHU_PAIRING_PENDING_MAX` / `FEISHU_PAIRING_PENDING_MAX`：待审批最大未处理条数
 - `LAINCLAW_FEISHU_PAIRING_ALLOW_FROM` / `FEISHU_PAIRING_ALLOW_FROM`：默认配对放行列表（逗号分隔，`*` 表示全放行）
-- `LAINCLAW_CODEX_PREFIX_RESPONSE`：全局调试开关，值为 `true/1/yes/on` 时在 openai-codex 文本结果前缀附加 `[openai-codex:<profileId>]`；默认关闭时不带前缀。
+- `LAINCLAW_CODEX_PREFIX_RESPONSE`：全局调试开关，值为 `true/1/yes/on` 时在响应文本前缀附加 `[<provider>:<profileId>]`；默认关闭时不带前缀。
 
 ### 配对鉴权（Pairing）使用说明
 

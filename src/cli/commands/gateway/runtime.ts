@@ -739,12 +739,9 @@ function parseHeartbeatSummaryTarget(rawMessage: string): string {
     return "模型处理超时，请稍后重试；若持续超时请检查网络或加长 timeout 配置。";
   }
   if (isAuthError(normalized)) {
-    return "未检测到可用 openai-codex 登录，请先执行：`lainclaw auth login openai-codex`。";
+    return "未检测到可用认证配置，请先执行 `lainclaw auth login openai-codex` 并检查登录信息。";
   }
-  if (isProviderNotSupportedError(normalized)) {
-    return "当前仅支持 provider=openai-codex，请使用 `--provider openai-codex`。";
-  }
-  return "模型调用失败，请联系管理员查看服务日志；或使用 `--provider openai-codex --profile <profileId>` 重试。";
+  return "模型调用失败，请联系管理员查看服务日志；或检查 provider/profile 配置后重试。";
 }
 
 function parseHeartbeatDecisionMessage(rawMessage: string): string {
@@ -841,14 +838,10 @@ function inspectHeartbeatTargetOpenId(raw: string): {
 
 function isAuthError(rawMessage: string): boolean {
   return (
-    rawMessage.includes("No openai-codex profile found") ||
-    rawMessage.includes("No openai-codex profile found. Run: lainclaw auth login openai-codex") ||
-    rawMessage.includes("Failed to read OAuth credentials for openai-codex")
+    rawMessage.includes("profile found") ||
+    rawMessage.includes("No profile found") ||
+    rawMessage.includes("Failed to read OAuth credentials")
   );
-}
-
-function isProviderNotSupportedError(rawMessage: string): boolean {
-  return rawMessage.includes("Unsupported provider");
 }
 
 function isPlaceholderLikely(value: string | undefined): boolean {

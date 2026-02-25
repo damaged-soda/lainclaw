@@ -4,7 +4,6 @@ import {
   RequestContext,
   SessionHistoryMessage,
 } from "../shared/types.js";
-import { OPENAI_CODEX_MODEL } from "../auth/authManager.js";
 import {
   buildAgentSystemPrompt,
   inspectWorkspaceContext,
@@ -40,7 +39,10 @@ export function buildRuntimeRequestContext(params: {
   memoryEnabled?: boolean;
 }): RuntimeContextMessages {
   const resolvedTools = params.withTools && Array.isArray(params.tools) ? params.tools : undefined;
-  const historyContext = contextMessagesFromHistory(trimContextMessages(params.priorMessages));
+  const historyContext = contextMessagesFromHistory(
+    trimContextMessages(params.priorMessages),
+    params.provider,
+  );
   const contextMessages: Message[] = [...historyContext];
 
   if (typeof params.memorySnippet === "string" && params.memorySnippet.length > 0) {
@@ -138,15 +140,19 @@ function makeUsageZero() {
   };
 }
 
-export function contextMessagesFromHistory(messages: SessionHistoryMessage[]): Message[] {
+export function contextMessagesFromHistory(
+  messages: SessionHistoryMessage[],
+  provider?: string,
+): Message[] {
+  const safeProvider = (provider || "unknown").trim() || "unknown";
   return messages.map((message) => {
     if (message.role === "assistant") {
       return {
         role: "assistant",
         content: [{ type: "text", text: message.content }],
-        api: "openai-codex-responses",
-        provider: "openai-codex",
-        model: OPENAI_CODEX_MODEL,
+        api: `${safeProvider}-responses`,
+        provider: safeProvider,
+        model: `${safeProvider}-model`,
         usage: makeUsageZero(),
         stopReason: "stop",
         timestamp: toTimestamp(message.timestamp),

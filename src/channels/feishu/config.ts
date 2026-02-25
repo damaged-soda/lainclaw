@@ -13,7 +13,7 @@ export interface FeishuGatewayConfig {
   appId?: string;
   appSecret?: string;
   requestTimeoutMs: number;
-  provider: string;
+  provider?: string;
   profileId?: string;
   withTools: boolean;
   memory: boolean;
@@ -82,7 +82,6 @@ export interface FeishuGatewayStorage {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
-const DEFAULT_PROVIDER = "openai-codex";
 const DEFAULT_WITH_TOOLS = true;
 const DEFAULT_MEMORY = false;
 const DEFAULT_HEARTBEAT_ENABLED = false;
@@ -130,12 +129,9 @@ function resolveText(raw: string | undefined): string {
   return raw.trim();
 }
 
-function isValidProvider(raw: string | undefined): string | undefined {
-  const normalized = resolveText(raw).toLowerCase();
-  if (normalized === "openai-codex") {
-    return normalized;
-  }
-  return undefined;
+function normalizeProvider(raw: string | undefined): string | undefined {
+  const normalized = resolveText(raw);
+  return normalized ? normalized.toLowerCase() : undefined;
 }
 
 function isValidPairingPolicy(raw: string | undefined): PairingPolicy | undefined {
@@ -255,7 +251,7 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
     typeof source.requestTimeoutMs === "number" && Number.isFinite(source.requestTimeoutMs)
       ? source.requestTimeoutMs
       : undefined;
-  const provider = isValidProvider(typeof source.provider === "string" ? source.provider : undefined);
+  const provider = normalizeProvider(typeof source.provider === "string" ? source.provider : undefined);
   const profileId = typeof source.profileId === "string" ? resolveText(source.profileId) : undefined;
   const withTools =
     typeof source.withTools === "boolean"
@@ -899,7 +895,7 @@ export async function resolveFeishuGatewayConfig(
   const envRequestTimeoutMs = resolveText(
     process.env.LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS || process.env.FEISHU_REQUEST_TIMEOUT_MS,
   );
-  const envProvider = isValidProvider(process.env.LAINCLAW_FEISHU_PROVIDER || process.env.FEISHU_PROVIDER);
+  const envProvider = normalizeProvider(process.env.LAINCLAW_FEISHU_PROVIDER || process.env.FEISHU_PROVIDER);
   const envProfileId = resolveText(process.env.LAINCLAW_FEISHU_PROFILE_ID || process.env.FEISHU_PROFILE_ID);
   const envWithTools = resolveBoolean(process.env.LAINCLAW_FEISHU_WITH_TOOLS || process.env.FEISHU_WITH_TOOLS);
   const envMemory = resolveBoolean(process.env.LAINCLAW_FEISHU_MEMORY || process.env.FEISHU_MEMORY);
@@ -942,11 +938,10 @@ export async function resolveFeishuGatewayConfig(
       ) ||
       DEFAULT_REQUEST_TIMEOUT_MS,
     provider: firstString(
-      isValidProvider(overrides.provider),
+      normalizeProvider(overrides.provider),
       envProvider,
       cached.provider,
-      DEFAULT_PROVIDER,
-    )!,
+    ),
     profileId: firstString(overrides.profileId, envProfileId, cached.profileId),
     withTools: firstBoolean(
       overrides.withTools,

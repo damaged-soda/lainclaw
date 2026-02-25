@@ -18,7 +18,7 @@ CLI（node dist/index.js）
           │   ├─ tools.ts（工具白名单/结果组装）
           │   ├─ persistence.ts（会话与记忆持久化）
           │   └─ entrypoint.ts（pi-agent-core 运行时编排，单次执行）
-          ├─ src/adapters/codexAdapter.ts（openai-codex）
+          ├─ src/adapters/codexAdapter.ts（provider adapter，当前实现为 openai-codex）
           ├─ src/adapters/stubAdapter.ts（非 codex 回退）
           ├─ src/tools/gateway.ts / src/tools/registry.ts / executor.ts（工具执行）
           ├─ src/sessions/sessionStore.ts（会话与记忆）
@@ -56,7 +56,7 @@ CLI（node dist/index.js）
 - `src/runtime/persistence.ts`
   - 封装会话轨迹、路由记录、记忆压缩相关的持久化写入。
 - `src/runtime/entrypoint.ts`
-  - 基于 `pi-agent-core` 的统一执行入口；维护单次执行的工具回调与错误归并。
+  - 基于 provider adapter 的单次执行入口，按 `provider` 选择具体运行适配器。
 
 ## 运行入口收口说明（新增）
 

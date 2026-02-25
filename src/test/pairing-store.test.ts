@@ -227,7 +227,7 @@ test("feishu config ignores legacy tool max steps env vars", async () => {
     FEISHU_TOOL_MAX_STEPS: "12",
   }, async () => {
     const config = await resolveFeishuGatewayConfig();
-    assert.equal(config.provider, "openai-codex");
+    assert.equal(config.provider, undefined);
     assert.equal(Object.prototype.hasOwnProperty.call(config, "toolMaxSteps"), false);
   });
 });

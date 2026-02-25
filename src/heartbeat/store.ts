@@ -108,13 +108,7 @@ function normalizeStringArray(raw: unknown): string[] | undefined {
 
 function normalizeProvider(raw: unknown): string | undefined {
   const provider = normalizeText(raw)?.toLowerCase();
-  if (!provider) {
-    return undefined;
-  }
-  if (provider === "openai-codex") {
-    return provider;
-  }
-  return undefined;
+  return provider;
 }
 
 function normalizeBoolean(raw: unknown): boolean | undefined {
