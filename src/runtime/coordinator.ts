@@ -37,11 +37,9 @@ type RunAgentOptions = {
   withTools?: boolean;
   toolAllow?: string[];
   cwd?: string;
-  channel?: string;
 };
 
 const DEFAULT_RUNTIME_PROVIDER = "openai-codex";
-const DEFAULT_CHANNEL = "agent";
 
 // Core flow: runAgent 是 runtime 的主入口，参数解析与 runtime 协同在下方统一落地
 export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Promise<GatewayResult> {
@@ -58,7 +56,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const memoryEnabled = resolveMemoryFlag(opts.memory);
   const withTools = typeof opts.withTools === "boolean" ? opts.withTools : true;
   const toolAllow = normalizeToolAllow(opts.toolAllow);
-  const channel = resolveChannel(opts.channel);
 
   if (provider !== "openai-codex") {
     throw new ValidationError(`Unsupported provider: ${provider}`, "UNSUPPORTED_PROVIDER");
@@ -120,7 +117,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
 
   const runtimeResult = await runOpenAICodexRuntime({
     requestContext,
-    channel,
     withTools,
     toolAllow,
     cwd: opts.cwd,
@@ -173,11 +169,6 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     ...(toolError ? { toolError } : {}),
     sessionContextUpdated,
   };
-}
-
-function resolveChannel(raw: string | undefined): string {
-  const normalized = raw?.trim().toLowerCase();
-  return normalized && normalized.length > 0 ? normalized : DEFAULT_CHANNEL;
 }
 
 function resolveProvider(raw: string | undefined): string {

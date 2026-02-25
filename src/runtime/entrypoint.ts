@@ -16,7 +16,6 @@ import { executeTool } from "../tools/executor.js";
 
 interface RuntimeOptions {
   requestContext: RequestContext;
-  channel: string;
   withTools: boolean;
   toolAllow: string[];
   cwd?: string;

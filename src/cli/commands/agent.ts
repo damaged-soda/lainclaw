@@ -29,7 +29,6 @@ export async function runAgentCommand(args: string[]): Promise<number> {
       ...(typeof memory === "boolean" ? { memory } : {}),
       ...(typeof withTools === "boolean" ? { withTools } : {}),
       ...(toolAllow ? { toolAllow } : {}),
-      channel: "agent",
     });
 
     if (response.success) {

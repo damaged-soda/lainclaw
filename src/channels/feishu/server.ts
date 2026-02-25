@@ -340,7 +340,6 @@ async function handleWsPayload(
     const runResult = await Promise.race([
       runAgent(inbound.input, {
         sessionKey: `feishu:dm:${inbound.openId}`,
-        channel: "feishu",
         provider: config.provider,
         ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
         withTools: config.withTools,

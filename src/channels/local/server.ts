@@ -301,7 +301,6 @@ export async function runLocalGatewayServer(
             ...(Array.isArray(opts.toolAllow) ? { toolAllow: opts.toolAllow } : {}),
             ...(typeof opts.memory === "boolean" ? { memory: opts.memory } : {}),
             ...(typeof sessionKey === "string" && sessionKey.trim() ? { sessionKey } : {}),
-            channel: "local",
           });
 
           const record = buildRunboxRecord(result, input, requestSource, sessionKey);

@@ -90,6 +90,8 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
 }
 ```
 
+说明：`channel` 为入口层可见字段，由 `local` 网关在写入 `outbox` 时统一注入，不在 runtime 里解释来源语义。
+
 错误示例（`run failure`）：
 ```json
 {

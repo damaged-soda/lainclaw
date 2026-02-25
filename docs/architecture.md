@@ -39,6 +39,7 @@ CLI（node dist/index.js）
   - 作为通道边界入口，接受 agent/gateway 输入并向下分发到 `runtime`。
 - `src/runtime/index.ts`
   - 暴露稳定的 `runAgent` API，并保持对 `gateway` 的兼容导出协议。
+  - 不承载调用来源语义（来源/外部通道归属），`runAgent` 仅接收执行上下文与会话参数。
 - `src/runtime/coordinator.ts`
   - 组织 `runAgent` 的顶层编排：会话上下文合并、工具清单与运行参数准备、执行结果归并。
   - 持有业务上下文边界（`session`、`memory`）并触发持久化写入；不直接处理 `tool` 执行策略细节。
