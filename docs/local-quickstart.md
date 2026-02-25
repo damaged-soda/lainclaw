@@ -2,7 +2,7 @@
 
 本指南用于在不依赖飞书（`feishu`）的情况下完成 `lainclaw` 本地全流程运行与验收。
 
-> 说明：当前实现仅做内部结构重排，`gateway` 主链路已拆分为 `src/gateway` 内更清晰的入口与服务子模块，行为和命令路径保持兼容。
+> 说明：当前实现仅做内部结构重排，`gateway` 主链路已拆分为 `src/gateway/agent`（`coordinator/context/tools/persistence`）与原有服务子模块，行为和命令路径保持兼容。
 
 ## 1. 快速准备
 
