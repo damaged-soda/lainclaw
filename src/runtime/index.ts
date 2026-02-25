@@ -1,12 +1,5 @@
 import { ValidationError, type GatewayResult } from "../shared/types.js";
 import { runRuntime } from "./entrypoint.js";
-import {
-  appendTurnMessages,
-  appendToolSummaryToHistory,
-  compactSessionMemoryIfNeeded,
-  persistRouteUsage,
-  resolveSessionMemoryPath,
-} from "./persistence.js";
 import { listAutoTools } from "./tools.js";
 import {
   buildWorkspaceSystemPrompt,
@@ -20,12 +13,7 @@ import {
   NEW_SESSION_ROUTE,
   NEW_SESSION_STAGE,
 } from "./context.js";
-import {
-  getOrCreateSession,
-  getRecentSessionMessages,
-  getSessionMemoryPath,
-  loadSessionMemorySnippet,
-} from "../sessions/sessionStore.js";
+import { sessionService } from "../sessions/sessionService.js";
 import { firstToolErrorFromLogs } from "./tools.js";
 
 type RunAgentOptions = {
@@ -56,13 +44,14 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const toolAllow = normalizeToolAllow(opts.toolAllow);
 
   if (input === NEW_SESSION_COMMAND) {
-    const newSession = await getOrCreateSession({
+    const newSession = await sessionService.resolveSession({
       sessionKey,
       provider,
       profileId,
       forceNew: true,
       ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
     });
+    const memoryFile = newSession.memoryEnabled ? sessionService.resolveSessionMemoryPath(newSession.sessionKey) : undefined;
 
     return {
       success: true,
@@ -75,13 +64,13 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
       sessionId: newSession.sessionId,
       memoryEnabled: !!newSession.memoryEnabled,
       memoryUpdated: false,
-      ...(newSession.memoryEnabled ? { memoryFile: getSessionMemoryPath(newSession.sessionKey) } : {}),
+      ...(memoryFile ? { memoryFile } : {}),
       sessionContextUpdated: false,
     };
   }
 
   const requestSystemPrompt = await buildWorkspaceSystemPrompt(opts.cwd);
-  const session = await getOrCreateSession({
+  const session = await sessionService.resolveSession({
     sessionKey,
     provider,
     profileId,
@@ -89,8 +78,8 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
   });
 
-  const memorySnippet = session.memoryEnabled ? await loadSessionMemorySnippet(session.sessionKey) : "";
-  const priorMessages = await getRecentSessionMessages(session.sessionId);
+  const memorySnippet = session.memoryEnabled ? await sessionService.loadMemorySnippet(session.sessionKey) : "";
+  const priorMessages = await sessionService.loadHistory(session.sessionId);
 
   const autoTools = listAutoTools(toolAllow);
   const { requestContext } = buildRuntimeRequestContext({
@@ -124,7 +113,7 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const sessionContextUpdated = toolResults.length > 0;
 
   if (toolResults.length > 0) {
-    await appendToolSummaryToHistory(
+    await sessionService.appendToolSummary(
       session.sessionId,
       toolCalls,
       toolResults,
@@ -134,10 +123,16 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
       finalResult.profileId,
     );
   }
-  await appendTurnMessages(session.sessionId, input, finalResult);
-  await persistRouteUsage(sessionKey, finalResult);
+  await sessionService.appendTurnMessages(session.sessionId, input, {
+    route: finalResult.route,
+    stage: finalResult.stage,
+    result: finalResult.result,
+    provider: finalResult.provider,
+    profileId: finalResult.profileId,
+  });
+  await sessionService.markRouteUsage(sessionKey, finalResult.route, finalResult.profileId, finalResult.provider);
 
-  const memoryUpdated = await compactSessionMemoryIfNeeded({
+  const memoryUpdated = await sessionService.compactIfNeeded({
     sessionKey: session.sessionKey,
     sessionId: session.sessionId,
     memoryEnabled: session.memoryEnabled,
@@ -157,7 +152,7 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     sessionId: session.sessionId,
     memoryEnabled: session.memoryEnabled,
     memoryUpdated,
-    memoryFile: session.memoryEnabled ? resolveSessionMemoryPath(session.sessionKey) : undefined,
+    memoryFile: session.memoryEnabled ? sessionService.resolveSessionMemoryPath(session.sessionKey) : undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     toolResults: toolResults.length > 0 ? toolResults : undefined,
     ...(toolError ? { toolError } : {}),

@@ -15,11 +15,11 @@ CLI（node dist/index.js）
           │   ├─ index.ts（稳定 API 导出与 runAgent 顶层编排）
           │   ├─ context.ts（上下文与请求基元）
           │   ├─ tools.ts（工具白名单/结果组装）
-          │   ├─ persistence.ts（会话与记忆持久化）
           │   └─ entrypoint.ts（pi-agent-core 运行时编排，单次执行）
           ├─ src/adapters/codexAdapter.ts（provider adapter，当前实现为 openai-codex）
           ├─ src/adapters/stubAdapter.ts（非 codex 回退）
           ├─ src/tools/gateway.ts / src/tools/registry.ts / executor.ts（工具执行）
+          ├─ src/sessions/sessionService.ts（会话/记忆/transcript 服务）
           ├─ src/sessions/sessionStore.ts（会话与记忆）
           ├─ src/channels/feishu/server.ts（飞书网关）
           ├─ src/channels/local/server.ts（本地网关）
@@ -41,7 +41,7 @@ CLI（node dist/index.js）
   - 不承载调用来源语义（来源/外部通道归属），`runAgent` 仅接收执行上下文与会话参数。
 - `src/runtime/index.ts`
   - 组织 `runAgent` 的顶层编排：会话上下文合并、工具清单与运行参数准备、执行结果归并。
-  - 持有业务上下文边界（`session`、`memory`）并触发持久化写入；不直接处理 `tool` 执行策略细节。
+  - 持有业务上下文边界（`session`、`memory`）并调度持久化动作；不直接处理持久化实现细节。
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与运行时元信息构建。
 - `src/runtime/tools.ts`
@@ -52,8 +52,8 @@ CLI（node dist/index.js）
 - `runtime` 可观测统一字段
   - `entrypoint` 采用 `stage` 维度打点，核心字段保留 `stage`、`sessionKey`、`durationMs`、`errorCode`（可选）。
   - `LAINCLAW_RUNTIME_TRACE=1|true` 时记录标准化调试事件；默认保持原有日志语义。
-- `src/runtime/persistence.ts`
-  - 封装会话轨迹、路由记录、记忆压缩相关的持久化写入。
+- `src/sessions/sessionService.ts`
+  - 会话生命周期、会话历史与长期记忆读写、tool summary 写入、路由记录和 compact 写入的服务编排中心。
 - `src/runtime/entrypoint.ts`
   - 基于 provider adapter 的单次执行入口，按 `provider` 选择具体运行适配器。
 
