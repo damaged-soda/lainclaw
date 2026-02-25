@@ -287,7 +287,7 @@ function buildRulePrompt(rule: HeartbeatRule, now: string, workspaceSummary: str
   return `${header}\n${constraints.join('\n')}\n`; 
 }
 
-function resolveRuleDecisionContext(rule: HeartbeatRule, now: string): {
+function resolveRuleDecisionContext(rule: HeartbeatRule): {
   sessionKey: string;
   provider?: string;
   profileId?: string;
@@ -369,7 +369,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
 
     summary.evaluated += 1;
     const decisionPrompt = buildRulePrompt(rule, now, formatWorkspaceContextSummary(runContext));
-    const ruleCtx = resolveRuleDecisionContext(rule, now);
+    const ruleCtx = resolveRuleDecisionContext(rule);
     try {
       const agentResult = await runAgent(decisionPrompt, {
         sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,

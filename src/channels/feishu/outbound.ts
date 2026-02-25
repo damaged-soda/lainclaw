@@ -130,19 +130,6 @@ function nowUnixSeconds() {
   return Math.floor(Date.now() / 1000);
 }
 
-function parseErrorPayload(raw: string): string {
-  try {
-    const parsed = JSON.parse(raw);
-    const msg = parseFeishuMessage(parsed);
-    if (msg) {
-      return msg;
-    }
-  } catch {
-    // ignore parse errors.
-  }
-  return raw;
-}
-
 async function requestJson(url: string, options: RequestInit, timeoutMs: number): Promise<unknown> {
   const response = await Promise.race([
     fetch(url, options),

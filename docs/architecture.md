@@ -16,7 +16,6 @@ CLI（node dist/index.js）
           │   │   ├─ entrypoint.ts（pi-agent-core 运行时编排）
           │   │   ├─ state/schema.ts / state/migration.ts / state/stateStore.ts（运行态持久化）
           │   │   └─ sandbox/toolSandbox.ts（工具隔离/超时/重试）
-          │   ├─ src/pipeline/pipeline.ts（路由决策）
           │   ├─ src/adapters/codexAdapter.ts（openai-codex）
           │   └─ src/adapters/stubAdapter.ts（非 codex 回退）
           │   ├─ src/tools/gateway.ts / src/tools/registry.ts / executor.ts（工具执行）
@@ -50,8 +49,6 @@ CLI（node dist/index.js）
   - 持久化运行状态（`runId/planId/stepId/phase/toolRunId`）并支持跨请求恢复。
 - `src/gateway/runtime/sandbox/toolSandbox.ts`
   - 统一工具执行隔离策略（超时、并发、重试、错误策略），并执行权限白名单与工具运行日志。
-- `src/pipeline/pipeline.ts`
-  - 当前主要按 `provider` 与输入特征决定路由（如 openai-codex / summary / echo）。
 - `src/adapters/codexAdapter.ts`
   - 对接模型 SDK（`@mariozechner/pi-ai`），处理工具 schema 映射与 tool-call 解析。
 - `src/adapters/stubAdapter.ts`
@@ -84,7 +81,7 @@ CLI（node dist/index.js）
 1. 用户输入通过 `agent` 或网关（Feishu/本地）进入 `runAgent`。
 2. `runAgent` 合并上下文：`SessionRecord` -> 最近对话 -> 历史/长期记忆提示。
 3. `runAgent` 进入 `runtime` 层；`entrypoint` 基于 `pi-agent-core` 建立/恢复 plan 执行状态。
-4. `pipeline` 与 `runAgent` 协同选择运行策略；若为 codex 路径则调用模型。
+4. `runAgent` 与 `runtime` 协同选择执行策略；若为 codex 路径则调用模型。
 5. 返回中如出现 tool-call，`pi-agent-core` 触发工具执行，`toolSandbox` 与 `executor` 联动后再把结果回填给模型。
 6. 最终输出写入会话轨迹（JSONL）和记忆文件（可选）；运行时状态写入 `~/.lainclaw/runtime` 以供下一次恢复。
 

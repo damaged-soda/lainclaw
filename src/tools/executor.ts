@@ -132,7 +132,7 @@ function createExecutionError(
   };
 }
 
-function normalizeToolError(toolName: string, rawError: unknown, durationMs: number): ToolError {
+function normalizeToolError(toolName: string, rawError: unknown): ToolError {
   if (
     rawError &&
     typeof rawError === "object" &&
@@ -219,7 +219,7 @@ export async function executeTool(call: ToolCall, context: ToolContext): Promise
       };
     }
 
-    normalizedResult.error = normalizeToolError(tool.name, normalizedResult.error, Date.now() - started);
+    normalizedResult.error = normalizeToolError(tool.name, normalizedResult.error);
 
     return { call: normalizedCall, result: normalizedResult };
   } catch (error) {

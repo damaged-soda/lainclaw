@@ -293,8 +293,6 @@ export function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
   };
 }
 
-type GatewayStartPlugin = (argv: string[]) => GatewayStartOverrides;
-
 const GATEWAY_CHANNEL_PLUGINS: Record<GatewayChannel, GatewayChannelPlugin> = {
   feishu: {
     name: 'feishu',

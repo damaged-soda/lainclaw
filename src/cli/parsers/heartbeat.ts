@@ -1,15 +1,5 @@
 import { parseModelCommandArgs, type ParsedModelCommandArgs } from '../shared/args.js';
 
-interface HeartbeatCommandOptions {
-  provider?: string;
-  profileId?: string;
-  withTools?: boolean;
-  toolAllow?: string[];
-  toolMaxSteps?: number;
-  memory?: boolean;
-  positional: string[];
-}
-
 function parseHeartbeatModelArgs(argv: string[], allowMemory = false): ParsedModelCommandArgs {
   return parseModelCommandArgs(argv, { allowMemory, strictUnknown: true });
 }
