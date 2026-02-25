@@ -12,8 +12,7 @@ CLI（node dist/index.js）
           │   ├─ src/gateway/serviceState.ts（服务状态）
           │   ├─ src/gateway/serviceProcess.ts（子进程）
           ├─ src/runtime/
-          │   ├─ index.ts（稳定 API 导出）
-          │   ├─ coordinator.ts（runAgent 顶层编排）
+          │   ├─ index.ts（稳定 API 导出与 runAgent 顶层编排）
           │   ├─ context.ts（上下文与请求基元）
           │   ├─ tools.ts（工具白名单/结果组装）
           │   ├─ persistence.ts（会话与记忆持久化）
@@ -40,15 +39,15 @@ CLI（node dist/index.js）
 - `src/runtime/index.ts`
   - 暴露稳定的 `runAgent` API，并保持对 `gateway` 的兼容导出协议。
   - 不承载调用来源语义（来源/外部通道归属），`runAgent` 仅接收执行上下文与会话参数。
-- `src/runtime/coordinator.ts`
+- `src/runtime/index.ts`
   - 组织 `runAgent` 的顶层编排：会话上下文合并、工具清单与运行参数准备、执行结果归并。
   - 持有业务上下文边界（`session`、`memory`）并触发持久化写入；不直接处理 `tool` 执行策略细节。
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与运行时元信息构建。
 - `src/runtime/tools.ts`
   - 封装工具白名单与工具名映射、执行日志归并；工具真实执行由 `tools/executor` 完成。
-- `src/runtime/coordinator.ts` 与 `src/runtime/entrypoint.ts` 的数据流
-  - `coordinator` 负责输入准备（会话/系统提示/工具列表）与执行结果收口；
+- `src/runtime/index.ts` 与 `src/runtime/entrypoint.ts` 的数据流
+  - `index` 负责输入准备（会话/系统提示/工具列表）与执行结果收口；
   - `entrypoint` 负责单次执行流程调度、工具回调与结果归并。
 - `runtime` 可观测统一字段
   - `entrypoint` 采用 `stage` 维度打点，核心字段保留 `stage`、`sessionKey`、`durationMs`、`errorCode`（可选）。
