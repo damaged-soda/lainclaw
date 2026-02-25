@@ -40,14 +40,4 @@ export interface RuntimeExecutionState {
   agentState?: RuntimeAgentStateSnapshot;
   lastError?: string;
   lastEventId?: string;
-  lastGoodSnapshot?: {
-    runId: string;
-    updatedAt: string;
-    stepId: number;
-  };
-}
-
-export interface RuntimeStateEnvelope {
-  current?: RuntimeExecutionState;
-  history?: RuntimeExecutionState[];
 }

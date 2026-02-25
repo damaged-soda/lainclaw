@@ -19,12 +19,81 @@ export const DEFAULT_TOOL_MAX_STEPS = 3;
 export const NEW_SESSION_COMMAND = "/new";
 export const NEW_SESSION_ROUTE = "system";
 export const NEW_SESSION_STAGE = "gateway.new_session";
-export const ASSISTANT_FOLLOWUP_PROMPT = "请基于上述工具结果回答问题。";
 
 interface RuntimeContextMessages {
   requestContext: RequestContext;
   contextMessages: Message[];
   historyContext: Message[];
+}
+
+// Core flow: 上下文构建与审计记录放在文件开头，主流程先见。
+export function buildRuntimeRequestContext(params: {
+  requestId: string;
+  createdAt: string;
+  input: string;
+  sessionKey: string;
+  sessionId: string;
+  priorMessages: SessionHistoryMessage[];
+  memorySnippet?: string;
+  provider?: string;
+  profileId?: string;
+  withTools: boolean;
+  tools?: ContextToolSpec[];
+  systemPrompt?: string;
+  memoryEnabled?: boolean;
+}): RuntimeContextMessages {
+  const resolvedTools = params.withTools && Array.isArray(params.tools) ? params.tools : undefined;
+  const historyContext = contextMessagesFromHistory(trimContextMessages(params.priorMessages));
+  const contextMessages: Message[] = [...historyContext];
+
+  if (typeof params.memorySnippet === "string" && params.memorySnippet.length > 0) {
+    contextMessages.push(makeUserContextMessage(`[memory]\n${params.memorySnippet}`));
+  }
+
+  contextMessages.push(makeUserContextMessage(params.input));
+
+  const requestContext = makeBaseRequestContext(
+    params.requestId,
+    params.createdAt,
+    params.input,
+    params.sessionKey,
+    params.sessionId,
+    contextMessages,
+    params.provider,
+    params.profileId,
+    resolvedTools,
+    params.systemPrompt,
+    params.memoryEnabled ?? true,
+  );
+
+  return { requestContext, contextMessages, historyContext };
+}
+
+export function buildPromptAuditRecord(
+  step: number,
+  requestContext: RequestContext,
+  routeDecision?: string,
+): PromptAuditRecord {
+  const clonedMessages = JSON.parse(JSON.stringify(requestContext.messages)) as Message[];
+  const clonedTools = Array.isArray(requestContext.tools) && requestContext.tools.length > 0
+    ? (JSON.parse(JSON.stringify(requestContext.tools)) as ContextToolSpec[])
+    : undefined;
+  return {
+    step,
+    ...(typeof routeDecision === "string" && routeDecision.trim() ? { routeDecision } : {}),
+    requestContext: {
+      requestId: requestContext.requestId,
+      createdAt: requestContext.createdAt,
+      input: requestContext.input,
+      sessionKey: requestContext.sessionKey,
+      sessionId: requestContext.sessionId,
+      ...(requestContext.provider ? { provider: requestContext.provider } : {}),
+      ...(requestContext.profileId ? { profileId: requestContext.profileId } : {}),
+      systemPrompt: requestContext.systemPrompt ?? "",
+      messages: clonedMessages,
+      ...(clonedTools ? { tools: clonedTools } : {}),
+    },
+  };
 }
 
 function nowTs() {
@@ -140,48 +209,6 @@ export function makeUserContextMessage(content: string): Message {
   } as Message;
 }
 
-export function buildRuntimeRequestContext(params: {
-  requestId: string;
-  createdAt: string;
-  input: string;
-  sessionKey: string;
-  sessionId: string;
-  priorMessages: SessionHistoryMessage[];
-  memorySnippet?: string;
-  provider?: string;
-  profileId?: string;
-  withTools: boolean;
-  tools?: ContextToolSpec[];
-  systemPrompt?: string;
-  memoryEnabled?: boolean;
-}): RuntimeContextMessages {
-  const resolvedTools = params.withTools && Array.isArray(params.tools) ? params.tools : undefined;
-  const historyContext = contextMessagesFromHistory(trimContextMessages(params.priorMessages));
-  const contextMessages: Message[] = [...historyContext];
-
-  if (typeof params.memorySnippet === "string" && params.memorySnippet.length > 0) {
-    contextMessages.push(makeUserContextMessage(`[memory]\n${params.memorySnippet}`));
-  }
-
-  contextMessages.push(makeUserContextMessage(params.input));
-
-  const requestContext = makeBaseRequestContext(
-    params.requestId,
-    params.createdAt,
-    params.input,
-    params.sessionKey,
-    params.sessionId,
-    contextMessages,
-    params.provider,
-    params.profileId,
-    resolvedTools,
-    params.systemPrompt,
-    params.memoryEnabled ?? true,
-  );
-
-  return { requestContext, contextMessages, historyContext };
-}
-
 export function makeBaseRequestContext(
   requestId: string,
   createdAt: string,
@@ -207,32 +234,5 @@ export function makeBaseRequestContext(
     ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
     ...(typeof systemPrompt === "string" && systemPrompt.trim().length > 0 ? { systemPrompt } : {}),
     memoryEnabled,
-  };
-}
-
-export function buildPromptAuditRecord(
-  step: number,
-  requestContext: RequestContext,
-  routeDecision?: string,
-): PromptAuditRecord {
-  const clonedMessages = JSON.parse(JSON.stringify(requestContext.messages)) as Message[];
-  const clonedTools = Array.isArray(requestContext.tools) && requestContext.tools.length > 0
-    ? (JSON.parse(JSON.stringify(requestContext.tools)) as ContextToolSpec[])
-    : undefined;
-  return {
-    step,
-    ...(typeof routeDecision === "string" && routeDecision.trim() ? { routeDecision } : {}),
-    requestContext: {
-      requestId: requestContext.requestId,
-      createdAt: requestContext.createdAt,
-      input: requestContext.input,
-      sessionKey: requestContext.sessionKey,
-      sessionId: requestContext.sessionId,
-      ...(requestContext.provider ? { provider: requestContext.provider } : {}),
-      ...(requestContext.profileId ? { profileId: requestContext.profileId } : {}),
-      systemPrompt: requestContext.systemPrompt ?? "",
-      messages: clonedMessages,
-      ...(clonedTools ? { tools: clonedTools } : {}),
-    },
   };
 }

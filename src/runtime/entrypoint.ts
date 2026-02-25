@@ -34,24 +34,7 @@ interface RuntimeOptions {
   retryDelayMs?: number;
 }
 
-type RuntimeTraceStage = "build-context" | "plan-step" | "tool-run" | "persist-state" | "finalize";
-
-interface RuntimeTraceEvent {
-  stage: RuntimeTraceStage;
-  sessionKey: string;
-  runId: string;
-  planId: string;
-  toolRunId?: string;
-  durationMs: number;
-  errorCode?: string;
-}
-
-interface RuntimeTraceBuilder {
-  emit: (stage: RuntimeTraceStage, details?: { toolRunId?: string; durationMs?: number; errorCode?: string }) => void;
-}
-
 const RUNTIME_PROVIDER = "openai-codex";
-const isRuntimeTraceEnabled = /^(1|true|yes|on)$/i.test(process.env.LAINCLAW_RUNTIME_TRACE ?? "");
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -136,72 +119,12 @@ function buildBaseRuntimeState(
   };
 }
 
-function createTraceBuilder(
-  sessionKey: string,
-  runId: string,
-  planId: string,
-): RuntimeTraceBuilder & { toArray: () => RuntimeTraceEvent[] } {
-  if (!isRuntimeTraceEnabled) {
-    return {
-      emit() {},
-      toArray() {
-        return [];
-      },
-    };
-  }
-
-  const stageStartedAt: Record<RuntimeTraceStage, number> = {
-    "build-context": Date.now(),
-    "plan-step": Date.now(),
-    "tool-run": Date.now(),
-    "persist-state": Date.now(),
-    finalize: Date.now(),
-  };
-  const events: RuntimeTraceEvent[] = [];
-
-  const emit = (stage: RuntimeTraceStage, details: { toolRunId?: string; durationMs?: number; errorCode?: string } = {}) => {
-    const timestamp = Date.now();
-    const next = timestamp;
-    const previous = stageStartedAt[stage];
-    const durationMs = details.durationMs ?? Math.max(1, next - previous);
-    stageStartedAt[stage] = next;
-    events.push({
-      stage,
-      sessionKey,
-      runId,
-      planId,
-      toolRunId: details.toolRunId,
-      durationMs,
-      errorCode: details.errorCode,
-    });
-    console.debug(
-      JSON.stringify({
-        scope: "runtime",
-        source: "runtime.entrypoint",
-        stage,
-        sessionKey,
-        runId,
-        planId,
-        toolRunId: details.toolRunId,
-        durationMs,
-        errorCode: details.errorCode,
-      }),
-    );
-  };
-
-  return {
-    emit,
-    toArray: () => events,
-  };
-}
-
 export interface RuntimeResult {
   adapter: AdapterResult;
   restored: boolean;
-  runState: RuntimeExecutionState;
-  runtimeTrace?: RuntimeTraceEvent[];
 }
 
+// Core flow: 单次请求主流程从这里开始，后续步骤在该函数内顺序展开。
 export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<RuntimeResult> {
   const requestContext = input.requestContext;
   const requestId = requestContext.requestId;
@@ -235,12 +158,8 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   const runId = runState.runId;
   const planId = runState.planId || `plan-${runId}`;
 
-  const trace = createTraceBuilder(requestContext.sessionKey, runId, planId);
-  trace.emit("build-context");
-
   let stepId = Number.isFinite(runState.stepId) ? Math.max(0, Math.floor(runState.stepId)) : 0;
   let toolLoopCount = 0;
-  let currentToolRunId: string | undefined;
 
   const toolCalls: ToolCall[] = [];
   const toolResults: ToolExecutionLog[] = [];
@@ -277,13 +196,6 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
     ...(isDefined(input.retryAttempts) ? { retryAttempts: input.retryAttempts } : {}),
     ...(isDefined(input.retryDelayMs) ? { retryDelayMs: input.retryDelayMs } : {}),
     ...(isDefined(input.toolAllow) && input.toolAllow.length > 0 ? { allowList: input.toolAllow } : {}),
-    onTraceEvent: (toolEvent) => {
-      trace.emit("tool-run", {
-        toolRunId: toolEvent.toolCallId,
-        durationMs: toolEvent.durationMs,
-        errorCode: toolEvent.errorCode,
-      });
-    },
   });
 
   const runTool = async (toolCall: ToolCall, signal?: AbortSignal): Promise<ToolExecutionLog> => {
@@ -324,35 +236,23 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   let finalPhase: RuntimeExecutionState["phase"] = "running";
   let runErr: Error | undefined;
   let limitExceeded = false;
-  let shouldPersistLastGoodSnapshot = false;
   let eventSeq = 0;
+  const persistBase = {
+    channel,
+    sessionKey: requestContext.sessionKey,
+    sessionId: requestContext.sessionId,
+    provider: RUNTIME_PROVIDER,
+    profileId,
+    runId,
+  };
 
-  const applyState = async (patch: Partial<RuntimeExecutionState>): Promise<void> => {
+  const persistState = async (patch: Partial<RuntimeExecutionState>): Promise<void> => {
     const eventId = `${requestId}-${++eventSeq}`;
-    const started = Date.now();
-    try {
-      await persistRuntimeExecutionState({
-        channel,
-        sessionKey: requestContext.sessionKey,
-        sessionId: requestContext.sessionId,
-        provider: RUNTIME_PROVIDER,
-        profileId,
-        runId,
-        eventId,
-        patch,
-      });
-      trace.emit("persist-state", {
-        toolRunId: currentToolRunId,
-        durationMs: Math.max(1, Date.now() - started),
-      });
-    } catch (error) {
-      trace.emit("persist-state", {
-        toolRunId: currentToolRunId,
-        durationMs: Math.max(1, Date.now() - started),
-        errorCode: error instanceof Error ? error.name : "persist_error",
-      });
-      throw error;
-    }
+    await persistRuntimeExecutionState({
+      ...persistBase,
+      eventId,
+      patch,
+    });
   };
 
   const userMessage: Message = {
@@ -364,26 +264,20 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   const unsubscribe = agent.subscribe((event: AgentEvent) => {
     if (event.type === "agent_start") {
       finalPhase = "running";
-      void applyState({ phase: "running", stepId, planId, lastRequestId: requestId });
+      void persistState({ phase: "running", stepId, planId, lastRequestId: requestId });
     }
 
     if (event.type === "turn_start") {
       stepId += 1;
-      trace.emit("plan-step", {
-        toolRunId: currentToolRunId,
-        errorCode: undefined,
-      });
-      void applyState({ phase: "running", stepId, planId, lastRequestId: requestId });
+      void persistState({ phase: "running", stepId, planId, lastRequestId: requestId });
     }
 
     if (event.type === "tool_execution_start") {
-      currentToolRunId = event.toolCallId;
-      void applyState({ phase: "running", toolRunId: event.toolCallId, lastRequestId: requestId });
+      void persistState({ phase: "running", toolRunId: event.toolCallId, lastRequestId: requestId });
     }
 
     if (event.type === "tool_execution_end") {
-      currentToolRunId = undefined;
-      void applyState({ phase: "running", toolRunId: undefined, lastRequestId: requestId });
+      void persistState({ phase: "running", toolRunId: undefined, lastRequestId: requestId });
     }
 
     if (event.type === "message_end") {
@@ -407,24 +301,16 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
 
     if (event.type === "agent_end") {
       finalPhase = finalPhase === "suspended" ? "suspended" : "idle";
-      shouldPersistLastGoodSnapshot = finalPhase === "idle";
     }
 
     const eventPhase: RuntimeExecutionState["phase"] = finalPhase;
-    void applyState({
-      phase: eventPhase,
-      stepId,
-      planId,
-      lastRequestId: requestId,
-      lastGoodSnapshot: shouldPersistLastGoodSnapshot
-        ? {
-          runId,
-          updatedAt: nowIso(),
-          stepId,
-        }
-        : undefined,
-      agentState: snapshotAgentState(agent, model.id),
-    });
+      void persistState({
+        phase: eventPhase,
+        stepId,
+        planId,
+        lastRequestId: requestId,
+        agentState: snapshotAgentState(agent, model.id),
+      });
   });
 
   try {
@@ -474,41 +360,17 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
     profileId,
   };
 
-  await applyState({
+  await persistState({
     phase: finalPhase,
     stepId,
     planId,
     lastRequestId: requestId,
     lastError,
-    lastGoodSnapshot:
-      shouldPersistLastGoodSnapshot
-        ? {
-          runId,
-          updatedAt: nowIso(),
-          stepId,
-        }
-        : runState.lastGoodSnapshot,
     agentState: snapshotAgentState(agent, model.id),
-  });
-
-  trace.emit("finalize", {
-    toolRunId: currentToolRunId,
-    errorCode: finalPhase === "failed" ? "execution_error" : undefined,
   });
 
   return {
     restored: shouldRestore,
-    runState: {
-      ...runState,
-      phase: finalPhase,
-      planId,
-      stepId,
-      lastRequestId: requestId,
-      runUpdatedAt: nowIso(),
-      lastError,
-      agentState: snapshotAgentState(agent, model.id),
-    },
     adapter: finalAdapter,
-    ...(isRuntimeTraceEnabled ? { runtimeTrace: trace.toArray() } : {}),
   };
 }

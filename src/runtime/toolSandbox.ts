@@ -12,6 +12,7 @@ interface SemaphoreRelease {
   (): void;
 }
 
+// Core flow: ToolSandbox 为主流程入口，先定义公开执行接口与默认配置，再把底层工具函数下沉。
 export interface ToolSandboxOptions {
   allowList?: string[];
   timeoutMs?: number;
@@ -19,14 +20,117 @@ export interface ToolSandboxOptions {
   retryAttempts?: number;
   retryDelayMs?: number;
   retryableErrorCodes?: ToolErrorCode[];
-  onTraceEvent?: (event: {
-    stage: "tool-run";
-    toolCallId: string;
-    toolName: string;
-    durationMs: number;
-    errorCode?: ToolErrorCode;
-    errorMessage?: string;
-  }) => void;
+}
+
+export class ToolSandbox {
+  private readonly allowList: string[];
+  private readonly timeoutMs: number;
+  private readonly maxConcurrentTools: number;
+  private readonly retryAttempts: number;
+  private readonly retryDelayMs: number;
+  private readonly retryableErrorCodes: ToolErrorCode[];
+  private active = 0;
+  private readonly waitQueue: Array<SemaphoreRelease> = [];
+
+  constructor(raw: ToolSandboxOptions = {}) {
+    this.allowList = Array.isArray(raw.allowList)
+      ? raw.allowList.map((entry) => entry.trim().toLowerCase()).filter(Boolean)
+      : [];
+    this.timeoutMs = normalizeNumber(raw.timeoutMs, DEFAULT_TIMEOUT_MS);
+    this.maxConcurrentTools = normalizeNumber(raw.maxConcurrentTools, DEFAULT_MAX_CONCURRENT);
+    this.retryAttempts = normalizeNumber(raw.retryAttempts, DEFAULT_RETRY_ATTEMPTS);
+    this.retryDelayMs = normalizeNumber(raw.retryDelayMs, DEFAULT_RETRY_DELAY_MS);
+    this.retryableErrorCodes = normalizeRetryErrorCodes(raw.retryableErrorCodes);
+  }
+
+  private acquireSlot(): Promise<SemaphoreRelease> {
+    if (this.active < this.maxConcurrentTools) {
+      this.active += 1;
+      return Promise.resolve(() => this.releaseSlot());
+    }
+    return new Promise<SemaphoreRelease>((resolve) => {
+      this.waitQueue.push(() => {
+        this.active += 1;
+        resolve(() => this.releaseSlot());
+      });
+    });
+  }
+
+  private releaseSlot(): void {
+    if (this.active > 0) {
+      this.active -= 1;
+    }
+    const next = this.waitQueue.shift();
+    if (next) {
+      next();
+    }
+  }
+
+  private shouldRetry(errorCode: unknown): boolean {
+    const normalized = parseToolErrorCode(errorCode);
+    return this.retryableErrorCodes.includes(normalized);
+  }
+
+  async execute(call: ToolCall, context: ToolContext): Promise<ToolExecutionLog> {
+    if (!isToolAllowed(call.name, this.allowList)) {
+      return normalizeToolError(call, `tool not allowed: ${call.name}`, "tool_not_found");
+    }
+
+    const release = await this.acquireSlot();
+    const started = Date.now();
+    try {
+      const attempts = Math.max(1, this.retryAttempts);
+      let lastLog: ToolExecutionLog | undefined;
+
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+          const log = await withTimeout(() => executeTool(call, context), this.timeoutMs, call.name);
+          const finalLog = {
+            call: { ...log.call },
+            result: {
+              ...log.result,
+              meta: {
+                ...log.result.meta,
+                durationMs: Math.max(1, Date.now() - started),
+              },
+            },
+          };
+          lastLog = finalLog;
+
+          if (finalLog.result.ok) {
+            return finalLog;
+          }
+
+          if (attempt < attempts - 1 && finalLog.result.error && this.shouldRetry(finalLog.result.error.code)) {
+            await sleep(this.retryDelayMs * Math.pow(2, attempt));
+            continue;
+          }
+          return finalLog;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "tool execution failed";
+          lastLog = normalizeToolError(call, message, "execution_error");
+          if (attempt < attempts - 1) {
+            await sleep(this.retryDelayMs * Math.pow(2, attempt));
+            continue;
+          }
+          break;
+        }
+      }
+      return lastLog ?? normalizeToolError(call, "tool execution failed", "execution_error");
+    } finally {
+      release();
+    }
+  }
+}
+
+export function createDefaultToolSandboxOptions(): ToolSandboxOptions {
+  return {
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    maxConcurrentTools: DEFAULT_MAX_CONCURRENT,
+    retryAttempts: DEFAULT_RETRY_ATTEMPTS,
+    retryDelayMs: DEFAULT_RETRY_DELAY_MS,
+    retryableErrorCodes: ["execution_error"],
+  };
 }
 
 function normalizeRetryErrorCodes(raw: ToolErrorCode[] | undefined): ToolErrorCode[] {
@@ -102,183 +206,4 @@ async function sleep(ms: number): Promise<void> {
     return;
   }
   await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export class ToolSandbox {
-  private readonly allowList: string[];
-  private readonly timeoutMs: number;
-  private readonly maxConcurrentTools: number;
-  private readonly retryAttempts: number;
-  private readonly retryDelayMs: number;
-  private readonly retryableErrorCodes: ToolErrorCode[];
-  private active = 0;
-  private readonly waitQueue: Array<SemaphoreRelease> = [];
-  private readonly onTraceEvent?: ToolSandboxOptions["onTraceEvent"];
-
-  constructor(raw: ToolSandboxOptions = {}) {
-    this.allowList = Array.isArray(raw.allowList)
-      ? raw.allowList.map((entry) => entry.trim().toLowerCase()).filter(Boolean)
-      : [];
-    this.timeoutMs = normalizeNumber(raw.timeoutMs, DEFAULT_TIMEOUT_MS);
-    this.maxConcurrentTools = normalizeNumber(raw.maxConcurrentTools, DEFAULT_MAX_CONCURRENT);
-    this.retryAttempts = normalizeNumber(raw.retryAttempts, DEFAULT_RETRY_ATTEMPTS);
-    this.retryDelayMs = normalizeNumber(raw.retryDelayMs, DEFAULT_RETRY_DELAY_MS);
-    this.retryableErrorCodes = normalizeRetryErrorCodes(raw.retryableErrorCodes);
-    this.onTraceEvent = raw.onTraceEvent;
-  }
-
-  private acquireSlot(): Promise<SemaphoreRelease> {
-    if (this.active < this.maxConcurrentTools) {
-      this.active += 1;
-      return Promise.resolve(() => this.releaseSlot());
-    }
-    return new Promise<SemaphoreRelease>((resolve) => {
-      this.waitQueue.push(() => {
-        this.active += 1;
-        resolve(() => this.releaseSlot());
-      });
-    });
-  }
-
-  private releaseSlot(): void {
-    if (this.active > 0) {
-      this.active -= 1;
-    }
-    const next = this.waitQueue.shift();
-    if (next) {
-      next();
-    }
-  }
-
-  private shouldRetry(errorCode: unknown): boolean {
-    const normalized = parseToolErrorCode(errorCode);
-    return this.retryableErrorCodes.includes(normalized);
-  }
-
-  private emitTraceEvent(event: {
-    stage: "tool-run";
-    toolCallId: string;
-    toolName: string;
-    durationMs: number;
-    errorCode?: ToolErrorCode;
-    errorMessage?: string;
-  }): void {
-    if (!this.onTraceEvent) {
-      return;
-    }
-    this.onTraceEvent(event);
-  }
-
-  async execute(call: ToolCall, context: ToolContext): Promise<ToolExecutionLog> {
-    if (!isToolAllowed(call.name, this.allowList)) {
-      return normalizeToolError(call, `tool not allowed: ${call.name}`, "tool_not_found");
-    }
-
-    const release = await this.acquireSlot();
-    const started = Date.now();
-    try {
-      const attempts = Math.max(1, this.retryAttempts);
-      let lastLog: ToolExecutionLog | undefined;
-
-      for (let attempt = 0; attempt < attempts; attempt += 1) {
-        try {
-          const log = await withTimeout(() => executeTool(call, context), this.timeoutMs, call.name);
-          const finalLog = {
-            call: { ...log.call },
-            result: {
-              ...log.result,
-              meta: {
-                ...log.result.meta,
-                durationMs: Math.max(1, Date.now() - started),
-              },
-            },
-          };
-          lastLog = finalLog;
-
-          if (finalLog.result.ok) {
-            this.emitTraceEvent({
-              stage: "tool-run",
-              toolCallId: call.id,
-              toolName: call.name,
-              durationMs: Math.max(1, Date.now() - started),
-            });
-            return finalLog;
-          }
-
-          if (attempt < attempts - 1 && finalLog.result.error && this.shouldRetry(finalLog.result.error.code)) {
-            await sleep(this.retryDelayMs * Math.pow(2, attempt));
-            continue;
-          }
-          this.emitTraceEvent({
-            stage: "tool-run",
-            toolCallId: call.id,
-            toolName: call.name,
-            durationMs: Math.max(1, Date.now() - started),
-            errorCode: finalLog.result.error?.code,
-            errorMessage: finalLog.result.error?.message,
-          });
-          return finalLog;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "tool execution failed";
-          lastLog = normalizeToolError(call, message, "execution_error");
-          if (attempt < attempts - 1) {
-            await sleep(this.retryDelayMs * Math.pow(2, attempt));
-            continue;
-          }
-          this.emitTraceEvent({
-            stage: "tool-run",
-            toolCallId: call.id,
-            toolName: call.name,
-            durationMs: Math.max(1, Date.now() - started),
-            errorCode: "execution_error",
-            errorMessage: message,
-          });
-          break;
-        }
-      }
-      this.emitTraceEvent({
-        stage: "tool-run",
-        toolCallId: call.id,
-        toolName: call.name,
-        durationMs: Math.max(1, Date.now() - started),
-        errorCode: lastLog?.result?.error?.code,
-        errorMessage: lastLog?.result?.error?.message,
-      });
-      return lastLog ?? normalizeToolError(call, "tool execution failed", "execution_error");
-    } finally {
-      release();
-    }
-  }
-
-  async executeCalls(
-    calls: ToolCall[],
-    context: ToolContext,
-  ): Promise<{ logs: ToolExecutionLog[]; toolError?: ToolExecutionLog["result"]["error"] }> {
-    if (!Array.isArray(calls) || calls.length === 0) {
-      return { logs: [] };
-    }
-
-    const logs: ToolExecutionLog[] = [];
-    let firstError: ToolExecutionLog["result"]["error"];
-
-    for (const call of calls) {
-      const log = await this.execute(call, context);
-      logs.push(log);
-      if (!firstError && log.result.error) {
-        firstError = log.result.error;
-      }
-    }
-
-    return { logs, toolError: firstError };
-  }
-}
-
-export function createDefaultToolSandboxOptions(): ToolSandboxOptions {
-  return {
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    maxConcurrentTools: DEFAULT_MAX_CONCURRENT,
-    retryAttempts: DEFAULT_RETRY_ATTEMPTS,
-    retryDelayMs: DEFAULT_RETRY_DELAY_MS,
-    retryableErrorCodes: ["execution_error"],
-  };
 }

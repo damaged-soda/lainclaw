@@ -1,1 +1,1 @@
-export { runAgent } from "./runAgent.js";
+export { runAgent } from "../runtime/index.js";

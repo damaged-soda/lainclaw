@@ -31,14 +31,14 @@ CLI（node dist/index.js）
 
 ## 核心职责
 
+- `docs/wip/20260225-runtime-simplification/runtime-layering.md` 记录了当前 `src/runtime` 四大职责边界与迁移规则，当前代码实现按该约束维护。
+
 - `src/cli/cli.ts`
   - 负责 CLI 参数解析、子命令分发与标准入口（`--help` / `--version`）输出。
   - 通过 `src/cli/registry.ts` 维护 `CommandRoute` 注册表，由 `runCommand` 风格执行层统一处理错误与返回码。
   - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口，但不变更命令语义与外部行为。
 - `src/gateway/gateway.ts`
   - 作为通道边界入口，接受 agent/gateway 输入并向下分发到 `runtime`。
-- `src/gateway/runAgent.ts`
-  - 仅保留 `runAgent` 的桥接导出。
 - `src/runtime/index.ts`
   - 暴露稳定的 `runAgent` API，并保持对 `gateway` 的兼容导出协议。
 - `src/runtime/coordinator.ts`
@@ -47,7 +47,7 @@ CLI（node dist/index.js）
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与审计记录构建。
 - `src/runtime/tools.ts`
-  - 封装工具白名单校验、tool-call 结果渲染与执行日志归并。
+  - 封装工具白名单与工具名映射、tool-call 映射与执行日志归并。
 - `src/runtime/coordinator.ts` 与 `src/runtime/entrypoint.ts` 的数据流
   - `coordinator` 负责输入准备（会话/系统提示/工具列表）与执行结果收口；
   - `entrypoint` 负责运行时生命周期推进、恢复策略与状态快照持久化。
@@ -64,6 +64,11 @@ CLI（node dist/index.js）
   - 持久化运行状态（`runId/planId/stepId/phase/toolRunId`）并支持跨请求恢复。
 - `src/runtime/toolSandbox.ts`
   - 统一工具执行隔离策略（超时、并发、重试、错误策略），并执行权限白名单与工具运行日志。
+
+## 运行入口收口说明（新增）
+
+- `gateway/index.ts` 与 `gateway/gateway.ts` 直接复用 `runtime/index.ts` 的 `runAgent` 导出。
+- 删除 `runtime/runAgent.ts` 与 `gateway/runAgent.ts` 这两层“仅转发”文件，减少不必要的中间封装。
 - `src/adapters/codexAdapter.ts`
   - 对接模型 SDK（`@mariozechner/pi-ai`），处理工具 schema 映射与 tool-call 解析。
 - `src/adapters/stubAdapter.ts`

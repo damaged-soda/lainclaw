@@ -1,34 +1,60 @@
 import type { Message } from "@mariozechner/pi-ai";
 import { AgentTool } from "@mariozechner/pi-agent-core";
-import { OPENAI_CODEX_MODEL } from "../auth/authManager.js";
 import { ContextToolSpec } from "../shared/types.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
-import { getToolInfo, listToolsCatalog } from "../tools/gateway.js";
-import { isToolAllowed } from "../tools/registry.js";
+import { listToolsCatalog } from "../tools/gateway.js";
 import type { RuntimeExecutionState } from "./schema.js";
-
-const TOOL_PARSE_PREFIX = "tool:";
 
 export interface RuntimeToolNameMap {
   codexByCanonical: Map<string, string>;
   canonicalByCodex: Map<string, string>;
 }
 
-export interface DeniedToolCall {
-  call: ToolCall;
-  code: ToolError["code"];
-  message: string;
-}
+// Core flow: createToolAdapter 是 runtime 的工具闭环入口，外层只负责协作，细节在内部函数里分解。
+export function createToolAdapter(
+  tools: ContextToolSpec[],
+  runTool: (call: ToolCall, signal?: AbortSignal) => Promise<ToolExecutionLog>,
+  toolNameMap: RuntimeToolNameMap,
+  onToolRun?: () => void,
+): AgentTool[] {
+  const normalizedTools = Array.isArray(tools)
+    ? tools.filter((tool): tool is ContextToolSpec => !!tool && typeof tool.name === "string")
+    : [];
 
-export interface ToolLoopState {
-  roundCalls: ToolCall[];
-  roundResults: ToolExecutionLog[];
-}
+  return normalizedTools.map((spec) => ({
+    name: toolNameMap.codexByCanonical.get(spec.name) ?? toRuntimeToolName(spec.name),
+    label: spec.name,
+    description: spec.description,
+    parameters: spec.inputSchema as unknown as AgentTool["parameters"],
+    execute: async (toolCallId, params, signal) => {
+      onToolRun?.();
+      const codexName = toolNameMap.codexByCanonical.get(spec.name) ?? toRuntimeToolName(spec.name);
+      const canonicalName = toolNameMap.canonicalByCodex.get(codexName) ?? spec.name;
+      const log = await runTool(
+        {
+          id: toolCallId,
+          name: canonicalName,
+          args: params,
+          source: "agent-runtime",
+        },
+        signal,
+      );
+      if (!log.result.ok) {
+        throw new Error(log.result.error?.message ?? `tool ${spec.name} failed`);
+      }
 
-export interface ParseToolInput {
-  toolCalls: ToolCall[];
-  residualInput: string;
-  parseError?: string;
+      return {
+        content: normalizeToolContent(log.result.content)
+          ? [{ type: "text", text: normalizeToolContent(log.result.content) }]
+          : [],
+        details: {
+          tool: canonicalName,
+          toolCallId: log.call.id,
+          meta: log.result.meta,
+        },
+      };
+    },
+  }));
 }
 
 function randomSuffix(): string {
@@ -38,10 +64,6 @@ function randomSuffix(): string {
 function toRuntimeToolName(raw: string): string {
   const normalized = raw.trim().replace(/[^a-zA-Z0-9_-]+/g, "_");
   return normalized.length > 0 ? normalized : `tool_${randomSuffix()}`;
-}
-
-function isRuntimeToolValid(call: ToolCall): call is ToolCall {
-  return !!call && typeof call === "object" && typeof call.name === "string" && call.name.trim().length > 0;
 }
 
 export function buildRuntimeToolNameMap(toolSpecs: ContextToolSpec[]): RuntimeToolNameMap {
@@ -151,132 +173,11 @@ export function shouldFollowUpBeforeContinue(previous: RuntimeExecutionState): b
   return !!lastMessage && lastMessage.role !== "user";
 }
 
-export function parseToolCallsFromPrompt(rawInput: string): ParseToolInput {
-  const trimmed = rawInput.trim();
-  if (!trimmed.startsWith(TOOL_PARSE_PREFIX)) {
-    return {
-      toolCalls: [],
-      residualInput: rawInput,
-    };
-  }
-
-  const payload = trimmed.slice(TOOL_PARSE_PREFIX.length).trim();
-  if (!payload) {
-    return {
-      toolCalls: [],
-      residualInput: "",
-      parseError: "tool invocation missing content",
-    };
-  }
-
-  let command = payload;
-  let residualInput = "";
-  const separator = payload.indexOf("\n");
-  if (separator >= 0) {
-    command = payload.slice(0, separator).trim();
-    residualInput = payload.slice(separator + 1).trim();
-  }
-
-  if (!command) {
-    return {
-      toolCalls: [],
-      residualInput,
-      parseError: "tool invocation missing call payload",
-    };
-  }
-
-  try {
-    let entries: unknown[] = [];
-    if (command.startsWith("[") || command.startsWith("{")) {
-      const parsed = JSON.parse(command);
-      const list = Array.isArray(parsed) ? parsed : [parsed];
-      if (list.length === 0) {
-        return {
-          toolCalls: [],
-          residualInput,
-          parseError: "tool invocation array is empty",
-        };
-      }
-      entries = list;
-    } else {
-      const firstSpace = command.search(/\s/);
-      const name = firstSpace >= 0 ? command.slice(0, firstSpace).trim() : command;
-      const argsText = firstSpace >= 0 ? command.slice(firstSpace + 1).trim() : "";
-      const args = argsText ? JSON.parse(argsText) : {};
-      entries = [{ name, args }];
-    }
-
-    const toolCalls = entries.map((entry, index) => {
-      if (!entry || typeof entry !== "object") {
-        throw new Error(`tool invocation #${index + 1} is invalid`);
-      }
-
-      const normalized = entry as Partial<ToolCall>;
-      const name = typeof normalized.name === "string" ? normalized.name.trim() : "";
-      if (!name) {
-        throw new Error(`tool invocation #${index + 1} missing name`);
-      }
-
-      return {
-        id:
-          typeof normalized.id === "string" && normalized.id.trim().length > 0
-            ? normalized.id.trim()
-            : `tool-${Date.now()}-${index + 1}-${randomSuffix()}`,
-        name,
-        args: normalized.args,
-        source: "agent",
-      } as ToolCall;
-    });
-
-    return {
-      toolCalls,
-      residualInput,
-    };
-  } catch (error) {
-    return {
-      toolCalls: [],
-      residualInput,
-      parseError: error instanceof Error ? error.message : "invalid tool payload",
-    };
-  }
-}
-
 export function resolveTools(input: ContextToolSpec[] | undefined, withTools: boolean): ContextToolSpec[] {
   if (!withTools || !Array.isArray(input)) {
     return [];
   }
   return input.filter((item) => item && typeof item.name === "string" && item.name.trim().length > 0);
-}
-
-export function normalizeToolCall(call: ToolCall): ToolCall {
-  return {
-    ...call,
-    id:
-      isRuntimeToolValid(call) && typeof call.id === "string" && call.id.trim().length > 0
-        ? call.id.trim()
-        : `tool-${Date.now()}-${randomSuffix()}`,
-    name: isRuntimeToolValid(call) ? call.name.trim() : "tool",
-  };
-}
-
-export function makeToolExecutionError(call: ToolCall, message: string, code: ToolError["code"]): ToolExecutionLog {
-  const normalized = normalizeToolCall(call);
-  return {
-    call: normalized,
-    result: {
-      ok: false,
-      content: undefined,
-      error: {
-        tool: normalized.name,
-        code,
-        message,
-      },
-      meta: {
-        tool: normalized.name,
-        durationMs: 0,
-      },
-    },
-  };
 }
 
 export function chooseFirstToolError(first: ToolError | undefined, next: ToolError | undefined): ToolError | undefined {
@@ -302,165 +203,6 @@ export function firstToolErrorFromLogs(logs: ToolExecutionLog[] | undefined): To
   }
 
   return found;
-}
-
-export function classifyToolCalls(calls: ToolCall[], toolAllow: string[]): {
-  allowed: ToolCall[];
-  denied: DeniedToolCall[];
-} {
-  return calls.reduce(
-    (acc, call) => {
-      const normalized = normalizeToolCall(call);
-      const name = normalized.name;
-      if (!isToolAllowed(name, toolAllow)) {
-        acc.denied.push({
-          call: normalized,
-          code: "tool_not_found",
-          message: `tool not allowed: ${name}`,
-        });
-        return acc;
-      }
-      if (!getToolInfo(name, toolAllow)) {
-        acc.denied.push({
-          call: normalized,
-          code: "tool_not_found",
-          message: `tool not found: ${name}`,
-        });
-        return acc;
-      }
-      acc.allowed.push(normalized);
-      return acc;
-    },
-    { allowed: [], denied: [] } as { allowed: ToolCall[]; denied: DeniedToolCall[] },
-  );
-}
-
-function normalizeToolContent(raw: unknown): string {
-  if (typeof raw === "string") {
-    return raw;
-  }
-  if (raw == null) {
-    return "";
-  }
-  try {
-    return JSON.stringify(raw);
-  } catch {
-    return String(raw);
-  }
-}
-
-export function createToolAdapter(
-  tools: ContextToolSpec[],
-  runTool: (call: ToolCall, signal?: AbortSignal) => Promise<ToolExecutionLog>,
-  toolNameMap: RuntimeToolNameMap,
-  onToolRun?: () => void,
-): AgentTool[] {
-  const normalizedTools = Array.isArray(tools)
-    ? tools.filter((tool): tool is ContextToolSpec => !!tool && typeof tool.name === "string")
-    : [];
-
-  return normalizedTools.map((spec) => ({
-    name: toolNameMap.codexByCanonical.get(spec.name) ?? toRuntimeToolName(spec.name),
-    label: spec.name,
-    description: spec.description,
-    parameters: spec.inputSchema as unknown as AgentTool["parameters"],
-    execute: async (toolCallId, params, signal) => {
-      onToolRun?.();
-      const codexName = toolNameMap.codexByCanonical.get(spec.name) ?? toRuntimeToolName(spec.name);
-      const canonicalName = toolNameMap.canonicalByCodex.get(codexName) ?? spec.name;
-      const log = await runTool(
-        {
-          id: toolCallId,
-          name: canonicalName,
-          args: params,
-          source: "agent-runtime",
-        },
-        signal,
-      );
-      if (!log.result.ok) {
-        throw new Error(log.result.error?.message ?? `tool ${spec.name} failed`);
-      }
-
-      return {
-        content: normalizeToolContent(log.result.content)
-          ? [{ type: "text", text: normalizeToolContent(log.result.content) }]
-          : [],
-        details: {
-          tool: canonicalName,
-          toolCallId: log.call.id,
-          meta: log.result.meta,
-        },
-      };
-    },
-  }));
-}
-
-export function makeAssistantToolContextMessage(
-  calls: ToolCall[],
-  resultText: string,
-  stopReason?: string,
-  provider?: string,
-): Message {
-  const shouldSanitize = provider === "openai-codex";
-  return {
-    role: "assistant",
-    content: [
-      ...(resultText ? [{ type: "text", text: resultText }] : []),
-      ...calls.map((call) => ({
-        type: "toolCall",
-        id: call.id,
-        name: shouldSanitize ? toRuntimeToolName(call.name) : call.name,
-        arguments: call.args,
-      })),
-    ],
-    api: "openai-codex-responses",
-    provider: "openai-codex",
-    model: OPENAI_CODEX_MODEL,
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        total: 0,
-      },
-    },
-    stopReason: stopReason ?? "toolUse",
-    timestamp: Date.now(),
-  } as Message;
-}
-
-export function makeToolResultContextMessage(log: ToolExecutionLog): Message {
-  const normalizedResult = log.result.ok
-    ? log.result.content
-    : log.result.error
-      ? log.result.error.message
-      : "tool execution failed";
-
-  return {
-    role: "toolResult" as const,
-    toolCallId: log.call.id,
-    toolName: log.call.name,
-    content: [{ type: "text", text: `${normalizedResult ?? ""}` }],
-    isError: !log.result.ok,
-    timestamp: Date.now(),
-  } as Message;
-}
-
-export function appendToolCallContextMessages(
-  requestMessages: Message[],
-  round: ToolLoopState,
-  resultText: string,
-  stopReason?: string,
-  provider?: string,
-): void {
-  requestMessages.push(makeAssistantToolContextMessage(round.roundCalls, resultText, stopReason, provider));
-  requestMessages.push(...round.roundResults.map(makeToolResultContextMessage));
 }
 
 export function buildToolMessages(calls: ToolCall[], results: ToolExecutionLog[]): string {
@@ -500,4 +242,18 @@ export function resolveStepLimitError(toolCalls: ToolCall[], toolMaxSteps: numbe
 
 export function listAutoTools(toolAllow: string[]) {
   return listToolsCatalog(toolAllow);
+}
+
+function normalizeToolContent(raw: unknown): string {
+  if (typeof raw === "string") {
+    return raw;
+  }
+  if (raw == null) {
+    return "";
+  }
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return String(raw);
+  }
 }

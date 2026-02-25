@@ -1,13 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import {
-  RuntimeExecutionState,
-  RuntimePhase,
-  RuntimeStateEnvelope,
-  RUNTIME_STATE_VERSION,
-} from "./schema.js";
+import { RuntimeExecutionState, RuntimePhase, RUNTIME_STATE_VERSION } from "./schema.js";
 import { resolveAuthDirectory } from "../auth/configStore.js";
-import { migrateRuntimeStateEnvelope } from "./migration.js";
+import { migrateRuntimeExecutionState } from "./migration.js";
 
 interface RuntimeStateStoreParams {
   channel: string;
@@ -21,9 +16,64 @@ interface RuntimeStateStoreParams {
 }
 
 const RUNTIME_DIR_NAME = "runtime";
-const MAX_HISTORY = 20;
 const JSON_PRETTY = 2;
 const STATE_WRITE_QUEUE = new Map<string, Promise<unknown>>();
+
+// Core flow: 运行态读写公开入口放在文件前部，保持主流程一眼可见。
+export async function loadRuntimeExecutionState(
+  channel: string,
+  sessionKey: string,
+): Promise<RuntimeExecutionState | undefined> {
+  return loadRuntimeStateFile(channel, sessionKey);
+}
+
+export async function persistRuntimeExecutionState(
+  params: RuntimeStateStoreParams,
+): Promise<RuntimeExecutionState> {
+  const statePath = resolveRuntimeStatePath(params.channel, params.sessionKey);
+
+  return queueWrite(statePath, async () => {
+    const current = await loadRuntimeStateFile(params.channel, params.sessionKey);
+    let baseState: RuntimeExecutionState;
+    if (!current || current.runId !== params.runId) {
+      baseState = createFallbackRuntimeState(
+        params.channel,
+        params.sessionKey,
+        params.sessionId,
+        params.provider,
+        params.profileId,
+        params.runId,
+      );
+    } else {
+      baseState = current;
+    }
+
+    if (params.eventId && baseState.lastEventId && baseState.lastEventId === params.eventId) {
+      return baseState;
+    }
+
+    const merged = {
+      ...baseState,
+      ...params.patch,
+      lastEventId: params.eventId,
+    };
+    const next = normalizeRuntimeExecutionState(
+      merged,
+      params.channel,
+      params.sessionKey,
+      params.sessionId,
+      params.provider,
+      params.profileId,
+      params.runId,
+    );
+    await writeState(statePath, next);
+    return next;
+  });
+}
+
+export function createRuntimeRunId(): string {
+  return `run-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -102,7 +152,6 @@ function normalizeRuntimeExecutionState(
     ...(typeof raw.lastRequestId === "string" ? { lastRequestId: raw.lastRequestId } : {}),
     ...(raw.lastError ? { lastError: raw.lastError } : {}),
     ...(raw.lastEventId ? { lastEventId: raw.lastEventId } : {}),
-    ...(raw.lastGoodSnapshot ? { lastGoodSnapshot: raw.lastGoodSnapshot } : {}),
     ...(raw.agentState ? { agentState: raw.agentState } : {}),
   };
 }
@@ -114,9 +163,7 @@ function makeWriteTempPath(statePath: string): string {
 
 function queueWrite<T>(statePath: string, action: () => Promise<T>): Promise<T> {
   const previous = STATE_WRITE_QUEUE.get(statePath) ?? Promise.resolve();
-  const current = previous
-    .catch(() => undefined)
-    .then(action);
+  const current = previous.catch(() => undefined).then(action);
   const done = current.then(() => undefined, () => undefined);
   STATE_WRITE_QUEUE.set(statePath, done);
   done.finally(() => {
@@ -127,89 +174,27 @@ function queueWrite<T>(statePath: string, action: () => Promise<T>): Promise<T> 
   return current;
 }
 
-function writeEnvelope(statePath: string, envelope: RuntimeStateEnvelope): Promise<void> {
+function writeState(statePath: string, state: RuntimeExecutionState): Promise<void> {
   return fs.mkdir(path.dirname(statePath), { recursive: true }).then(() => {
     const tempPath = makeWriteTempPath(statePath);
-    return fs.writeFile(tempPath, JSON.stringify(envelope, null, JSON_PRETTY), "utf-8")
+    return fs.writeFile(tempPath, JSON.stringify(state, null, JSON_PRETTY), "utf-8")
       .then(() => fs.rename(tempPath, statePath));
   });
 }
 
-export async function loadRuntimeStateEnvelope(
+async function loadRuntimeStateFile(
   channel: string,
   sessionKey: string,
-): Promise<RuntimeStateEnvelope> {
+): Promise<RuntimeExecutionState | undefined> {
   const statePath = resolveRuntimeStatePath(channel, sessionKey);
   try {
     const raw = await fs.readFile(statePath, "utf-8");
     const parsed = JSON.parse(raw);
-    return migrateRuntimeStateEnvelope(parsed);
+    return migrateRuntimeExecutionState(parsed);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return {};
+      return undefined;
     }
-    return {};
+    return undefined;
   }
-}
-
-export async function loadRuntimeExecutionState(
-  channel: string,
-  sessionKey: string,
-): Promise<RuntimeExecutionState | undefined> {
-  const envelope = await loadRuntimeStateEnvelope(channel, sessionKey);
-  return envelope.current;
-}
-
-export async function persistRuntimeExecutionState(
-  params: RuntimeStateStoreParams,
-): Promise<RuntimeExecutionState> {
-  const statePath = resolveRuntimeStatePath(params.channel, params.sessionKey);
-
-  return queueWrite(statePath, async () => {
-    const envelope = await loadRuntimeStateEnvelope(params.channel, params.sessionKey);
-
-    let current = envelope.current;
-    if (!current || current.runId !== params.runId) {
-      if (current) {
-        const history = Array.isArray(envelope.history) ? [...envelope.history] : [];
-        history.unshift(current);
-        envelope.history = history.slice(0, MAX_HISTORY);
-      }
-      current = createFallbackRuntimeState(
-        params.channel,
-        params.sessionKey,
-        params.sessionId,
-        params.provider,
-        params.profileId,
-        params.runId,
-      );
-    }
-
-    if (params.eventId && current.lastEventId && current.lastEventId === params.eventId) {
-      return current;
-    }
-
-    const patch = {
-      ...current,
-      ...params.patch,
-      lastEventId: params.eventId,
-    };
-    const next = normalizeRuntimeExecutionState(
-      patch,
-      params.channel,
-      params.sessionKey,
-      params.sessionId,
-      params.provider,
-      params.profileId,
-      params.runId,
-    );
-
-    envelope.current = next;
-    await writeEnvelope(statePath, envelope);
-    return next;
-  });
-}
-
-export function createRuntimeRunId(): string {
-  return `run-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
 }

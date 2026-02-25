@@ -27,6 +27,10 @@ interface RuntimeRouteContext {
   profileId?: string;
 }
 
+export function resolveSessionMemoryPath(sessionKey: string): string {
+  return getSessionMemoryPath(sessionKey);
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -65,22 +69,6 @@ async function appendRuntimeMessage(
     ...(routeContext.provider ? { provider: routeContext.provider } : {}),
     ...(routeContext.profileId ? { profileId: routeContext.profileId } : {}),
   });
-}
-
-export function buildCompactionSummary(messages: SessionHistoryMessage[], compactedMessageCount: number): string {
-  const cutoff = Math.max(messages.length - MEMORY_KEEP_RECENT_MESSAGES, 0);
-  const compactFrom = Math.max(0, Math.min(compactedMessageCount, cutoff));
-  const candidates = messages
-    .slice(compactFrom, cutoff)
-    .filter((message) => message.role === "user" || message.role === "assistant")
-    .slice(-MEMORY_SUMMARY_MESSAGE_LIMIT);
-
-  if (candidates.length < MEMORY_MIN_COMPACT_WINDOW) {
-    return "";
-  }
-
-  const lines = candidates.map((message) => `${message.role}: ${truncateText(message.content, MEMORY_SUMMARY_LINE_LIMIT)}`);
-  return `## Memory Summary\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }
 
 export async function appendToolSummaryToHistory(
@@ -151,6 +139,18 @@ export async function compactSessionMemoryIfNeeded(session: {
   return true;
 }
 
-export function resolveSessionMemoryPath(sessionKey: string): string {
-  return getSessionMemoryPath(sessionKey);
+export function buildCompactionSummary(messages: SessionHistoryMessage[], compactedMessageCount: number): string {
+  const cutoff = Math.max(messages.length - MEMORY_KEEP_RECENT_MESSAGES, 0);
+  const compactFrom = Math.max(0, Math.min(compactedMessageCount, cutoff));
+  const candidates = messages
+    .slice(compactFrom, cutoff)
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .slice(-MEMORY_SUMMARY_MESSAGE_LIMIT);
+
+  if (candidates.length < MEMORY_MIN_COMPACT_WINDOW) {
+    return "";
+  }
+
+  const lines = candidates.map((message) => `${message.role}: ${truncateText(message.content, MEMORY_SUMMARY_LINE_LIMIT)}`);
+  return `## Memory Summary\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }

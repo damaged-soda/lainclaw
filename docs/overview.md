@@ -16,7 +16,8 @@
 - `agent`：命令行直接发起问题，按 session 管理上下文。
 - `gateway`：通道边界，启动飞书 WS 或 local 服务；不承载运行时建模与恢复逻辑。
   - CLI 内部已重构为集中式命令分发与统一执行封装，当前版本保持命令格式、行为和返回码兼容，仅结构优化。
-- `runtime`（顶层模块）：引入 `pi-agent-core` 统一编排，支持会话级执行 plan 的持久化恢复（`src/runtime`）。
+- `runtime`（顶层模块）：引入 `pi-agent-core` 统一编排，支持会话级执行 plan 的持久化恢复（`src/runtime`），并通过更直接的导出链路连接网关与 agent 命令。
+  - 详见 `docs/wip/20260225-runtime-simplification/runtime-layering.md` 的分层边界与迁移约定。
 - 会话持久化：会话索引与消息按 `~/.lainclaw` 目录记录。
 - 配置管理：网关参数和工具参数集中到配置文件。
 - 工具调用：内置文件读写/时间/目录等工具。

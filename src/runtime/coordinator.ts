@@ -47,16 +47,7 @@ type RunAgentOptions = {
 const DEFAULT_RUNTIME_PROVIDER = "openai-codex";
 const DEFAULT_CHANNEL = "agent";
 
-function resolveChannel(raw: string | undefined): string {
-  const normalized = raw?.trim().toLowerCase();
-  return normalized && normalized.length > 0 ? normalized : DEFAULT_CHANNEL;
-}
-
-function resolveProvider(raw: string | undefined): string {
-  const normalized = raw?.trim();
-  return normalized && normalized.length > 0 ? normalized : DEFAULT_RUNTIME_PROVIDER;
-}
-
+// Core flow: runAgent 是 runtime 的主入口，参数解析与 runtime 协同在下方统一落地
 export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Promise<GatewayResult> {
   if (!rawInput || !rawInput.trim()) {
     throw new ValidationError("agent command requires non-empty input", "AGENT_INPUT_REQUIRED");
@@ -198,4 +189,14 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     sessionContextUpdated,
     ...(promptAudit ? { promptAudit } : {}),
   };
+}
+
+function resolveChannel(raw: string | undefined): string {
+  const normalized = raw?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : DEFAULT_CHANNEL;
+}
+
+function resolveProvider(raw: string | undefined): string {
+  const normalized = raw?.trim();
+  return normalized && normalized.length > 0 ? normalized : DEFAULT_RUNTIME_PROVIDER;
 }
