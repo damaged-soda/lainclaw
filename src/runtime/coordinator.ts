@@ -1,6 +1,4 @@
-import { type GatewayResult } from "../shared/types.js";
-import { ValidationError, type RequestContext } from "../shared/types.js";
-import type { ToolExecutionLog, ToolError } from "../tools/types.js";
+import { ValidationError, type GatewayResult, type RequestContext } from "../shared/types.js";
 import { runOpenAICodexRuntime } from "./entrypoint.js";
 import {
   appendTurnMessages,
@@ -9,20 +7,17 @@ import {
   persistRouteUsage,
   resolveSessionMemoryPath,
 } from "./persistence.js";
-import { chooseFirstToolError, listAutoTools } from "./tools.js";
+import { listAutoTools } from "./tools.js";
 import {
   buildPromptAuditRecord,
   buildWorkspaceSystemPrompt,
-  contextMessagesFromHistory,
+  buildRuntimeRequestContext,
   createRequestId,
-  makeBaseRequestContext,
-  makeUserContextMessage,
   nowIso,
   normalizeToolAllow,
   resolveMemoryFlag,
   resolveSessionKey,
   resolveToolMaxSteps,
-  trimContextMessages,
   NEW_SESSION_COMMAND,
   NEW_SESSION_ROUTE,
   NEW_SESSION_STAGE,
@@ -33,6 +28,7 @@ import {
   getSessionMemoryPath,
   loadSessionMemorySnippet,
 } from "../sessions/sessionStore.js";
+import { firstToolErrorFromLogs } from "./tools.js";
 
 type RunAgentOptions = {
   provider?: string;
@@ -59,22 +55,6 @@ function resolveChannel(raw: string | undefined): string {
 function resolveProvider(raw: string | undefined): string {
   const normalized = raw?.trim();
   return normalized && normalized.length > 0 ? normalized : DEFAULT_RUNTIME_PROVIDER;
-}
-
-function firstToolError(logs: ToolExecutionLog[] | undefined): ToolError | undefined {
-  if (!Array.isArray(logs)) {
-    return undefined;
-  }
-  let found: ToolError | undefined;
-  for (const entry of logs) {
-    if (entry?.result?.error) {
-      found = chooseFirstToolError(found, entry.result.error);
-      if (found) {
-        return found;
-      }
-    }
-  }
-  return found;
 }
 
 export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Promise<GatewayResult> {
@@ -133,7 +113,7 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   });
 
   const memorySnippet = session.memoryEnabled ? await loadSessionMemorySnippet(session.sessionKey) : "";
-  const priorMessages = trimContextMessages(await getRecentSessionMessages(session.sessionId));
+  const priorMessages = await getRecentSessionMessages(session.sessionId);
   const promptAudit = opts.includePromptAudit ? { enabled: true, records: [] } : undefined;
 
   const recordPromptAudit = (requestContext: RequestContext, routeDecision: string) => {
@@ -143,26 +123,22 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
     promptAudit.records.push(buildPromptAuditRecord(promptAudit.records.length + 1, requestContext, routeDecision));
   };
 
-  const historyContext = contextMessagesFromHistory(priorMessages);
-  if (memorySnippet) {
-    historyContext.push(makeUserContextMessage(`[memory]\n${memorySnippet}`));
-  }
-
   const autoTools = listAutoTools(toolAllow);
-  const contextMessages = [...historyContext, makeUserContextMessage(input)];
-  const requestContext = makeBaseRequestContext(
+  const { requestContext } = buildRuntimeRequestContext({
     requestId,
     createdAt,
     input,
     sessionKey,
-    session.sessionId,
-    contextMessages,
+    sessionId: session.sessionId,
+    priorMessages,
+    memorySnippet,
     provider,
     profileId,
-    withTools ? autoTools : undefined,
-    requestSystemPrompt,
-    session.memoryEnabled,
-  );
+    withTools,
+    tools: autoTools,
+    systemPrompt: requestSystemPrompt,
+    memoryEnabled: session.memoryEnabled,
+  });
 
   const runtimeResult = await runOpenAICodexRuntime({
     requestContext,
@@ -177,7 +153,7 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const finalResult = runtimeResult.adapter;
   const toolCalls = finalResult.toolCalls ?? [];
   const toolResults = finalResult.toolResults ?? [];
-  const toolError = firstToolError(finalResult.toolResults);
+  const toolError = firstToolErrorFromLogs(toolResults);
   const sessionContextUpdated = toolResults.length > 0;
 
   recordPromptAudit(requestContext, runtimeResult.restored ? "runtime.restore" : "runtime.new");

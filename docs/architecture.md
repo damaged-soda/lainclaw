@@ -42,11 +42,18 @@ CLI（node dist/index.js）
 - `src/runtime/index.ts`
   - 暴露稳定的 `runAgent` API，并保持对 `gateway` 的兼容导出协议。
 - `src/runtime/coordinator.ts`
-  - 组织 `runAgent` 的顶层流程：新建会话、手工/自动工具路径选择、模型执行、结果汇总。
+  - 组织 `runAgent` 的顶层编排：会话上下文合并、工具清单与运行参数准备、执行结果归并。
+  - 持有业务上下文边界（`session`、`memory`、审计）并触发持久化写入；不直接处理 `tool` 执行策略细节。
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与审计记录构建。
 - `src/runtime/tools.ts`
   - 封装工具白名单校验、tool-call 结果渲染与执行日志归并。
+- `src/runtime/coordinator.ts` 与 `src/runtime/entrypoint.ts` 的数据流
+  - `coordinator` 负责输入准备（会话/系统提示/工具列表）与执行结果收口；
+  - `entrypoint` 负责运行时生命周期推进、恢复策略与状态快照持久化。
+- `runtime` 可观测统一字段
+  - `entrypoint` 与 `toolSandbox` 采用 `stage` 维度打点，字段包含 `stage`、`sessionKey`、`runId/planId`、`toolRunId`（可选）、`durationMs`、`errorCode`（可选）。
+  - `LAINCLAW_RUNTIME_TRACE=1|true` 时记录标准化调试事件；默认保持原有日志语义。
 - `src/runtime/persistence.ts`
   - 封装会话轨迹、路由记录、记忆压缩相关的持久化写入。
 - `src/runtime/entrypoint.ts`

@@ -21,6 +21,12 @@ export const NEW_SESSION_ROUTE = "system";
 export const NEW_SESSION_STAGE = "gateway.new_session";
 export const ASSISTANT_FOLLOWUP_PROMPT = "请基于上述工具结果回答问题。";
 
+interface RuntimeContextMessages {
+  requestContext: RequestContext;
+  contextMessages: Message[];
+  historyContext: Message[];
+}
+
 function nowTs() {
   return Date.now();
 }
@@ -132,6 +138,48 @@ export function makeUserContextMessage(content: string): Message {
     content,
     timestamp: nowTs(),
   } as Message;
+}
+
+export function buildRuntimeRequestContext(params: {
+  requestId: string;
+  createdAt: string;
+  input: string;
+  sessionKey: string;
+  sessionId: string;
+  priorMessages: SessionHistoryMessage[];
+  memorySnippet?: string;
+  provider?: string;
+  profileId?: string;
+  withTools: boolean;
+  tools?: ContextToolSpec[];
+  systemPrompt?: string;
+  memoryEnabled?: boolean;
+}): RuntimeContextMessages {
+  const resolvedTools = params.withTools && Array.isArray(params.tools) ? params.tools : undefined;
+  const historyContext = contextMessagesFromHistory(trimContextMessages(params.priorMessages));
+  const contextMessages: Message[] = [...historyContext];
+
+  if (typeof params.memorySnippet === "string" && params.memorySnippet.length > 0) {
+    contextMessages.push(makeUserContextMessage(`[memory]\n${params.memorySnippet}`));
+  }
+
+  contextMessages.push(makeUserContextMessage(params.input));
+
+  const requestContext = makeBaseRequestContext(
+    params.requestId,
+    params.createdAt,
+    params.input,
+    params.sessionKey,
+    params.sessionId,
+    contextMessages,
+    params.provider,
+    params.profileId,
+    resolvedTools,
+    params.systemPrompt,
+    params.memoryEnabled ?? true,
+  );
+
+  return { requestContext, contextMessages, historyContext };
 }
 
 export function makeBaseRequestContext(

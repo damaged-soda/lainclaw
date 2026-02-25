@@ -1,4 +1,4 @@
-import { RuntimeExecutionState, RuntimeStateEnvelope } from "./schema.js";
+import { RuntimeExecutionState, RuntimeStateEnvelope, RUNTIME_STATE_VERSION } from "./schema.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -27,7 +27,7 @@ function sanitizeExecutionState(raw: unknown, fallbackRunId: string): RuntimeExe
   }
 
   return {
-    version: 1,
+    version: RUNTIME_STATE_VERSION,
     channel: "agent",
     sessionKey: "main",
     sessionId: fallbackRunId,

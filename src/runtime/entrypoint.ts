@@ -1,20 +1,24 @@
 import path from "node:path";
-import { Agent, type AgentEvent, type AgentTool } from "@mariozechner/pi-agent-core";
+import { Agent, type AgentEvent } from "@mariozechner/pi-agent-core";
 import { getModel, type Message as PiMessage, type StopReason as PiStopReason } from "@mariozechner/pi-ai";
 import type { Message } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext, OPENAI_CODEX_MODEL } from "../auth/authManager.js";
 import { ContextToolSpec, RequestContext } from "../shared/types.js";
 import type { AdapterResult } from "../adapters/stubAdapter.js";
-import { chooseFirstToolError, resolveStepLimitError } from "./tools.js";
+import {
+  buildRuntimeToolNameMap,
+  chooseFirstToolError,
+  createToolAdapter,
+  remapRuntimeMessages,
+  resolveStepLimitError,
+  resolveTools,
+  shouldFollowUpBeforeContinue,
+} from "./tools.js";
 import { resolveToolMaxSteps } from "./context.js";
 import { ToolSandbox, createDefaultToolSandboxOptions } from "./toolSandbox.js";
-import {
-  createRuntimeRunId,
-  loadRuntimeExecutionState,
-  persistRuntimeExecutionState,
-} from "./stateStore.js";
+import { createRuntimeRunId, loadRuntimeExecutionState, persistRuntimeExecutionState } from "./stateStore.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
-import type { RuntimeExecutionState } from "./schema.js";
+import { RUNTIME_STATE_VERSION, type RuntimeExecutionState } from "./schema.js";
 
 interface RuntimeOptions {
   requestContext: RequestContext;
@@ -30,136 +34,24 @@ interface RuntimeOptions {
   retryDelayMs?: number;
 }
 
-function toRuntimeToolName(raw: string): string {
-  const normalized = raw.trim().replace(/[^a-zA-Z0-9_-]+/g, "_");
-  return normalized.length > 0 ? normalized : `tool_${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
+type RuntimeTraceStage = "build-context" | "plan-step" | "tool-run" | "persist-state" | "finalize";
+
+interface RuntimeTraceEvent {
+  stage: RuntimeTraceStage;
+  sessionKey: string;
+  runId: string;
+  planId: string;
+  toolRunId?: string;
+  durationMs: number;
+  errorCode?: string;
 }
 
-type RuntimeToolNameMap = {
-  codexByCanonical: Map<string, string>;
-  canonicalByCodex: Map<string, string>;
-};
-
-function createRuntimeToolNameMap(toolSpecs: ContextToolSpec[]): RuntimeToolNameMap {
-  const used = new Set<string>();
-  const codexByCanonical = new Map<string, string>();
-  const canonicalByCodex = new Map<string, string>();
-
-  for (const spec of toolSpecs) {
-    const canonical = typeof spec.name === "string" ? spec.name : "";
-    if (!canonical) {
-      continue;
-    }
-
-    let preferred = toRuntimeToolName(canonical);
-    if (!preferred.length) {
-      preferred = `tool_${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
-    }
-    let candidate = preferred;
-    let counter = 1;
-    while (used.has(candidate)) {
-      counter += 1;
-      candidate = `${preferred}_${counter}`;
-    }
-    used.add(candidate);
-    codexByCanonical.set(canonical, candidate);
-    canonicalByCodex.set(candidate, canonical);
-  }
-
-  return { codexByCanonical, canonicalByCodex };
-}
-
-function sanitizeRuntimeToolName(raw: string, codexByCanonical: Map<string, string>): string {
-  return codexByCanonical.get(raw) ?? raw;
-}
-
-function remapToolNameInContent(content: unknown, codexByCanonical: Map<string, string>): unknown {
-  if (!content || typeof content !== "object") {
-    return content;
-  }
-  const candidate = content as Record<string, unknown>;
-  const type = typeof candidate.type === "string" ? candidate.type : "";
-  if (type !== "toolCall" && type !== "tool_call" && type !== "toolResult") {
-    return content;
-  }
-
-  const toolName =
-    typeof candidate.name === "string"
-      ? candidate.name
-      : typeof candidate.toolName === "string"
-        ? candidate.toolName
-        : "";
-  if (!toolName) {
-    return content;
-  }
-
-  const mapped = sanitizeRuntimeToolName(toolName, codexByCanonical);
-  if (type === "toolResult") {
-    return { ...candidate, toolName: mapped };
-  }
-  return { ...candidate, name: mapped };
-}
-
-function remapRuntimeMessages(rawMessages: unknown, codexByCanonical: Map<string, string>): PiMessage[] {
-  if (!Array.isArray(rawMessages)) {
-    return [];
-  }
-
-  return rawMessages
-    .map((item) => {
-      if (!item || typeof item !== "object") {
-        return undefined;
-      }
-
-      const message = item as Record<string, unknown>;
-      const normalized: Record<string, unknown> = { ...message };
-
-      if (Array.isArray(message.content)) {
-        normalized.content = message.content.map((block) => remapToolNameInContent(block, codexByCanonical));
-      }
-
-      if (typeof message.toolName === "string") {
-        normalized.toolName = sanitizeRuntimeToolName(message.toolName, codexByCanonical);
-      }
-
-      return normalized as unknown as PiMessage;
-    })
-    .filter((message): message is PiMessage => message !== undefined);
-}
-
-function shouldFollowUpBeforeContinue(previous: RuntimeExecutionState): boolean {
-  if (!previous) {
-    return false;
-  }
-
-  if (previous.phase !== "running" && previous.phase !== "failed") {
-    return false;
-  }
-
-  const hasPendingToolCalls = Array.isArray(previous.agentState?.pendingToolCalls)
-    && previous.agentState.pendingToolCalls.length > 0;
-  const hasInProgressTool = typeof previous.toolRunId === "string" && previous.toolRunId.length > 0;
-  const lastMessage = (Array.isArray(previous.agentState?.messages) ? previous.agentState.messages : [])
-    .at(-1);
-
-  if (hasInProgressTool || hasPendingToolCalls) {
-    return false;
-  }
-
-  if (!lastMessage || lastMessage.role === "user") {
-    return false;
-  }
-
-  return true;
-}
-
-export interface RuntimeResult {
-  adapter: AdapterResult;
-  restored: boolean;
-  runState: RuntimeExecutionState;
+interface RuntimeTraceBuilder {
+  emit: (stage: RuntimeTraceStage, details?: { toolRunId?: string; durationMs?: number; errorCode?: string }) => void;
 }
 
 const RUNTIME_PROVIDER = "openai-codex";
+const isRuntimeTraceEnabled = /^(1|true|yes|on)$/i.test(process.env.LAINCLAW_RUNTIME_TRACE ?? "");
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -193,27 +85,6 @@ function toText(message: Message | undefined): string {
     .join("\n");
 }
 
-function normalizeToolContent(raw: unknown): string {
-  if (typeof raw === "string") {
-    return raw;
-  }
-  if (raw == null) {
-    return "";
-  }
-  try {
-    return JSON.stringify(raw);
-  } catch {
-    return String(raw);
-  }
-}
-
-function resolveTools(input: ContextToolSpec[] | undefined, withTools: boolean): ContextToolSpec[] {
-  if (!withTools || !Array.isArray(input)) {
-    return [];
-  }
-  return input.filter((item) => item && typeof item.name === "string" && item.name.trim().length > 0);
-}
-
 function resolveStage(profileId: string, phase: RuntimeExecutionState["phase"]): string {
   if (phase === "suspended") {
     return `runtime.codex.${profileId}.suspended`;
@@ -224,7 +95,7 @@ function resolveStage(profileId: string, phase: RuntimeExecutionState["phase"]):
   return `adapter.codex.${profileId}`;
 }
 
-function snapshotAgentState(agent: Agent, modelId: string): RuntimeExecutionState["agentState"] {
+function snapshotAgentState(agent: InstanceType<typeof Agent>, modelId: string): RuntimeExecutionState["agentState"] {
   const state = agent.state;
   return {
     systemPrompt: state.systemPrompt,
@@ -242,45 +113,6 @@ function snapshotAgentState(agent: Agent, modelId: string): RuntimeExecutionStat
   };
 }
 
-function createToolAdapter(
-  tools: ContextToolSpec[],
-  runTool: (call: ToolCall, signal?: AbortSignal) => Promise<ToolExecutionLog>,
-  toolNameMap: RuntimeToolNameMap,
-): AgentTool[] {
-  return tools.map((spec) => ({
-    name: toolNameMap.codexByCanonical.get(spec.name) ?? toRuntimeToolName(spec.name),
-    label: spec.name,
-    description: spec.description,
-    parameters: spec.inputSchema as unknown as AgentTool["parameters"],
-    execute: async (toolCallId, params, signal) => {
-      const codexName = toolNameMap.codexByCanonical.get(spec.name) ?? toRuntimeToolName(spec.name);
-      const canonicalName = toolNameMap.canonicalByCodex.get(codexName) ?? spec.name;
-      const log = await runTool(
-        {
-          id: toolCallId,
-          name: canonicalName,
-          args: params,
-          source: "agent-runtime",
-        },
-        signal,
-      );
-      if (!log.result.ok) {
-        throw new Error(log.result.error?.message ?? `tool ${spec.name} failed`);
-      }
-      return {
-        content: normalizeToolContent(log.result.content)
-          ? [{ type: "text", text: normalizeToolContent(log.result.content) }]
-          : [],
-        details: {
-          tool: canonicalName,
-          toolCallId: log.call.id,
-          meta: log.result.meta,
-        },
-      };
-    },
-  }));
-}
-
 function buildBaseRuntimeState(
   channel: string,
   sessionKey: string,
@@ -289,7 +121,7 @@ function buildBaseRuntimeState(
 ): RuntimeExecutionState {
   const runId = createRuntimeRunId();
   return {
-    version: 1,
+    version: RUNTIME_STATE_VERSION,
     channel,
     sessionKey,
     sessionId,
@@ -304,6 +136,72 @@ function buildBaseRuntimeState(
   };
 }
 
+function createTraceBuilder(
+  sessionKey: string,
+  runId: string,
+  planId: string,
+): RuntimeTraceBuilder & { toArray: () => RuntimeTraceEvent[] } {
+  if (!isRuntimeTraceEnabled) {
+    return {
+      emit() {},
+      toArray() {
+        return [];
+      },
+    };
+  }
+
+  const stageStartedAt: Record<RuntimeTraceStage, number> = {
+    "build-context": Date.now(),
+    "plan-step": Date.now(),
+    "tool-run": Date.now(),
+    "persist-state": Date.now(),
+    finalize: Date.now(),
+  };
+  const events: RuntimeTraceEvent[] = [];
+
+  const emit = (stage: RuntimeTraceStage, details: { toolRunId?: string; durationMs?: number; errorCode?: string } = {}) => {
+    const timestamp = Date.now();
+    const next = timestamp;
+    const previous = stageStartedAt[stage];
+    const durationMs = details.durationMs ?? Math.max(1, next - previous);
+    stageStartedAt[stage] = next;
+    events.push({
+      stage,
+      sessionKey,
+      runId,
+      planId,
+      toolRunId: details.toolRunId,
+      durationMs,
+      errorCode: details.errorCode,
+    });
+    console.debug(
+      JSON.stringify({
+        scope: "runtime",
+        source: "runtime.entrypoint",
+        stage,
+        sessionKey,
+        runId,
+        planId,
+        toolRunId: details.toolRunId,
+        durationMs,
+        errorCode: details.errorCode,
+      }),
+    );
+  };
+
+  return {
+    emit,
+    toArray: () => events,
+  };
+}
+
+export interface RuntimeResult {
+  adapter: AdapterResult;
+  restored: boolean;
+  runState: RuntimeExecutionState;
+  runtimeTrace?: RuntimeTraceEvent[];
+}
+
 export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<RuntimeResult> {
   const requestContext = input.requestContext;
   const requestId = requestContext.requestId;
@@ -311,7 +209,7 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   const toolMaxSteps = resolveToolMaxSteps(input.toolMaxSteps);
   const toolSpecs = resolveTools(input.toolSpecs, input.withTools);
   const cwd = path.resolve(input.cwd || process.cwd());
-  const toolNameMap = createRuntimeToolNameMap(toolSpecs);
+  const toolNameMap = buildRuntimeToolNameMap(toolSpecs);
 
   const { apiKey, profile } = await getOpenAICodexApiContext(requestContext.profileId);
   const model = getModel("openai-codex", OPENAI_CODEX_MODEL);
@@ -337,8 +235,12 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   const runId = runState.runId;
   const planId = runState.planId || `plan-${runId}`;
 
+  const trace = createTraceBuilder(requestContext.sessionKey, runId, planId);
+  trace.emit("build-context");
+
   let stepId = Number.isFinite(runState.stepId) ? Math.max(0, Math.floor(runState.stepId)) : 0;
   let toolLoopCount = 0;
+  let currentToolRunId: string | undefined;
 
   const toolCalls: ToolCall[] = [];
   const toolResults: ToolExecutionLog[] = [];
@@ -352,16 +254,17 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
       toolResults.push(log);
       toolLogsById.set(log.call.id, log);
     } else {
-      const last = {
+      const merged = {
         ...existing,
         ...log,
       };
-      toolLogsById.set(log.call.id, last);
+      toolLogsById.set(log.call.id, merged);
       const index = toolResults.findIndex((entry) => entry.call.id === log.call.id);
       if (index >= 0) {
-        toolResults[index] = last;
+        toolResults[index] = merged;
       }
     }
+
     if (isDefined(log.result.error)) {
       toolError = chooseFirstToolError(toolError, log.result.error);
     }
@@ -374,6 +277,13 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
     ...(isDefined(input.retryAttempts) ? { retryAttempts: input.retryAttempts } : {}),
     ...(isDefined(input.retryDelayMs) ? { retryDelayMs: input.retryDelayMs } : {}),
     ...(isDefined(input.toolAllow) && input.toolAllow.length > 0 ? { allowList: input.toolAllow } : {}),
+    onTraceEvent: (toolEvent) => {
+      trace.emit("tool-run", {
+        toolRunId: toolEvent.toolCallId,
+        durationMs: toolEvent.durationMs,
+        errorCode: toolEvent.errorCode,
+      });
+    },
   });
 
   const runTool = async (toolCall: ToolCall, signal?: AbortSignal): Promise<ToolExecutionLog> => {
@@ -392,6 +302,7 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   const initialMessages = (shouldRestore && runState.agentState?.messages?.length)
     ? remapRuntimeMessages(runState.agentState.messages, toolNameMap.codexByCanonical)
     : requestContext.messages;
+
   const agent = new Agent({
     initialState: {
       systemPrompt: requestContext.systemPrompt ?? "",
@@ -418,16 +329,30 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
 
   const applyState = async (patch: Partial<RuntimeExecutionState>): Promise<void> => {
     const eventId = `${requestId}-${++eventSeq}`;
-    await persistRuntimeExecutionState({
-      channel,
-      sessionKey: requestContext.sessionKey,
-      sessionId: requestContext.sessionId,
-      provider: RUNTIME_PROVIDER,
-      profileId,
-      runId,
-      eventId,
-      patch,
-    });
+    const started = Date.now();
+    try {
+      await persistRuntimeExecutionState({
+        channel,
+        sessionKey: requestContext.sessionKey,
+        sessionId: requestContext.sessionId,
+        provider: RUNTIME_PROVIDER,
+        profileId,
+        runId,
+        eventId,
+        patch,
+      });
+      trace.emit("persist-state", {
+        toolRunId: currentToolRunId,
+        durationMs: Math.max(1, Date.now() - started),
+      });
+    } catch (error) {
+      trace.emit("persist-state", {
+        toolRunId: currentToolRunId,
+        durationMs: Math.max(1, Date.now() - started),
+        errorCode: error instanceof Error ? error.name : "persist_error",
+      });
+      throw error;
+    }
   };
 
   const userMessage: Message = {
@@ -441,22 +366,33 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
       finalPhase = "running";
       void applyState({ phase: "running", stepId, planId, lastRequestId: requestId });
     }
+
     if (event.type === "turn_start") {
       stepId += 1;
+      trace.emit("plan-step", {
+        toolRunId: currentToolRunId,
+        errorCode: undefined,
+      });
       void applyState({ phase: "running", stepId, planId, lastRequestId: requestId });
     }
+
     if (event.type === "tool_execution_start") {
+      currentToolRunId = event.toolCallId;
       void applyState({ phase: "running", toolRunId: event.toolCallId, lastRequestId: requestId });
     }
+
     if (event.type === "tool_execution_end") {
+      currentToolRunId = undefined;
       void applyState({ phase: "running", toolRunId: undefined, lastRequestId: requestId });
     }
-        if (event.type === "message_end") {
-          if (event.message.role === "assistant") {
-            finalMessage = event.message;
-            finalStopReason = event.message.stopReason;
-          }
-        }
+
+    if (event.type === "message_end") {
+      if (event.message.role === "assistant") {
+        finalMessage = event.message;
+        finalStopReason = event.message.stopReason;
+      }
+    }
+
     if (event.type === "turn_end") {
       if (event.toolResults.length > 0) {
         toolLoopCount += 1;
@@ -468,10 +404,12 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
         }
       }
     }
+
     if (event.type === "agent_end") {
       finalPhase = finalPhase === "suspended" ? "suspended" : "idle";
       shouldPersistLastGoodSnapshot = finalPhase === "idle";
     }
+
     const eventPhase: RuntimeExecutionState["phase"] = finalPhase;
     void applyState({
       phase: eventPhase,
@@ -518,6 +456,7 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
   } else if (finalPhase !== "suspended" && runErr && !toolError) {
     throw runErr;
   }
+
   if (runErr && (toolError || finalPhase === "suspended")) {
     finalPhase = finalPhase === "running" ? "failed" : finalPhase;
     lastError = lastError || runErr.message;
@@ -552,6 +491,11 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
     agentState: snapshotAgentState(agent, model.id),
   });
 
+  trace.emit("finalize", {
+    toolRunId: currentToolRunId,
+    errorCode: finalPhase === "failed" ? "execution_error" : undefined,
+  });
+
   return {
     restored: shouldRestore,
     runState: {
@@ -565,5 +509,6 @@ export async function runOpenAICodexRuntime(input: RuntimeOptions): Promise<Runt
       agentState: snapshotAgentState(agent, model.id),
     },
     adapter: finalAdapter,
+    ...(isRuntimeTraceEnabled ? { runtimeTrace: trace.toArray() } : {}),
   };
 }

@@ -19,6 +19,14 @@ export interface ToolSandboxOptions {
   retryAttempts?: number;
   retryDelayMs?: number;
   retryableErrorCodes?: ToolErrorCode[];
+  onTraceEvent?: (event: {
+    stage: "tool-run";
+    toolCallId: string;
+    toolName: string;
+    durationMs: number;
+    errorCode?: ToolErrorCode;
+    errorMessage?: string;
+  }) => void;
 }
 
 function normalizeRetryErrorCodes(raw: ToolErrorCode[] | undefined): ToolErrorCode[] {
@@ -105,6 +113,7 @@ export class ToolSandbox {
   private readonly retryableErrorCodes: ToolErrorCode[];
   private active = 0;
   private readonly waitQueue: Array<SemaphoreRelease> = [];
+  private readonly onTraceEvent?: ToolSandboxOptions["onTraceEvent"];
 
   constructor(raw: ToolSandboxOptions = {}) {
     this.allowList = Array.isArray(raw.allowList)
@@ -115,6 +124,7 @@ export class ToolSandbox {
     this.retryAttempts = normalizeNumber(raw.retryAttempts, DEFAULT_RETRY_ATTEMPTS);
     this.retryDelayMs = normalizeNumber(raw.retryDelayMs, DEFAULT_RETRY_DELAY_MS);
     this.retryableErrorCodes = normalizeRetryErrorCodes(raw.retryableErrorCodes);
+    this.onTraceEvent = raw.onTraceEvent;
   }
 
   private acquireSlot(): Promise<SemaphoreRelease> {
@@ -145,6 +155,20 @@ export class ToolSandbox {
     return this.retryableErrorCodes.includes(normalized);
   }
 
+  private emitTraceEvent(event: {
+    stage: "tool-run";
+    toolCallId: string;
+    toolName: string;
+    durationMs: number;
+    errorCode?: ToolErrorCode;
+    errorMessage?: string;
+  }): void {
+    if (!this.onTraceEvent) {
+      return;
+    }
+    this.onTraceEvent(event);
+  }
+
   async execute(call: ToolCall, context: ToolContext): Promise<ToolExecutionLog> {
     if (!isToolAllowed(call.name, this.allowList)) {
       return normalizeToolError(call, `tool not allowed: ${call.name}`, "tool_not_found");
@@ -172,6 +196,12 @@ export class ToolSandbox {
           lastLog = finalLog;
 
           if (finalLog.result.ok) {
+            this.emitTraceEvent({
+              stage: "tool-run",
+              toolCallId: call.id,
+              toolName: call.name,
+              durationMs: Math.max(1, Date.now() - started),
+            });
             return finalLog;
           }
 
@@ -179,6 +209,14 @@ export class ToolSandbox {
             await sleep(this.retryDelayMs * Math.pow(2, attempt));
             continue;
           }
+          this.emitTraceEvent({
+            stage: "tool-run",
+            toolCallId: call.id,
+            toolName: call.name,
+            durationMs: Math.max(1, Date.now() - started),
+            errorCode: finalLog.result.error?.code,
+            errorMessage: finalLog.result.error?.message,
+          });
           return finalLog;
         } catch (error) {
           const message = error instanceof Error ? error.message : "tool execution failed";
@@ -187,14 +225,51 @@ export class ToolSandbox {
             await sleep(this.retryDelayMs * Math.pow(2, attempt));
             continue;
           }
+          this.emitTraceEvent({
+            stage: "tool-run",
+            toolCallId: call.id,
+            toolName: call.name,
+            durationMs: Math.max(1, Date.now() - started),
+            errorCode: "execution_error",
+            errorMessage: message,
+          });
           break;
         }
       }
-
+      this.emitTraceEvent({
+        stage: "tool-run",
+        toolCallId: call.id,
+        toolName: call.name,
+        durationMs: Math.max(1, Date.now() - started),
+        errorCode: lastLog?.result?.error?.code,
+        errorMessage: lastLog?.result?.error?.message,
+      });
       return lastLog ?? normalizeToolError(call, "tool execution failed", "execution_error");
     } finally {
       release();
     }
+  }
+
+  async executeCalls(
+    calls: ToolCall[],
+    context: ToolContext,
+  ): Promise<{ logs: ToolExecutionLog[]; toolError?: ToolExecutionLog["result"]["error"] }> {
+    if (!Array.isArray(calls) || calls.length === 0) {
+      return { logs: [] };
+    }
+
+    const logs: ToolExecutionLog[] = [];
+    let firstError: ToolExecutionLog["result"]["error"];
+
+    for (const call of calls) {
+      const log = await this.execute(call, context);
+      logs.push(log);
+      if (!firstError && log.result.error) {
+        firstError = log.result.error;
+      }
+    }
+
+    return { logs, toolError: firstError };
   }
 }
 
