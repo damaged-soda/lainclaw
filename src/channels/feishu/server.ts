@@ -1,7 +1,6 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { runAgent } from "../../gateway/gateway.js";
 import { sendFeishuTextMessage } from "./outbound.js";
-import { writeAgentAuditRecord } from "../../shared/agentAudit.js";
 import {
   resolveFeishuGatewayConfig,
   type FeishuGatewayConfig,
@@ -355,24 +354,6 @@ async function handleWsPayload(
       }),
     ]);
 
-    await writeAgentAuditRecord({
-      channel: "feishu",
-      requestId: runResult.requestId,
-      requestSource: inbound.requestId,
-      sessionKey: runResult.sessionKey,
-      input: inbound.input,
-      result: runResult,
-      emitToStdout: options.auditDebug,
-      auditStage: "runAgent.feishu.success",
-      metadata: {
-        inboundRequestId: inbound.requestId,
-        openId: inbound.openId,
-        chatId: inbound.chatId,
-        chatType: inbound.chatType,
-        messageId: inbound.messageId,
-      },
-    });
-
     await sendFeishuTextMessage(config, {
       openId: inbound.openId,
       text: runResult.result,
@@ -383,27 +364,6 @@ async function handleWsPayload(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (inbound?.openId && inbound.input) {
-      const sessionKey = `feishu:dm:${inbound.openId}`;
-        await writeAgentAuditRecord({
-        channel: "feishu",
-        requestId: inbound.requestId,
-        requestSource: inbound.requestId,
-        sessionKey,
-        input: inbound.input,
-        error: message,
-        emitToStdout: options.auditDebug,
-        auditStage: "runAgent.feishu.error",
-        metadata: {
-          inboundRequestId: inbound.requestId,
-          openId: inbound.openId,
-          chatId: inbound.chatId,
-          chatType: inbound.chatType,
-          messageId: inbound.messageId,
-          context: inbound,
-        },
-      }).catch((writeError) => {
-        console.warn(`[feishu] ${requestId} agent audit error-record failed: ${String(writeError)}`);
-      });
     }
     console.error(`[feishu] ${requestId} error: ${message}`);
     if (inbound?.openId) {
@@ -424,7 +384,6 @@ export type FeishuFailureHintResolver = (rawMessage: string) => string;
 
 interface FeishuGatewayServerOptions {
   onFailureHint?: FeishuFailureHintResolver;
-  auditDebug?: boolean;
 }
 
 export async function runFeishuGatewayServer(

@@ -385,7 +385,6 @@ export async function runFeishuGatewayWithHeartbeat(
         overrides,
         {
           onFailureHint,
-          auditDebug: serviceContext.debug,
         },
         effectiveChannel,
       );
@@ -505,7 +504,6 @@ export async function runFeishuGatewayWithHeartbeat(
       overrides,
       {
         onFailureHint,
-        auditDebug: serviceContext.debug,
       },
       effectiveChannel,
     );

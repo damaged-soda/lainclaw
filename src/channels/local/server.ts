@@ -3,9 +3,6 @@ import path from "node:path";
 import os from "node:os";
 import { runAgent } from "../../gateway/gateway.js";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
-import {
-  writeAgentAuditRecord,
-} from "../../shared/agentAudit.js";
 
 export interface LocalGatewayOverrides {
   provider?: string;
@@ -308,44 +305,12 @@ export async function runLocalGatewayServer(
           });
 
           const record = buildRunboxRecord(result, input, requestSource, sessionKey);
-          await writeAgentAuditRecord({
-            channel: "local",
-            requestId: result.requestId,
-            requestSource,
-            sessionKey,
-            input,
-            emitToStdout: context.debug,
-            auditStage: "runAgent.local.success",
-            result,
-            metadata: {
-              channel: "local",
-              requestSource,
-              auditMode: "stream",
-            },
-          });
           await appendLine(outboxPath, writeRunboxRecordSafe(record));
           console.log(`[local] ${requestSource} route=${result.route} stage=${result.stage}`);
           continue;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const requestId = `${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
-            await writeAgentAuditRecord({
-            channel: "local",
-            requestId,
-            requestSource,
-            sessionKey,
-            input,
-            emitToStdout: context.debug,
-            auditStage: "runAgent.local.error",
-            error: message,
-            metadata: {
-              channel: "local",
-              requestSource,
-              context: "local-gateway",
-            },
-          }).catch((writeError) => {
-            console.warn(`[local] ${requestId} agent audit error-record failed: ${String(writeError)}`);
-          });
           const record = buildErrorRecord(requestId, input, requestSource, sessionKey, message);
           await appendLine(outboxPath, writeErrorRecordSafe(record));
           console.log(`[local] ${requestSource} failed: ${message}`);

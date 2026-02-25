@@ -41,9 +41,9 @@ CLI（node dist/index.js）
   - 暴露稳定的 `runAgent` API，并保持对 `gateway` 的兼容导出协议。
 - `src/runtime/coordinator.ts`
   - 组织 `runAgent` 的顶层编排：会话上下文合并、工具清单与运行参数准备、执行结果归并。
-  - 持有业务上下文边界（`session`、`memory`、审计）并触发持久化写入；不直接处理 `tool` 执行策略细节。
+  - 持有业务上下文边界（`session`、`memory`）并触发持久化写入；不直接处理 `tool` 执行策略细节。
 - `src/runtime/context.ts`
-  - 封装 request/session 上下文、时间戳与审计记录构建。
+  - 封装 request/session 上下文、时间戳与运行时元信息构建。
 - `src/runtime/tools.ts`
   - 封装工具白名单与工具名映射、执行日志归并；工具真实执行由 `tools/executor` 完成。
 - `src/runtime/coordinator.ts` 与 `src/runtime/entrypoint.ts` 的数据流
@@ -86,7 +86,7 @@ CLI（node dist/index.js）
 - `src/gateway/serviceProcess.ts`
   - 管理 gateway 子进程启动与 stop/kill 生命周期。
 - `src/shared/*`
-  - 公共上下文（工作区、提示词拼装、审计结构）。
+  - 公共上下文（工作区、提示词拼装、运行时共享元信息）。
 
 ## 会话与记忆数据流（简化）
 
