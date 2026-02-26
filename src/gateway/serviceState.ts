@@ -2,39 +2,53 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import type { GatewayServiceState } from "./servicePaths.js";
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isStrictPositiveInt(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isStringArray(values: unknown): values is string[] {
+  if (!Array.isArray(values) || values.length === 0) {
+    return false;
+  }
+  return values.every((value) => typeof value === "string" && value.trim().length > 0);
+}
+
+function isGatewayServiceStatePayload(raw: unknown): raw is Record<string, unknown> {
+  return typeof raw === "object" && raw !== null;
+}
+
 function isGatewayServiceState(raw: unknown): raw is GatewayServiceState {
-  if (!raw || typeof raw !== "object") {
+  if (!isGatewayServiceStatePayload(raw)) {
     return false;
   }
   const candidate = raw as Partial<GatewayServiceState>;
-  if (typeof candidate.channel !== "string" || !candidate.channel.trim()) {
+  if (!isNonEmptyString(candidate.channel)) {
     return false;
   }
-  if (typeof candidate.pid !== "number" || !Number.isInteger(candidate.pid) || candidate.pid <= 0) {
+  if (!isStrictPositiveInt(candidate.pid)) {
     return false;
   }
-  if (typeof candidate.startedAt !== "string" || candidate.startedAt.trim().length === 0) {
+  if (!isNonEmptyString(candidate.startedAt)) {
     return false;
   }
-  if (typeof candidate.command !== "string" || candidate.command.trim().length === 0) {
+  if (!isNonEmptyString(candidate.command)) {
     return false;
   }
-  if (typeof candidate.statePath !== "string" || candidate.statePath.trim().length === 0) {
+  if (!isNonEmptyString(candidate.statePath)) {
     return false;
   }
-  if (typeof candidate.logPath !== "string" || candidate.logPath.trim().length === 0) {
+  if (!isNonEmptyString(candidate.logPath)) {
     return false;
   }
   if (!Array.isArray(candidate.argv) || candidate.argv.length === 0) {
     return false;
   }
-  if (Array.isArray(candidate.channels)) {
-    if (candidate.channels.length === 0) {
-      return false;
-    }
-    if (!candidate.channels.every((item) => typeof item === "string" && item.trim().length > 0)) {
-      return false;
-    }
+  if (candidate.channels !== undefined && !isStringArray(candidate.channels)) {
+    return false;
   }
   return true;
 }

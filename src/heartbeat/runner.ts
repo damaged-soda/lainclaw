@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { runAgent } from '../gateway/gateway.js';
+import { runAgent } from '../gateway/index.js';
 import {
   type HeartbeatRule,
   loadHeartbeatRules,

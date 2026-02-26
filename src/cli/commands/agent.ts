@@ -1,6 +1,6 @@
 import { parseAgentArgs } from '../parsers/agent.js';
 import { ValidationError } from '../../shared/types.js';
-import { runAgent } from '../../gateway/gateway.js';
+import { runAgent } from '../../gateway/index.js';
 import { runCommand } from '../shared/result.js';
 
 export async function runAgentCommand(args: string[]): Promise<number> {

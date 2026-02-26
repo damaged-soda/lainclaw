@@ -8,6 +8,10 @@ import type { GatewayServiceTerminateOptions } from "./servicePaths.js";
 const POLL_INTERVAL_MS = 200;
 const DEFAULT_GRACEFUL_TIMEOUT_MS = 5000;
 const DEFAULT_FORCE_KILL_TIMEOUT_MS = 2000;
+const KILL_SIGNALS = {
+  graceful: "SIGTERM" as NodeJS.Signals,
+  force: "SIGKILL" as NodeJS.Signals,
+};
 
 export function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -27,6 +31,21 @@ export function isProcessAlive(pid: number): boolean {
     }
     return false;
   }
+}
+
+function signalProcess(pid: number, signal: NodeJS.Signals): void {
+  process.kill(pid, signal);
+}
+
+function handleProcessKillError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "ESRCH") {
+    return true;
+  }
+  if (code === "EPERM") {
+    throw error;
+  }
+  return false;
 }
 
 export async function spawnGatewayServiceProcess(
@@ -82,14 +101,10 @@ export async function terminateGatewayProcess(
   }
 
   try {
-    process.kill(pid, "SIGTERM");
+    signalProcess(pid, KILL_SIGNALS.graceful);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ESRCH") {
+    if (handleProcessKillError(error)) {
       return true;
-    }
-    if (code === "EPERM") {
-      throw error;
     }
   }
 
@@ -98,14 +113,10 @@ export async function terminateGatewayProcess(
   }
 
   try {
-    process.kill(pid, "SIGKILL");
+    signalProcess(pid, KILL_SIGNALS.force);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ESRCH") {
+    if (handleProcessKillError(error)) {
       return true;
-    }
-    if (code === "EPERM") {
-      throw error;
     }
   }
 

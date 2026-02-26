@@ -6,7 +6,7 @@
 CLI（node dist/index.js）
   └─ src/index.ts
       └─ src/cli/cli.ts（参数路由）
-          ├─ src/gateway/gateway.ts（兼容入口）
+          ├─ src/gateway/index.ts（gateway 主入口）
           │   ├─ src/gateway/service.ts（服务生命周期）
           │   ├─ src/gateway/servicePaths.ts（服务路径）
           │   ├─ src/gateway/serviceState.ts（服务状态）
@@ -33,8 +33,8 @@ CLI（node dist/index.js）
   - 负责 CLI 参数解析、子命令分发与标准入口（`--help` / `--version`）输出。
   - 通过 `src/cli/registry.ts` 维护 `CommandRoute` 注册表，由 `runCommand` 风格执行层统一处理错误与返回码。
   - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口，但不变更命令语义与外部行为。
-- `src/gateway/gateway.ts`
-  - 作为通道边界入口，接受 agent/gateway 输入并向下分发到 `runtime`。
+- `src/gateway/index.ts`
+  - 作为主入口边界，接受 `agent/gateway` 输入并向下分发到 `runtime`。
 - `src/runtime/index.ts`
   - 暴露稳定的 `runAgent` API，并保持对 `gateway` 的兼容导出协议。
   - 不承载调用来源语义（来源/外部通道归属），`runAgent` 仅接收执行上下文与会话参数。
@@ -58,7 +58,7 @@ CLI（node dist/index.js）
 
 ## 运行入口收口说明（新增）
 
-- `gateway/index.ts` 与 `gateway/gateway.ts` 直接复用 `runtime/index.ts` 的 `runAgent` 导出。
+- `gateway/index.ts` 复用 `runtime/index.ts` 的 `runAgent` 导出。
 - 删除 `runtime/runAgent.ts` 与 `gateway/runAgent.ts` 这两层“仅转发”文件，减少不必要的中间封装。
 - `src/adapters/codexAdapter.ts`
   - 对接模型 SDK（`@mariozechner/pi-ai`），处理工具 schema 映射与 tool-call 解析。

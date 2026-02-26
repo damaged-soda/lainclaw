@@ -25,12 +25,20 @@ export interface GatewayServiceTerminateOptions {
 const DEFAULT_STATE_FILE_SUFFIX = ".json";
 const DEFAULT_LOG_FILE_SUFFIX = ".log";
 const DEFAULT_GATEWAY_SERVICE_BASENAME = "gateway-service";
+const DEFAULT_GATEWAY_CHANNEL = "gateway";
+
+function normalizeGatewayChannel(rawChannel: string): string {
+  const normalized = String(rawChannel ?? "").trim().toLowerCase();
+  return normalized.length > 0 ? normalized : DEFAULT_GATEWAY_CHANNEL;
+}
 
 export function resolveGatewayServicePaths(
-  _rawChannel: string,
+  rawChannel: string,
   overrides: Partial<GatewayServicePaths> = {},
 ): GatewayServicePaths {
-  void _rawChannel;
+  const channel = normalizeGatewayChannel(rawChannel);
+  // 当前实现不按 channel 分目录，但保留归一化调用链，便于后续扩展且不影响既有路径语义。
+  void channel;
   const serviceDir = path.join(resolveAuthDirectory(), "service");
 
   return {
