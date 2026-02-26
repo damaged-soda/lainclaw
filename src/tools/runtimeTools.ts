@@ -1,13 +1,9 @@
 import { AgentTool } from "@mariozechner/pi-agent-core";
 import { ContextToolSpec } from "../shared/types.js";
-import { listToolsCatalog } from "./gateway.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "./types.js";
-import type { ToolSpec } from "./types.js";
 
-export type ToolCatalogEntry = Pick<ToolSpec, "name" | "description" | "inputSchema">;
-
-const TOOL_NAME_FALLBACK_PREFIX = "tool_";
 const RUNTIME_NAME_NORMALIZER = /[^a-zA-Z0-9_-]+/g;
+const TOOL_NAME_FALLBACK_PREFIX = "tool_";
 
 export interface RuntimeToolNameMap {
   codexByCanonical: Map<string, string>;
@@ -151,10 +147,6 @@ export function buildToolMessages(calls: ToolCall[], results: ToolExecutionLog[]
   });
 
   return JSON.stringify(normalized, null, 2);
-}
-
-export function listAutoTools(toolAllow: string[] | undefined) {
-  return listToolsCatalog(toolAllow);
 }
 
 export function isNamedToolSpec(tool: ContextToolSpec | undefined): tool is ContextToolSpec {

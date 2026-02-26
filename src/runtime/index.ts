@@ -1,6 +1,5 @@
 import { ValidationError, type GatewayResult } from "../shared/types.js";
 import { runRuntime } from "./entrypoint.js";
-import { listAutoTools } from "../tools/runtimeTools.js";
 import {
   buildWorkspaceSystemPrompt,
   buildRuntimeRequestContext,
@@ -14,6 +13,7 @@ import {
   NEW_SESSION_STAGE,
 } from "./context.js";
 import { sessionService } from "../sessions/sessionService.js";
+import { listTools } from "../tools/registry.js";
 import { firstToolErrorFromLogs } from "../tools/runtimeTools.js";
 
 type RunAgentOptions = {
@@ -81,7 +81,11 @@ export async function runAgent(rawInput: string, opts: RunAgentOptions = {}): Pr
   const memorySnippet = session.memoryEnabled ? await sessionService.loadMemorySnippet(session.sessionKey) : "";
   const priorMessages = await sessionService.loadHistory(session.sessionId);
 
-  const autoTools = listAutoTools(toolAllow);
+  const autoTools = listTools({ allowList: toolAllow }).map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+  }));
   const { requestContext } = buildRuntimeRequestContext({
     requestId,
     createdAt,

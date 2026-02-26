@@ -1,6 +1,8 @@
 import { parseToolsArgs, type ParsedToolsCommand } from '../parsers/tools.js';
-import { getToolInfo, invokeToolByCli, listToolsCatalog } from '../../tools/gateway.js';
 import { runCommand } from '../shared/result.js';
+import { executeTool } from '../../tools/executor.js';
+import { getTool, listTools } from '../../tools/registry.js';
+import type { ToolCall, ToolContext } from '../../tools/types.js';
 
 export async function runToolsCommand(args: string[]): Promise<number> {
   return runCommand(async () => {
@@ -20,16 +22,31 @@ export async function runToolsCommand(args: string[]): Promise<number> {
       return 1;
     }
     if (parsed.kind === 'list') {
-      console.log(JSON.stringify(listToolsCatalog(), null, 2));
+      const tools = listTools().map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      }));
+      console.log(JSON.stringify(tools, null, 2));
       return 0;
     }
     if (parsed.kind === 'info') {
-      const tool = getToolInfo(parsed.name);
+      const tool = getTool(parsed.name);
       if (!tool) {
         console.error(`Tool not found: ${parsed.name}`);
         return 1;
       }
-      console.log(JSON.stringify(tool, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          },
+          null,
+          2,
+        ),
+      );
       return 0;
     }
     if (parsed.kind === 'invoke') {
@@ -42,12 +59,20 @@ export async function runToolsCommand(args: string[]): Promise<number> {
           return 1;
         }
       }
-      const execResult = await invokeToolByCli(parsed.name, parsedArgs, {
+
+      const call: ToolCall = {
+        id: `cli-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, '0')}`,
+        name: parsed.name,
+        args: parsedArgs,
+        source: 'cli',
+      };
+      const context: ToolContext = {
         requestId: `cli-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, '0')}`,
         sessionId: 'tools-cli',
         sessionKey: 'tools',
         cwd: process.cwd(),
-      });
+      };
+      const execResult = await executeTool(call, context);
       console.log(JSON.stringify(execResult, null, 2));
       return execResult.result.ok ? 0 : 1;
     }
