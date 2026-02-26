@@ -1,6 +1,6 @@
 import { ValidationError, type GatewayResult } from "../shared/types.js";
 import { runRuntime } from "./entrypoint.js";
-import { listAutoTools } from "./tools.js";
+import { listAutoTools } from "../tools/runtimeTools.js";
 import {
   buildWorkspaceSystemPrompt,
   buildRuntimeRequestContext,
@@ -14,7 +14,7 @@ import {
   NEW_SESSION_STAGE,
 } from "./context.js";
 import { sessionService } from "../sessions/sessionService.js";
-import { firstToolErrorFromLogs } from "./tools.js";
+import { firstToolErrorFromLogs } from "../tools/runtimeTools.js";
 
 type RunAgentOptions = {
   provider?: string;

@@ -14,7 +14,6 @@ CLI（node dist/index.js）
           ├─ src/runtime/
           │   ├─ index.ts（稳定 API 导出与 runAgent 顶层编排）
           │   ├─ context.ts（上下文与请求基元）
-          │   ├─ tools.ts（工具白名单/结果组装）
           │   └─ entrypoint.ts（pi-agent-core 运行时编排，单次执行）
           ├─ src/adapters/codexAdapter.ts（provider adapter，当前实现为 openai-codex）
           ├─ src/adapters/stubAdapter.ts（非 codex 回退）
@@ -44,8 +43,8 @@ CLI（node dist/index.js）
   - 持有业务上下文边界（`session`、`memory`）并调度持久化动作；不直接处理持久化实现细节。
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与运行时元信息构建。
-- `src/runtime/tools.ts`
-  - 封装工具白名单与工具名映射、执行日志归并；工具真实执行由 `tools/executor` 完成。
+- `src/tools/runtimeTools.ts`
+  - 承载工具清单、工具名映射、工具名适配、错误归并与 tool summary 构建能力；`runAgent` 与 `codexAdapter` 直接消费该能力。
 - `src/runtime/index.ts` 与 `src/runtime/entrypoint.ts` 的数据流
   - `index` 负责输入准备（会话/系统提示/工具列表）与执行结果收口；
   - `entrypoint` 负责单次执行流程调度、工具回调与结果归并。

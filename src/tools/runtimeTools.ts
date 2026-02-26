@@ -1,7 +1,10 @@
 import { AgentTool } from "@mariozechner/pi-agent-core";
 import { ContextToolSpec } from "../shared/types.js";
-import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
-import { listToolsCatalog } from "../tools/gateway.js";
+import { listToolsCatalog } from "./gateway.js";
+import type { ToolCall, ToolExecutionLog, ToolError } from "./types.js";
+import type { ToolSpec } from "./types.js";
+
+export type ToolCatalogEntry = Pick<ToolSpec, "name" | "description" | "inputSchema">;
 
 const TOOL_NAME_FALLBACK_PREFIX = "tool_";
 const RUNTIME_NAME_NORMALIZER = /[^a-zA-Z0-9_-]+/g;
@@ -64,22 +67,9 @@ export function resolveTools(input: ContextToolSpec[] | undefined, withTools: bo
   return input.filter(isNamedToolSpec);
 }
 
-function isNamedToolSpec(tool: ContextToolSpec | undefined): tool is ContextToolSpec {
-  return Boolean(tool && typeof tool.name === "string" && tool.name.trim().length > 0);
-}
-
-function randomSuffix(): string {
-  return Math.floor(Math.random() * 10000).toString(16).padStart(4, "0");
-}
-
 function resolveRuntimeToolName(rawName: string, map: RuntimeToolNameMap): string {
   const normalized = toRuntimeToolName(rawName);
   return map.codexByCanonical.get(rawName) ?? normalized;
-}
-
-function toRuntimeToolName(rawName: string): string {
-  const normalized = rawName.trim().replace(RUNTIME_NAME_NORMALIZER, "_");
-  return normalized.length > 0 ? normalized : `${TOOL_NAME_FALLBACK_PREFIX}${randomSuffix()}`;
 }
 
 export function buildRuntimeToolNameMap(toolSpecs: ContextToolSpec[]): RuntimeToolNameMap {
@@ -163,8 +153,21 @@ export function buildToolMessages(calls: ToolCall[], results: ToolExecutionLog[]
   return JSON.stringify(normalized, null, 2);
 }
 
-export function listAutoTools(toolAllow: string[]) {
+export function listAutoTools(toolAllow: string[] | undefined) {
   return listToolsCatalog(toolAllow);
+}
+
+export function isNamedToolSpec(tool: ContextToolSpec | undefined): tool is ContextToolSpec {
+  return Boolean(tool && typeof tool.name === "string" && tool.name.trim().length > 0);
+}
+
+function randomSuffix(): string {
+  return Math.floor(Math.random() * 10000).toString(16).padStart(4, "0");
+}
+
+function toRuntimeToolName(rawName: string): string {
+  const normalized = rawName.trim().replace(RUNTIME_NAME_NORMALIZER, "_");
+  return normalized.length > 0 ? normalized : `${TOOL_NAME_FALLBACK_PREFIX}${randomSuffix()}`;
 }
 
 function normalizeToolContent(raw: unknown): string {

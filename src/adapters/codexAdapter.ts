@@ -6,7 +6,7 @@ import { RequestContext } from "../shared/types.js";
 import type { AdapterRunInput } from "./registry.js";
 import type { AdapterResult } from "./stubAdapter.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
-import { buildRuntimeToolNameMap, chooseFirstToolError, createToolAdapter, resolveTools } from "../runtime/tools.js";
+import { buildRuntimeToolNameMap, chooseFirstToolError, createToolAdapter, resolveTools } from "../tools/runtimeTools.js";
 import { isToolAllowed } from "../tools/registry.js";
 import { executeTool } from "../tools/executor.js";
 
