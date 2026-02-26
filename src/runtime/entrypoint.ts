@@ -2,7 +2,7 @@ import path from "node:path";
 import { resolveAdapter, type AdapterRunInput, type ResolvedAdapter } from "../adapters/registry.js";
 import type { AdapterResult } from "../adapters/stubAdapter.js";
 
-interface RuntimeOptions {
+export interface RuntimeOptions {
   requestContext: AdapterRunInput["requestContext"];
   withTools: boolean;
   toolAllow: string[];
@@ -10,7 +10,7 @@ interface RuntimeOptions {
   toolSpecs?: AdapterRunInput["toolSpecs"];
 }
 
-interface RuntimeResult {
+export interface RuntimeResult {
   adapter: AdapterResult;
 }
 

@@ -7,17 +7,24 @@ CLI（node dist/index.js）
   └─ src/index.ts
       └─ src/cli/cli.ts（参数路由）
           ├─ src/gateway/index.ts（gateway 主入口）
+          │   ├─ src/core/index.ts（CoreCoordinator 统一执行入口）
+          │   ├─ src/core/contracts.ts（核心接口与事件/错误码）
+          │   ├─ src/core/adapters（会话/工具/运行时端口）
+          │   │   ├─ session.ts
+          │   │   ├─ tools.ts
+          │   │   └─ runtime.ts
           │   ├─ src/gateway/service.ts（服务生命周期）
           │   ├─ src/gateway/servicePaths.ts（服务路径）
           │   ├─ src/gateway/serviceState.ts（服务状态）
           │   ├─ src/gateway/serviceProcess.ts（子进程）
-          ├─ src/runtime/
-          │   ├─ index.ts（稳定 API 导出与 runAgent 顶层编排）
+      ├─ src/runtime/
+          │   ├─ index.ts（统一转发层，仅复用 coreCoordinator）
+          │   ├─ adapter.ts（runtime port 实现，组装 requestContext）
           │   ├─ context.ts（上下文与请求基元）
-          │   └─ entrypoint.ts（pi-agent-core 运行时编排，单次执行）
+          │   └─ entrypoint.ts（provider adapter 的底层执行入口）
           ├─ src/adapters/codexAdapter.ts（provider adapter，当前实现为 openai-codex）
           ├─ src/adapters/stubAdapter.ts（非 codex 回退）
-          ├─ src/tools/gateway.ts / src/tools/registry.ts / executor.ts（工具执行）
+          ├─ src/tools/registry.ts / executor.ts / runtimeTools.ts（工具执行）
           ├─ src/sessions/sessionService.ts（会话/记忆/transcript 服务）
           ├─ src/sessions/sessionStore.ts（会话与记忆）
           ├─ src/channels/feishu/server.ts（飞书网关）
@@ -33,33 +40,34 @@ CLI（node dist/index.js）
   - 负责 CLI 参数解析、子命令分发与标准入口（`--help` / `--version`）输出。
   - 通过 `src/cli/registry.ts` 维护 `CommandRoute` 注册表，由 `runCommand` 风格执行层统一处理错误与返回码。
   - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口，但不变更命令语义与外部行为。
+- `src/core/index.ts`
+  - 统一执行业务执行入口，承接 `agent/gateway/channel/heartbeat` 的请求并编排上下文、会话、工具与运行时调用。
+- `src/core/contracts.ts`
+  - 定义 `CoreCoordinator` 接口、`runAgent` 输入/输出、`trace/event/log` 事件与错误码。
+- `src/core/adapters/*`
+  - 将会话、工具、runtime 能力收敛为端口后通过依赖注入组装，避免业务层直接互相调用。
 - `src/gateway/index.ts`
-  - 作为主入口边界，接受 `agent/gateway` 输入并向下分发到 `runtime`。
+  - 作为主入口边界，入口仅委托 `coreCoordinator.runAgent`。
 - `src/runtime/index.ts`
-  - 暴露稳定的 `runAgent` API，并保持对 `gateway` 的兼容导出协议。
-  - 不承载调用来源语义（来源/外部通道归属），`runAgent` 仅接收执行上下文与会话参数。
-- `src/runtime/index.ts`
-  - 组织 `runAgent` 的顶层编排：会话上下文合并、工具清单与运行参数准备、执行结果归并。
-  - 持有业务上下文边界（`session`、`memory`）并调度持久化动作；不直接处理持久化实现细节。
+  - 统一转发层，复用 bootstrap 注入后的 `coreCoordinator`，不再承载编排。
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与运行时元信息构建。
 - `src/tools/runtimeTools.ts`
   - 承载工具清单、工具名映射、工具名适配、错误归并与 tool summary 构建能力；`runAgent` 与 `codexAdapter` 直接消费该能力。
-- `src/runtime/index.ts` 与 `src/runtime/entrypoint.ts` 的数据流
-  - `index` 负责输入准备（会话/系统提示/工具列表）与执行结果收口；
-  - `entrypoint` 负责单次执行流程调度、工具回调与结果归并。
+- `src/runtime/adapter.ts` 与 `src/runtime/entrypoint.ts` 的数据流
+  - `adapter` 负责 `CoreRuntimeInput` 到 `RequestContext` 的转换并切入 provider adapter；
+  - `entrypoint` 提供 provider 底座执行与结果收口。
 - `runtime` 可观测统一字段
-  - `entrypoint` 采用 `stage` 维度打点，核心字段保留 `stage`、`sessionKey`、`durationMs`、`errorCode`（可选）。
-  - `LAINCLAW_RUNTIME_TRACE=1|true` 时记录标准化调试事件；默认保持原有日志语义。
+  - `core` 通过 `emitEvent` 统一输出 trace/event/log 结构。
 - `src/sessions/sessionService.ts`
   - 会话生命周期、会话历史与长期记忆读写、tool summary 写入、路由记录和 compact 写入的服务编排中心。
 - `src/runtime/entrypoint.ts`
-  - 基于 provider adapter 的单次执行入口，按 `provider` 选择具体运行适配器。
+  - 基于 provider adapter 的单次执行底座，按 `provider` 选择具体运行适配器。
 
 ## 运行入口收口说明（新增）
 
-- `gateway/index.ts` 复用 `runtime/index.ts` 的 `runAgent` 导出。
-- 删除 `runtime/runAgent.ts` 与 `gateway/runAgent.ts` 这两层“仅转发”文件，减少不必要的中间封装。
+- `gateway/index.ts` 复用 `bootstrap/coreCoordinator.ts` 的 `runAgent` 导出。
+- 运行时代码不再作为业务模块交接点，`runtime` 仅保留边界层实现与 provider 适配。
 - `src/adapters/codexAdapter.ts`
   - 对接模型 SDK（`@mariozechner/pi-ai`），处理工具 schema 映射与 tool-call 解析。
 - `src/adapters/stubAdapter.ts`
@@ -67,7 +75,7 @@ CLI（node dist/index.js）
 - `src/sessions/sessionStore.ts`
   - 管理 session 目录、索引文件与记忆文件。
 - `src/tools/*`
-  - `registry` 管理工具元数据与白名单；`executor` 统一校验与执行，`gateway.ts` 做调用编排。
+  - `registry` 管理工具元数据与白名单；`executor` 统一校验与执行，`runtimeTools.ts` 与核心协调器协作处理 tool summary/名称映射。
 - `src/channels/feishu/*` / `src/channels/local/*`
   - 分别处理飞书 WS 入/出站与 local channel 文件队列。
 - `src/pairing/*`
@@ -89,9 +97,9 @@ CLI（node dist/index.js）
 
 ## 会话与记忆数据流（简化）
 
-1. 用户输入通过 `agent` 或网关（Feishu/本地）进入 `runAgent`。
-2. `runAgent` 合并上下文：`SessionRecord` -> 最近对话 -> 历史/长期记忆提示。
-3. `runAgent` 进入 `runtime` 层；`entrypoint` 基于 `pi-agent-core` 按会话上下文执行单次会话流程。
+1. 用户输入通过 `agent` 或网关（Feishu/本地）进入 `core` 的 `runAgent`。
+2. `CoreCoordinator` 合并上下文：`SessionRecord` -> 最近对话 -> 历史/长期记忆提示。
+3. `CoreCoordinator` 进入 `runtime/adapter`，由 adapter 构建 context 后交给 `runtime/entrypoint`（provider 底座）进行单次会话执行。
 4. `runAgent` 与 `runtime` 协同选择执行策略；若为 codex 路径则调用模型。
 5. 返回中如出现 tool-call，`pi-agent-core` 触发工具执行，`executor` 回填结果后继续对话。
 6. 最终输出写入会话轨迹（JSONL）和记忆文件（可选）；不保留运行态恢复文件。

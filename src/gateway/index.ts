@@ -1,6 +1,7 @@
 /**
  * Gateway 模块主入口。
  *
- * 统一对外承载 runAgent 导出，避免重复胶水层散落在多个文件。
+ * 统一对外承载 runAgent 导出，直接走 bootstrap 组装后的 CoreCoordinator。
  */
-export { runAgent } from "../runtime/index.js";
+export { runAgent } from "../bootstrap/coreCoordinator.js";
+export type { CoreRunAgentOptions } from "../core/contracts.js";

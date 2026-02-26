@@ -15,8 +15,8 @@
 
 - `agent`：命令行直接发起问题，按 session 管理上下文。
 - `gateway`：通道边界，启动飞书 WS 或 local 服务；不承载运行时建模与恢复逻辑。
-  - CLI 内部已重构为集中式命令分发与统一执行封装，当前版本保持命令格式、行为和返回码兼容，仅结构优化。
-- `runtime`（顶层模块）：引入 `pi-agent-core` 统一编排，按会话上下文构建**单次执行**路径（`src/runtime`），并通过更直接的导出链路连接网关与 agent 命令；运行时不在模块内写死 provider，由 `profile/provider` 配置驱动适配器选择。工具链路能力实现收敛到 `src/tools/runtimeTools.ts`，`runtime` 侧直接消费该能力。
+  - CLI 内部已重构为集中式命令分发与统一执行封装，当前版本以最小改动保留既有执行语义，优先完成核心边界重建。
+  - `runtime`（顶层模块）：通过 `CoreCoordinator` 统一入口编排，`src/runtime/adapter.ts` 负责 `CoreRuntimeInput` 到 provider adapter 的上下文拼装；网关、本地、heartbeat、agent 命令均走 `bootstrap` 注入后的 `runAgent` 统一入口。运行时不在模块内写死 provider，由 `profile/provider` 配置驱动适配器选择。工具链路能力实现收敛到 `src/tools/runtimeTools.ts`，`runtime` 侧仅作为底座能力。
   - 详见 `docs/wip/20260225-runtime-simplification/runtime-layering.md` 的分层边界与迁移约定。
 - `sessions/sessionService`：会话、记忆与 transcript 持久化服务边界，统一封装 `src/sessions/sessionStore.ts` 文件落盘细节；`runtime` 只关注会话上下文拼装与执行编排，不直接持有文件路径和目录细节。
 - 会话持久化：会话索引与消息仍按 `~/.lainclaw` 目录记录（`sessions.json`、`<sessionId>.jsonl`、`memory/<sessionKey>.md`）。

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { runAgent } from "../../gateway/index.js";
+import { runAgent } from "../../bootstrap/coreCoordinator.js";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
 
 export interface LocalGatewayOverrides {

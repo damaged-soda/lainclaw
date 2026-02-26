@@ -1,5 +1,5 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
-import { runAgent } from "../../gateway/index.js";
+import { runAgent } from "../../bootstrap/coreCoordinator.js";
 import { sendFeishuTextMessage } from "./outbound.js";
 import {
   resolveFeishuGatewayConfig,
