@@ -122,8 +122,8 @@ async function appendRuntimeMessage(
     content,
     route: context.route,
     stage: context.stage,
-    ...(context.provider ? { provider: context.provider } : {}),
-    ...(context.profileId ? { profileId: context.profileId } : {}),
+    provider: context.provider,
+    profileId: context.profileId,
   });
 }
 
@@ -133,8 +133,8 @@ export function createSessionAdapter(): CoreSessionPort {
       return runWithSessionFailure(async () => {
         const rawInput: SessionLoadOptions = {
           sessionKey: input.sessionKey,
-          ...(input.provider ? { provider: input.provider } : {}),
-          ...(input.profileId ? { profileId: input.profileId } : {}),
+          provider: input.provider,
+          profileId: input.profileId,
           ...(typeof input.forceNew === "boolean" ? { forceNew: input.forceNew } : {}),
           ...(typeof input.memory === "boolean" ? { memory: input.memory } : {}),
         };
@@ -166,8 +166,8 @@ export function createSessionAdapter(): CoreSessionPort {
       toolResults: CoreToolExecutionLog[],
       route: string,
       stage: string,
-      provider?: string,
-      profileId?: string,
+      provider: string,
+      profileId: string,
     ): Promise<void> => {
       await runWithSessionFailure(async () => {
         if (toolResults.length === 0) {
@@ -189,7 +189,7 @@ export function createSessionAdapter(): CoreSessionPort {
         );
       });
     },
-    markRouteUsage: (sessionKey: string, route: string, profileId?: string, provider?: string): Promise<void> => {
+    markRouteUsage: (sessionKey: string, route: string, profileId: string, provider: string): Promise<void> => {
       return runWithSessionFailure(async () =>
         recordSessionRoute(sessionKey, route, profileId, provider),
       );

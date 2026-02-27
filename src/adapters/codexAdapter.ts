@@ -99,7 +99,7 @@ function shouldPrefixResponse(profileId: string, provider: string): string {
   return `[${provider}:${profileId}] `;
 }
 
-function normalizeProvider(raw: string | undefined): string {
+function normalizeProvider(raw: string): string {
   const normalized = (raw || "").trim();
   if (!normalized) {
     throw new Error("Missing provider. Set --provider in command args or runtime config.");
@@ -352,7 +352,7 @@ export async function runCodexAdapter(input: AdapterRunInput): Promise<AdapterRe
     toolResults: toolState.toolResults.length > 0 ? toolState.toolResults : undefined,
     assistantMessage: finalMessage,
     stopReason: failed ? "tool_error_or_runtime_error" : finalStopReason,
-    provider: profile.provider || provider,
+    provider,
     profileId,
   };
 }

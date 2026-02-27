@@ -1,5 +1,5 @@
 import * as Lark from "@larksuiteoapi/node-sdk";
-import { runAgent } from "../../bootstrap/coreCoordinator.js";
+import { runAgent } from "../../gateway/index.js";
 import { sendFeishuTextMessage } from "./outbound.js";
 import {
   resolveFeishuGatewayConfig,
@@ -41,6 +41,14 @@ interface FeishuInboundMessage {
   input?: string;
   reason?: string;
   requestId: string;
+}
+
+interface FeishuRunAgentDefaults {
+  provider?: string;
+  profileId?: string;
+  withTools?: boolean;
+  toolAllow?: string[];
+  memory?: boolean;
 }
 
 const FEISHU_DM_CHAT_TYPES = new Set(["p2p", "private", "direct"]);
@@ -308,6 +316,7 @@ function parseFeishuInbound(raw: unknown, requestId: string): FeishuInboundMessa
 async function handleWsPayload(
   data: unknown,
   config: FeishuGatewayConfig,
+  runAgentDefaults: FeishuRunAgentDefaults,
   options: FeishuGatewayServerOptions,
   onFailureHint?: (rawMessage: string) => string,
 ): Promise<void> {
@@ -337,15 +346,16 @@ async function handleWsPayload(
       return;
     }
 
+    const sessionKey = `feishu:dm:${inbound.openId}`;
     const runResult = await Promise.race([
-      runAgent(inbound.input, {
-        sessionKey: `feishu:dm:${inbound.openId}`,
-        provider: config.provider,
-        ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
-        withTools: config.withTools,
-        ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
-        memory: config.memory,
-      }),
+      runAgent(
+        {
+          input: inbound.input,
+          channelId: "feishu",
+          sessionKey,
+          runtime: runAgentDefaults,
+        },
+      ),
       new Promise<never>((_, reject) => {
         setTimeout(() => {
           reject(new Error(`agent timeout after ${REPLY_TIMEOUT_MS}ms`));
@@ -355,10 +365,10 @@ async function handleWsPayload(
 
     await sendFeishuTextMessage(config, {
       openId: inbound.openId,
-      text: runResult.result,
+      text: runResult,
     });
     console.log(
-      `[feishu] ${requestId} answered dm for open_id=${inbound.openId} session=${runResult.sessionKey}/${runResult.sessionId}`,
+      `[feishu] ${requestId} answered dm for open_id=${inbound.openId} session=${sessionKey}`,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -392,6 +402,13 @@ export async function runFeishuGatewayServer(
 ): Promise<void> {
   const config = await resolveFeishuGatewayConfig(overrides, channel);
   await persistFeishuGatewayConfig(overrides, channel);
+  const runAgentDefaults = {
+    provider: config.provider,
+    profileId: config.profileId,
+    withTools: config.withTools,
+    toolAllow: config.toolAllow,
+    memory: config.memory,
+  };
 
   if (!config.appId || !config.appSecret) {
     throw new Error("Missing FEISHU_APP_ID or FEISHU_APP_SECRET for websocket mode");
@@ -400,7 +417,7 @@ export async function runFeishuGatewayServer(
   const eventDispatcher = new Lark.EventDispatcher({});
   eventDispatcher.register({
     "im.message.receive_v1": async (data) => {
-      await handleWsPayload(data, config, options, options.onFailureHint);
+      await handleWsPayload(data, config, runAgentDefaults, options, options.onFailureHint);
     },
   });
 

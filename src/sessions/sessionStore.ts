@@ -217,8 +217,8 @@ async function loadMessages(sessionId: string, limit?: number): Promise<SessionH
 
 export interface SessionLoadOptions {
   sessionKey: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
   forceNew?: boolean;
   memory?: boolean;
 }
@@ -249,12 +249,8 @@ export async function getOrCreateSession({
       ...existing,
       updatedAt: now,
     };
-    if (provider) {
-      next.provider = provider;
-    }
-    if (profileId) {
-      next.profileId = profileId;
-    }
+    next.provider = provider;
+    next.profileId = profileId;
     if (typeof memory === "boolean") {
       next.memoryEnabled = memory;
     }
@@ -277,8 +273,8 @@ export async function getOrCreateSession({
     sessionId,
     createdAt: now,
     updatedAt: now,
-    ...(provider ? { provider } : {}),
-    ...(profileId ? { profileId } : {}),
+    provider,
+    profileId,
     ...(typeof memory === "boolean" ? { memoryEnabled: memory } : {}),
     compactedMessageCount: 0,
   };
@@ -349,8 +345,8 @@ export async function appendSessionMessage(
 export async function recordSessionRoute(
   sessionKey: string,
   route: string,
-  profileId?: string,
-  provider?: string,
+  profileId: string,
+  provider: string,
 ) {
   const catalog = await loadSessionCatalog();
   const now = nowIso();
@@ -360,12 +356,8 @@ export async function recordSessionRoute(
   }
   existing.updatedAt = now;
   existing.route = route;
-  if (profileId) {
-    existing.profileId = profileId;
-  }
-  if (provider) {
-    existing.provider = provider;
-  }
+  existing.provider = provider;
+  existing.profileId = profileId;
   catalog.sessions[sessionKey] = existing;
   await saveSessionCatalog(catalog);
 }

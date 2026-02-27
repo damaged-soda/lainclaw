@@ -23,8 +23,8 @@ export interface RequestContext {
   messages: Message[];
   systemPrompt?: string;
   tools?: ContextToolSpec[];
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
   memoryEnabled?: boolean;
 }
 
@@ -37,8 +37,8 @@ export interface PipelineResult {
   toolCalls?: ToolCall[];
   assistantMessage?: Message;
   stopReason?: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
 }
 
 export interface SessionHistoryMessage {
@@ -61,8 +61,8 @@ export interface GatewayResult {
   sessionContextUpdated?: boolean;
   sessionKey: string;
   sessionId: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
   memoryEnabled: boolean;
   memoryUpdated: boolean;
   memoryFile?: string;

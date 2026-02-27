@@ -89,8 +89,8 @@ export interface CoreSessionTurnResult {
   route: string;
   stage: string;
   result: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
 }
 
 export interface CoreSessionRecord {
@@ -112,8 +112,8 @@ export interface CoreSessionSnapshotCompact {
 
 export interface CoreSessionLoadInput {
   sessionKey: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
   forceNew?: boolean;
   memory?: boolean;
 }
@@ -140,22 +140,22 @@ export interface CoreSessionPort {
     toolResults: CoreToolExecutionLog[],
     route: string,
     stage: string,
-    provider?: string,
-    profileId?: string,
+    provider: string,
+    profileId: string,
   ): Promise<void>;
-  markRouteUsage(sessionKey: string, route: string, profileId?: string, provider?: string): Promise<void>;
+  markRouteUsage(sessionKey: string, route: string, profileId: string, provider: string): Promise<void>;
   compactIfNeeded(input: CoreSessionSnapshotCompact): Promise<boolean>;
   resolveSessionMemoryPath(sessionKey: string): string;
 }
 
 export interface CoreRunAgentOptions {
-  provider?: string;
-  profileId?: string;
-  sessionKey?: string;
+  provider: string;
+  profileId: string;
+  sessionKey: string;
   newSession?: boolean;
   memory?: boolean;
-  withTools?: boolean;
-  toolAllow?: string[];
+  withTools: boolean;
+  toolAllow: string[];
   cwd?: string;
 }
 
@@ -167,8 +167,8 @@ export interface CoreRuntimeInput {
   sessionId: string;
   priorMessages: CoreSessionHistoryMessage[];
   memorySnippet: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
   withTools: boolean;
   toolAllow: string[];
   tools?: CoreContextToolSpec[];
@@ -185,8 +185,8 @@ export interface CoreRuntimeResult {
   toolResults?: CoreToolExecutionLog[];
   assistantMessage?: unknown;
   stopReason?: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
 }
 
 export interface CoreRuntimePort {
@@ -206,15 +206,15 @@ export interface CoreAgentResult {
   sessionContextUpdated?: boolean;
   sessionKey: string;
   sessionId: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
   memoryEnabled: boolean;
   memoryUpdated: boolean;
   memoryFile?: string;
 }
 
 export interface CoreCoordinator {
-  runAgent(rawInput: string, options?: CoreRunAgentOptions): Promise<CoreAgentResult>;
+  runAgent(rawInput: string, options: CoreRunAgentOptions): Promise<CoreAgentResult>;
   runRuntime(input: CoreRuntimeInput): Promise<CoreRuntimeResult>;
   resolveSession(input: CoreSessionLoadInput): Promise<CoreSessionRecord>;
   listTools(options?: CoreToolQueryOptions): CoreToolSpec[];
@@ -228,10 +228,10 @@ export interface CoreCoordinator {
     toolResults: CoreToolExecutionLog[],
     route: string,
     stage: string,
-    provider?: string,
-    profileId?: string,
+    provider: string,
+    profileId: string,
   ): Promise<void>;
-  markRouteUsage(sessionKey: string, route: string, profileId?: string, provider?: string): Promise<void>;
+  markRouteUsage(sessionKey: string, route: string, profileId: string, provider: string): Promise<void>;
   loadHistory(sessionId: string): Promise<CoreSessionHistoryMessage[]>;
   loadMemorySnippet(sessionKey: string): Promise<string>;
   resolveSessionMemoryPath(sessionKey: string): string;

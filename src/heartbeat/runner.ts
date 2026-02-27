@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { runAgent } from "../bootstrap/coreCoordinator.js";
+import { runAgent } from "../gateway/index.js";
 import {
   type HeartbeatRule,
   loadHeartbeatRules,
@@ -63,7 +63,6 @@ interface HeartbeatRunLogEntry {
   reason?: string;
   message?: string;
   sessionKey?: string;
-  runSessionKey?: string;
 }
 
 export interface HeartbeatRunOptions {
@@ -285,28 +284,46 @@ function buildRulePrompt(rule: HeartbeatRule, now: string, workspaceSummary: str
   return `${header}\n${constraints.join('\n')}\n`; 
 }
 
-function resolveRuleDecisionContext(rule: HeartbeatRule): {
-  sessionKey: string;
-  provider?: string;
-  profileId?: string;
-  withTools: boolean;
-  toolAllow?: string[];
-} {
-  return {
-    sessionKey: `${rule.id}`,
-    provider: rule.provider,
-    profileId: rule.profileId,
-    withTools: rule.withTools,
-    toolAllow: rule.toolAllow,
-  };
-}
-
 function resolveText(raw?: string): string | undefined {
   if (typeof raw !== 'string') {
     return undefined;
   }
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+interface RuleAgentRuntimeInput {
+  provider?: string;
+  profileId?: string;
+  withTools?: boolean;
+  toolAllow?: string[];
+  memory?: boolean;
+  cwd?: string;
+}
+
+interface RuleAgentInvocationInput {
+  sessionKey: string;
+  runtime: RuleAgentRuntimeInput;
+}
+
+function buildRuleAgentInput(
+  options: HeartbeatRunOptions,
+  rule: HeartbeatRule,
+  baseSessionKey: string,
+  workspaceDir: string,
+): RuleAgentInvocationInput {
+  const sessionKey = `${baseSessionKey}:${rule.id}`;
+  return {
+    sessionKey,
+    runtime: {
+      provider: options.provider ?? rule.provider,
+      profileId: options.profileId ?? rule.profileId,
+      withTools: options.withTools ?? rule.withTools,
+      toolAllow: options.toolAllow ?? rule.toolAllow,
+      memory: options.memory,
+      cwd: workspaceDir,
+    },
+  };
 }
 
 export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promise<HeartbeatRunSummary> {
@@ -364,33 +381,31 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
 
     summary.evaluated += 1;
     const decisionPrompt = buildRulePrompt(rule, now, formatWorkspaceContextSummary(runContext));
-    const ruleCtx = resolveRuleDecisionContext(rule);
+    const invocationInput = buildRuleAgentInput(options, rule, baseSessionKey, workspaceDir);
+    const invocation = invocationInput;
     try {
-      const agentResult = await runAgent(decisionPrompt, {
-        sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
-        provider: resolveText(options.provider) || ruleCtx.provider,
-        profileId: resolveText(options.profileId) || ruleCtx.profileId,
-        withTools: typeof options.withTools === 'boolean' ? options.withTools : ruleCtx.withTools,
-        toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-        memory: options.memory,
-        cwd: workspaceDir,
+      const agentResult = await runAgent({
+        input: decisionPrompt,
+        channelId: "heartbeat",
+        sessionKey: invocation.sessionKey,
+        runtime: invocation.runtime,
       });
 
-      const parsed = parseDecision(agentResult.result);
+      const parsed = parseDecision(agentResult);
       void appendHeartbeatLog({
         eventType: "rule-result",
         runId,
         timestamp: now,
         ruleId: rule.id,
         ruleText: rule.ruleText,
-        provider: resolveText(options.provider) || ruleCtx.provider,
-        profileId: resolveText(options.profileId) || ruleCtx.profileId,
-        withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
-        toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-        rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
+        provider: invocation.runtime.provider,
+        profileId: invocation.runtime.profileId,
+        withTools: invocation.runtime.withTools,
+        toolAllow: invocation.runtime.toolAllow,
+        rawDecision: resolveLogPayloadLimit(agentResult ?? ""),
         parsedDecision: parsed.decision,
         parseError: parsed.parseError,
-        sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
+        sessionKey: invocation.sessionKey,
       });
       rule.lastRunAt = now;
 
@@ -416,15 +431,15 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           timestamp: now,
           ruleId: rule.id,
           ruleText: rule.ruleText,
-          provider: resolveText(options.provider) || ruleCtx.provider,
-          profileId: resolveText(options.profileId) || ruleCtx.profileId,
-          withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
-          toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-          rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
+          provider: invocation.runtime.provider,
+          profileId: invocation.runtime.profileId,
+          withTools: invocation.runtime.withTools,
+          toolAllow: invocation.runtime.toolAllow,
+          rawDecision: resolveLogPayloadLimit(agentResult ?? ""),
           parsedDecision: parsed.decision,
           status: triggeredResult.status,
           reason: triggeredResult.message || triggeredResult.decisionRaw,
-          sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
+          sessionKey: invocation.sessionKey,
         });
         options.onResult?.(triggeredResult);
 
@@ -438,11 +453,11 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
             });
           } catch (error) {
             const failure = error instanceof Error ? error.message : String(error);
-              summary.errors += 1;
-              summary.triggered -= 1;
-              summary.results.pop();
-              rule.lastStatus = 'error';
-              rule.lastStatusMessage = failure;
+            summary.errors += 1;
+            summary.triggered -= 1;
+            summary.results.pop();
+            rule.lastStatus = 'error';
+            rule.lastStatusMessage = failure;
 
             const erroredResult: HeartbeatRunResult = {
               ruleId: rule.id,
@@ -459,16 +474,16 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
               timestamp: now,
               ruleId: rule.id,
               ruleText: rule.ruleText,
-              provider: resolveText(options.provider) || ruleCtx.provider,
-              profileId: resolveText(options.profileId) || ruleCtx.profileId,
-              withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
-              toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
+              provider: invocation.runtime.provider,
+              profileId: invocation.runtime.profileId,
+              withTools: invocation.runtime.withTools,
+              toolAllow: invocation.runtime.toolAllow,
               parsedDecision: "error",
               status: erroredResult.status,
               reason: failure,
-              rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
-              message: parseDecision(agentResult.result).message,
-              sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
+              rawDecision: resolveLogPayloadLimit(agentResult ?? ""),
+              message: parsed.message,
+              sessionKey: invocation.sessionKey,
             });
             summary.results.push(erroredResult);
             options.onResult?.(erroredResult);
@@ -498,17 +513,17 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           timestamp: now,
           ruleId: rule.id,
           ruleText: rule.ruleText,
-          provider: resolveText(options.provider) || ruleCtx.provider,
-          profileId: resolveText(options.profileId) || ruleCtx.profileId,
-          withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
-          toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
-          rawDecision: resolveLogPayloadLimit(agentResult.result ?? ""),
+          provider: invocation.runtime.provider,
+          profileId: invocation.runtime.profileId,
+          withTools: invocation.runtime.withTools,
+          toolAllow: invocation.runtime.toolAllow,
+          rawDecision: resolveLogPayloadLimit(agentResult ?? ""),
           parsedDecision: parsed.decision,
           parseError: parsed.parseError,
           status: skippedResult.status,
           reason: skippedResult.reason,
           message: skippedResult.message,
-          sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
+          sessionKey: invocation.sessionKey,
         });
         options.onResult?.(skippedResult);
         continue;
@@ -533,10 +548,10 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         timestamp: now,
         ruleId: rule.id,
         ruleText: rule.ruleText,
-        provider: resolveText(options.provider) || ruleCtx.provider,
-        profileId: resolveText(options.profileId) || ruleCtx.profileId,
-        withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
-        toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
+        provider: invocation.runtime.provider,
+        profileId: invocation.runtime.profileId,
+        withTools: invocation.runtime.withTools,
+        toolAllow: invocation.runtime.toolAllow,
         rawDecision: "",
         parsedDecision: "error",
         status: erroredResult.status,
@@ -565,14 +580,14 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         timestamp: now,
         ruleId: rule.id,
         ruleText: rule.ruleText,
-        provider: resolveText(options.provider) || ruleCtx.provider,
-        profileId: resolveText(options.profileId) || ruleCtx.profileId,
-        withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
-        toolAllow: options.toolAllow ?? ruleCtx.toolAllow,
+        provider: invocation.runtime.provider,
+        profileId: invocation.runtime.profileId,
+        withTools: invocation.runtime.withTools,
+        toolAllow: invocation.runtime.toolAllow,
         parsedDecision: "error",
         status: erroredResult.status,
         reason: erroredResult.reason,
-        sessionKey: `${baseSessionKey}:${ruleCtx.sessionKey}`,
+        sessionKey: invocation.sessionKey,
       });
       options.onResult?.(erroredResult);
     }
@@ -582,7 +597,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
     eventType: "run-summary",
     runId,
     timestamp: now,
-    provider: resolveText(options.provider) || undefined,
+    provider: resolveText(options.provider),
     profileId: resolveText(options.profileId),
     withTools: typeof options.withTools === "boolean" ? options.withTools : undefined,
     toolAllow: options.toolAllow,

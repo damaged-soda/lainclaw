@@ -18,13 +18,11 @@ export async function runRuntime(input: RuntimeOptions): Promise<RuntimeResult> 
   const requestContext = input.requestContext;
   const resolved: ResolvedAdapter = resolveAdapter(requestContext.provider);
   const route = `adapter.${resolved.provider}`;
-  const toolAllow = Array.isArray(input.toolAllow) ? input.toolAllow : [];
-  const withTools = typeof input.withTools === "boolean" ? input.withTools : true;
   const adapterInput: AdapterRunInput = {
     requestContext,
     route,
-    withTools,
-    toolAllow,
+    withTools: input.withTools,
+    toolAllow: input.toolAllow,
     ...(typeof input.cwd === "string" ? { cwd: path.resolve(input.cwd) } : {}),
     ...(Array.isArray(input.toolSpecs) ? { toolSpecs: input.toolSpecs } : {}),
   };

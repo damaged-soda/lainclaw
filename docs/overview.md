@@ -16,7 +16,7 @@
 - `agent`：命令行直接发起问题，按 session 管理上下文。
 - `gateway`：通道边界，启动飞书 WS 或 local 服务；不承载运行时建模与恢复逻辑。
   - CLI 内部已重构为集中式命令分发与统一执行封装，当前版本以最小改动保留既有执行语义，优先完成核心边界重建。
-  - `runtime`（顶层模块）：通过 `CoreCoordinator` 统一入口编排，`src/runtime/adapter.ts` 负责 `CoreRuntimeInput` 到 provider adapter 的上下文拼装；网关、本地、heartbeat、agent 命令均走 `bootstrap` 注入后的 `runAgent` 统一入口。运行时不在模块内写死 provider，由 `profile/provider` 配置驱动适配器选择。工具链路能力实现收敛到 `src/tools/runtimeTools.ts`，`runtime` 侧仅作为底座能力。
+  - `agent`（调用入口）：`src/agent/invoke.ts` 统一做参数归一化后交由 `core` 的统一协作协议处理；`runtime` 仅承担底层请求上下文与 provider 适配执行，不关心来源参数来源。
   - 详见 `docs/wip/20260225-runtime-simplification/runtime-layering.md` 的分层边界与迁移约定。
 - `sessions/sessionService`：会话、记忆与 transcript 持久化服务边界，统一封装 `src/sessions/sessionStore.ts` 文件落盘细节；`runtime` 只关注会话上下文拼装与执行编排，不直接持有文件路径和目录细节。
 - 会话持久化：会话索引与消息仍按 `~/.lainclaw` 目录记录（`sessions.json`、`<sessionId>.jsonl`、`memory/<sessionKey>.md`）。

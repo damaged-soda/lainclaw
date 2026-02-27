@@ -77,16 +77,7 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
   "requestSource": "t-001",
   "sessionKey": "local:demo",
   "input": "请告诉我当前时间",
-  "output": {
-    "success": true,
-    "route": "adapter.<provider>",
-    "stage": "adapter.<provider>.<profileId>",
-    "result": "...真实回复...",
-    "provider": "<provider>",
-    "memoryEnabled": false,
-    "memoryUpdated": true,
-    "sessionContextUpdated": true
-  }
+  "output": "...真实回复..."
 }
 ```
 
@@ -110,7 +101,7 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
 ### 4.1 生命周期
 - 启动 local gateway。
 - 发送一条 inbox 消息。
-- 在 outbox 读取到成功记录且 `route` 存在。
+- 在 outbox 读取到成功记录且 `output` 有返回文本内容。
 - 查询 `gateway status` 显示当前状态（daemon 场景）。
 - `gateway stop` 后再次确认进程停止。
 
@@ -131,11 +122,11 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
 ```json
 {"input":"tool:fs.pwd","sessionKey":"local:demo","requestId":"t-tool-pwd"}
 ```
-- 应有 outbox 记录且 `toolResults`、`toolCalls` 字段可见（若模型自动工具或手工工具路径生效）。
+- 应有 outbox 记录，`output` 为响应文本；如需调试工具调用，需查看运行日志或会话记录中的工具摘要。
 
 ### 4.4 记忆（Memory）
 - 启动时附加 `--memory`。
-- 发送至少两轮消息后，响应中应返回 `memoryEnabled` 与 `memoryUpdated`（由 runAgent 结果决定）。
+- 发送至少两轮消息后，若开启记忆与会话压缩可观察到内存相关副作用（会体现在会话状态与记忆文件），本地 outbox 仅保留文本 `output`。
 
 ### 4.5 异常场景
 - 写入非法 JSON 到 inbox（例如单行 `{bad`），服务应不会阻塞主循环，可继续处理后续有效消息。

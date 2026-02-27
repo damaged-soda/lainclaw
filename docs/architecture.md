@@ -41,15 +41,15 @@ CLI（node dist/index.js）
   - 通过 `src/cli/registry.ts` 维护 `CommandRoute` 注册表，由 `runCommand` 风格执行层统一处理错误与返回码。
   - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口，但不变更命令语义与外部行为。
 - `src/core/index.ts`
-  - 统一执行业务执行入口，承接 `agent/gateway/channel/heartbeat` 的请求并编排上下文、会话、工具与运行时调用。
+  - 统一执行业务执行入口，承接 `agent/gateway/channel/heartbeat` 的请求并编排上下文、会话、工具与运行时调用；核心层侧重协议协调与事件收口。
 - `src/core/contracts.ts`
   - 定义 `CoreCoordinator` 接口、`runAgent` 输入/输出、`trace/event/log` 事件与错误码。
 - `src/core/adapters/*`
   - 将会话、工具、runtime 能力收敛为端口后通过依赖注入组装，避免业务层直接互相调用。
 - `src/gateway/index.ts`
-  - 作为主入口边界，入口仅委托 `coreCoordinator.runAgent`。
-- `src/runtime/index.ts`
-  - 统一转发层，复用 bootstrap 注入后的 `coreCoordinator`，不再承载编排。
+  - 作为主入口边界，仅委托 `agent` 标准调用入口后进入 `core` 的统一运行协议。
+- `src/agent/invoke.ts`
+  - 上层渠道/CLI/heartbeat 统一入站层：标准化入口参数（`sessionKey`、`toolAllow`、`memory`）后交由 `coreCoordinator.runAgent`。
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与运行时元信息构建。
 - `src/tools/runtimeTools.ts`
@@ -66,8 +66,8 @@ CLI（node dist/index.js）
 
 ## 运行入口收口说明（新增）
 
-- `gateway/index.ts` 复用 `bootstrap/coreCoordinator.ts` 的 `runAgent` 导出。
-- 运行时代码不再作为业务模块交接点，`runtime` 仅保留边界层实现与 provider 适配。
+- `gateway/index.ts`、`cli/commands/agent.ts`、`channels/*`、`heartbeat` 入口统一复用 `agent/invoke.ts` 的 `runAgent`。
+- `运行时代码不再作为业务模块交接点`，`runtime/adapter.ts` 与 `runtime/entrypoint.ts` 仅负责 protocol context 与 provider 适配执行。
 - `src/adapters/codexAdapter.ts`
   - 对接模型 SDK（`@mariozechner/pi-ai`），处理工具 schema 映射与 tool-call 解析。
 - `src/adapters/stubAdapter.ts`

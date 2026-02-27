@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { runAgent } from "../../bootstrap/coreCoordinator.js";
+import { runAgent } from "../../gateway/index.js";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
+
+type RunAgentText = Awaited<ReturnType<typeof runAgent>>;
 
 export interface LocalGatewayOverrides {
   provider?: string;
@@ -26,20 +28,7 @@ interface LocalRunboxRecord {
   requestSource: string;
   sessionKey: string;
   input: string;
-  output: {
-    success: boolean;
-    route: string;
-    stage: string;
-    result: string;
-    provider?: string;
-    profileId?: string;
-    memoryEnabled?: boolean;
-    memoryUpdated?: boolean;
-    toolCalls?: unknown;
-    toolResults?: unknown;
-    toolError?: unknown;
-    sessionContextUpdated?: boolean;
-  };
+  output: string;
 }
 
 interface LocalErrorRecord {
@@ -172,7 +161,7 @@ function writeErrorRecordSafe(record: LocalErrorRecord): string {
 }
 
 function buildRunboxRecord(
-  response: Awaited<ReturnType<typeof runAgent>>,
+  response: RunAgentText,
   input: string,
   requestSource: string,
   sessionKey: string,
@@ -180,24 +169,11 @@ function buildRunboxRecord(
   return {
     channel: "local",
     recordedAt: nowIso(),
-    requestId: response.requestId,
+    requestId: requestSource,
     requestSource,
     sessionKey,
     input,
-    output: {
-      success: response.success,
-      route: response.route,
-      stage: response.stage,
-      result: response.result,
-      ...(response.provider ? { provider: response.provider } : {}),
-      ...(response.profileId ? { profileId: response.profileId } : {}),
-      ...(typeof response.memoryEnabled === "boolean" ? { memoryEnabled: response.memoryEnabled } : {}),
-      ...(typeof response.memoryUpdated === "boolean" ? { memoryUpdated: response.memoryUpdated } : {}),
-      ...(response.toolCalls ? { toolCalls: response.toolCalls } : {}),
-      ...(response.toolResults ? { toolResults: response.toolResults } : {}),
-      ...(response.toolError ? { toolError: response.toolError } : {}),
-      ...(response.sessionContextUpdated ? { sessionContextUpdated: response.sessionContextUpdated } : {}),
-    },
+    output: response,
   };
 }
 
@@ -259,7 +235,7 @@ export async function runLocalGatewayServer(
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  const opts = {
+  const runAgentDefaults = {
     provider: overrides.provider,
     profileId: overrides.profileId,
     withTools: overrides.withTools,
@@ -274,7 +250,7 @@ export async function runLocalGatewayServer(
       lastOffset = 0;
     }
 
-  if (raw.length > lastOffset) {
+    if (raw.length > lastOffset) {
       const appendedText = raw.slice(lastOffset);
       const lines = appendedText.split("\n");
       lastOffset = raw.length;
@@ -294,18 +270,18 @@ export async function runLocalGatewayServer(
         const requestSource = payload.requestId || `seq-${requestSeq++}`;
 
         try {
-          const result = await runAgent(input, {
-            ...(typeof opts.provider === "string" && opts.provider.length > 0 ? { provider: opts.provider } : {}),
-            ...(typeof opts.profileId === "string" && opts.profileId.length > 0 ? { profileId: opts.profileId } : {}),
-            ...(typeof opts.withTools === "boolean" ? { withTools: opts.withTools } : {}),
-            ...(Array.isArray(opts.toolAllow) ? { toolAllow: opts.toolAllow } : {}),
-            ...(typeof opts.memory === "boolean" ? { memory: opts.memory } : {}),
-            ...(typeof sessionKey === "string" && sessionKey.trim() ? { sessionKey } : {}),
+          const result = await runAgent({
+            input,
+            channelId: "local",
+            sessionKey,
+            runtime: runAgentDefaults,
           });
 
           const record = buildRunboxRecord(result, input, requestSource, sessionKey);
           await appendLine(outboxPath, writeRunboxRecordSafe(record));
-          console.log(`[local] ${requestSource} route=${result.route} stage=${result.stage}`);
+          console.log(
+            `[local] ${requestSource} ok`,
+          );
           continue;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -317,7 +293,7 @@ export async function runLocalGatewayServer(
       }
     }
 
-  await new Promise((resolve) => setTimeout(resolve, pollMs));
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 
   const outboxExists = await fs.access(outboxPath).then(() => true).catch(() => false);

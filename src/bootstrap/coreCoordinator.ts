@@ -9,6 +9,5 @@ export const coreCoordinator = createCoreCoordinator({
   runtimeAdapter: createRuntimeAdapter(),
 });
 
-export const runAgent = coreCoordinator.runAgent;
 export { createCoreCoordinator, type CoreCoordinator as CoreCoordinatorExport } from "../core/index.js";
 export type { CoreRunAgentOptions } from "../core/contracts.js";

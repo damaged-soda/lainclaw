@@ -20,7 +20,7 @@ export interface ResolvedAdapter {
   run: RuntimeAdapter;
 }
 
-function normalizeProvider(raw: string | undefined): string {
+function normalizeProvider(raw: string): string {
   return (raw || "").trim().toLowerCase();
 }
 
@@ -29,7 +29,7 @@ const ADAPTER_BY_PROVIDER: Record<string, RuntimeAdapter> = {
   stub: runStubAdapter,
 };
 
-export function resolveAdapter(providerRaw: string | undefined): ResolvedAdapter {
+export function resolveAdapter(providerRaw: string): ResolvedAdapter {
   const normalized = normalizeProvider(providerRaw);
   const provider = normalized;
   if (!provider) {

@@ -1,6 +1,7 @@
 import type { Message } from "@mariozechner/pi-ai";
 import type { ToolExecutionLog } from "../tools/types.js";
 import type { AdapterRunInput } from "./registry.js";
+import { ValidationError } from "../shared/types.js";
 
 export interface AdapterResult {
   route: string;
@@ -10,14 +11,18 @@ export interface AdapterResult {
   toolResults?: ToolExecutionLog[];
   assistantMessage?: Message;
   stopReason?: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
 }
 
 export async function runStubAdapter(input: AdapterRunInput): Promise<AdapterResult> {
   const context = input.requestContext;
   const route = input.route;
-  const provider = (input.requestContext.provider || "stub").trim();
+  const rawProvider = context.provider;
+  const provider = rawProvider.trim();
+  if (!provider) {
+    throw new ValidationError("Missing provider. Set --provider in runtime input.", "MISSING_PROVIDER");
+  }
   const normalizedInput = input.requestContext.input.trim();
   const historyCount = Array.isArray(context.messages) ? context.messages.length : 0;
   const shortHistory = `context=${historyCount}条消息`;
@@ -57,6 +62,8 @@ export async function runStubAdapter(input: AdapterRunInput): Promise<AdapterRes
       result: `[stub-summary] ${shortHistory}：我已接收到你的内容：${normalizedInput}`,
       assistantMessage,
       stopReason: assistantMessage.stopReason,
+      provider,
+      profileId: context.profileId,
     };
   }
 
@@ -66,5 +73,7 @@ export async function runStubAdapter(input: AdapterRunInput): Promise<AdapterRes
     result: `[stub-echo][${context.sessionId}] ${shortHistory}，已接收到输入：${normalizedInput}`,
     assistantMessage,
     stopReason: assistantMessage.stopReason,
+    provider,
+    profileId: context.profileId,
   };
 }

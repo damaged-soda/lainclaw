@@ -10,11 +10,7 @@ import {
   resolveWorkspaceDir,
 } from "../shared/workspaceContext.js";
 
-export const DEFAULT_SESSION_KEY = "main";
 export const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;
-export const NEW_SESSION_COMMAND = "/new";
-export const NEW_SESSION_ROUTE = "system";
-export const NEW_SESSION_STAGE = "gateway.new_session";
 
 interface RuntimeContextMessages {
   requestContext: RequestContext;
@@ -31,17 +27,18 @@ export function buildRuntimeRequestContext(params: {
   sessionId: string;
   priorMessages: SessionHistoryMessage[];
   memorySnippet?: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
   withTools: boolean;
   tools?: ContextToolSpec[];
   systemPrompt?: string;
   memoryEnabled?: boolean;
 }): RuntimeContextMessages {
   const resolvedTools = params.withTools && Array.isArray(params.tools) ? params.tools : undefined;
+  const provider = params.provider.trim();
   const historyContext = contextMessagesFromHistory(
     trimContextMessages(params.priorMessages),
-    params.provider,
+    provider,
   );
   const contextMessages: Message[] = [...historyContext];
 
@@ -58,7 +55,7 @@ export function buildRuntimeRequestContext(params: {
     params.sessionKey,
     params.sessionId,
     contextMessages,
-    params.provider,
+    provider,
     params.profileId,
     resolvedTools,
     params.systemPrompt,
@@ -89,33 +86,11 @@ export function toTimestamp(raw: string): number {
   return Number.isFinite(parsed) ? parsed : nowTs();
 }
 
-export function resolveSessionKey(rawSessionKey: string | undefined): string {
-  const normalized = rawSessionKey?.trim();
-  return normalized && normalized.length > 0 ? normalized : DEFAULT_SESSION_KEY;
-}
-
-export function resolveMemoryFlag(value: boolean | undefined): boolean | undefined {
-  if (typeof value === "undefined") {
-    return undefined;
-  }
-  return !!value;
-}
-
 export function trimContextMessages(messages: SessionHistoryMessage[]): SessionHistoryMessage[] {
   if (messages.length <= DEFAULT_CONTEXT_MESSAGE_LIMIT) {
     return messages;
   }
   return messages.slice(-DEFAULT_CONTEXT_MESSAGE_LIMIT);
-}
-
-export function normalizeToolAllow(raw: string[] | undefined): string[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return [];
-  }
-
-  return raw
-    .map((entry) => (typeof entry === "string" ? entry.trim().toLowerCase() : ""))
-    .filter((entry) => entry.length > 0);
 }
 
 export async function buildWorkspaceSystemPrompt(cwd: string | undefined): Promise<string> {
@@ -142,17 +117,16 @@ function makeUsageZero() {
 
 export function contextMessagesFromHistory(
   messages: SessionHistoryMessage[],
-  provider?: string,
+  provider: string,
 ): Message[] {
-  const safeProvider = (provider || "unknown").trim() || "unknown";
   return messages.map((message) => {
     if (message.role === "assistant") {
       return {
         role: "assistant",
         content: [{ type: "text", text: message.content }],
-        api: `${safeProvider}-responses`,
-        provider: safeProvider,
-        model: `${safeProvider}-model`,
+        api: `${provider}-responses`,
+        provider,
+        model: `${provider}-model`,
         usage: makeUsageZero(),
         stopReason: "stop",
         timestamp: toTimestamp(message.timestamp),
@@ -182,8 +156,8 @@ export function makeBaseRequestContext(
   sessionKey: string,
   sessionId: string,
   messages: Message[],
-  provider?: string,
-  profileId?: string,
+  provider: string,
+  profileId: string,
   tools?: ContextToolSpec[],
   systemPrompt?: string,
   memoryEnabled: boolean = true,
@@ -195,8 +169,8 @@ export function makeBaseRequestContext(
     sessionKey,
     sessionId,
     messages,
-    ...(provider ? { provider } : {}),
-    ...(profileId ? { profileId } : {}),
+    provider,
+    profileId,
     ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
     ...(typeof systemPrompt === "string" && systemPrompt.trim().length > 0 ? { systemPrompt } : {}),
     memoryEnabled,

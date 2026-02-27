@@ -34,10 +34,8 @@ export interface CreateCoreCoordinatorOptions {
   emitEvent?: CoreEventSink;
 }
 
-const NEW_SESSION_COMMAND = "/new";
 const NEW_SESSION_ROUTE = "system";
 const NEW_SESSION_STAGE = "gateway.new_session";
-const CORE_DEFAULT_SESSION_KEY = "main";
 
 function createDefaultEmitEvent(): CoreEventSink {
   return async (event) => {
@@ -55,39 +53,6 @@ function createEventSink(handler: CoreEventSink): CoreEventSink {
       // event sink should not impact execution path.
     }
   };
-}
-
-function resolveProvider(rawProvider: string | undefined): string {
-  const normalized = rawProvider?.trim();
-  if (!normalized) {
-    throw new ValidationError(
-      "Missing provider. Set --provider in command args or runtime config.",
-      "MISSING_PROVIDER",
-    );
-  }
-  return normalized;
-}
-
-function resolveSessionKey(rawSessionKey: string | undefined): string {
-  const normalized = rawSessionKey?.trim();
-  return normalized && normalized.length > 0 ? normalized : CORE_DEFAULT_SESSION_KEY;
-}
-
-function resolveMemoryFlag(value: boolean | undefined): boolean | undefined {
-  if (typeof value === "undefined") {
-    return undefined;
-  }
-  return !!value;
-}
-
-function normalizeToolAllow(raw: string[] | undefined): string[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return [];
-  }
-
-  return raw
-    .map((entry) => (typeof entry === "string" ? entry.trim().toLowerCase() : ""))
-    .filter((entry) => entry.length > 0);
 }
 
 function nowIso(): string {
@@ -212,8 +177,8 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
     markRouteUsage: (
       sessionKey: string,
       route: string,
-      profileId?: string,
-      provider?: string,
+      profileId: string,
+      provider: string,
     ): Promise<void> => {
       return sessionAdapter.markRouteUsage(sessionKey, route, profileId, provider);
     },
@@ -226,21 +191,18 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
     resolveSessionMemoryPath: (sessionKey: string): string => {
       return sessionAdapter.resolveSessionMemoryPath(sessionKey);
     },
-    runAgent: async (rawInput: string, options: CoreRunAgentOptions = {}) => {
+    runAgent: async (rawInput: string, options: CoreRunAgentOptions) => {
       const requestId = createRequestId();
       const createdAt = nowIso();
-      const input = (rawInput || "").trim();
+      const input = rawInput;
+      const requestIsNewSession = options.newSession === true;
 
-      if (!input) {
-        throw new ValidationError("agent command requires non-empty input", "VALIDATION_ERROR");
-      }
-
-      const provider = resolveProvider(options.provider);
-      const sessionKey = resolveSessionKey(options.sessionKey);
-      const profileId = options.profileId?.trim();
-      const memoryEnabled = resolveMemoryFlag(options.memory);
-      const withTools = typeof options.withTools === "boolean" ? options.withTools : true;
-      const toolAllow = normalizeToolAllow(options.toolAllow);
+      const provider = options.provider;
+      const profileId = options.profileId;
+      const memoryEnabled = options.memory;
+      const sessionKey = options.sessionKey;
+      const withTools = options.withTools;
+      const toolAllow = options.toolAllow;
 
       try {
         await emitEvent({
@@ -252,13 +214,13 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           sessionKey,
           payload: {
             provider,
-            profileId: profileId || undefined,
+            profileId,
             withTools,
             hasToolFilter: toolAllow.length > 0,
           },
         });
 
-        if (input === NEW_SESSION_COMMAND) {
+        if (requestIsNewSession) {
           const newSession = await withFailureMapping(
             "core.session.resolve",
             requestId,
@@ -298,6 +260,8 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
             route: NEW_SESSION_ROUTE,
             stage: NEW_SESSION_STAGE,
             result: `New session started. sessionId=${newSession.sessionId}`,
+            provider,
+            profileId,
             sessionKey: newSession.sessionKey,
             sessionId: newSession.sessionId,
             memoryEnabled: !!newSession.memoryEnabled,
@@ -367,7 +331,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
               priorMessages,
               memorySnippet,
               provider,
-              ...(profileId ? { profileId } : {}),
+              profileId,
               withTools,
               toolAllow,
               tools: autoTools,
@@ -415,8 +379,8 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
                 route: runtimeResult.route,
                 stage: runtimeResult.stage,
                 result: runtimeResult.result,
-                ...(runtimeResult.provider ? { provider: runtimeResult.provider } : {}),
-                ...(runtimeResult.profileId ? { profileId: runtimeResult.profileId } : {}),
+                provider: runtimeResult.provider,
+                profileId: runtimeResult.profileId,
               },
             ),
         );
@@ -494,8 +458,8 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           route: runtimeResult.route,
           stage: runtimeResult.stage,
           result: runtimeResult.result,
-          ...(runtimeResult.provider ? { provider: runtimeResult.provider } : {}),
-          ...(runtimeResult.profileId ? { profileId: runtimeResult.profileId } : {}),
+          provider: runtimeResult.provider,
+          profileId: runtimeResult.profileId,
           sessionKey: session.sessionKey,
           sessionId: session.sessionId,
           memoryEnabled: session.memoryEnabled,
@@ -520,7 +484,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           message: normalized.message,
           sessionKey,
           payload: {
-            provider: options.provider,
+            provider,
             profileId,
             code: normalized.code,
           },

@@ -51,8 +51,8 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
 
         const resolved = resolveAdapter(input.provider);
         const route = `adapter.${resolved.provider}`;
-        const toolAllow = Array.isArray(input.toolAllow) ? input.toolAllow : [];
-        const withTools = typeof input.withTools === "boolean" ? input.withTools : true;
+        const toolAllow = input.toolAllow;
+        const withTools = input.withTools;
 
         const adapterInput = {
           requestContext: requestContext.requestContext,
@@ -73,8 +73,8 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
           ...(adapterResult.toolResults ? { toolResults: adapterResult.toolResults } : {}),
           ...(adapterResult.assistantMessage ? { assistantMessage: adapterResult.assistantMessage } : {}),
           ...(adapterResult.stopReason ? { stopReason: adapterResult.stopReason } : {}),
-          ...(adapterResult.provider ? { provider: adapterResult.provider } : {}),
-          ...(adapterResult.profileId ? { profileId: adapterResult.profileId } : {}),
+          provider: adapterResult.provider,
+          profileId: adapterResult.profileId,
         };
       } catch (error) {
         if (error instanceof ValidationError) {

@@ -1,6 +1,6 @@
 import { parseAgentArgs } from '../parsers/agent.js';
 import { ValidationError } from '../../shared/types.js';
-import { runAgent } from '../../bootstrap/coreCoordinator.js';
+import { runAgent } from '../../gateway/index.js';
 import { runCommand } from '../shared/result.js';
 
 export async function runAgentCommand(args: string[]): Promise<number> {
@@ -15,24 +15,26 @@ export async function runAgentCommand(args: string[]): Promise<number> {
       withTools,
       toolAllow,
     } = parseAgentArgs(args);
-    if (!input) {
+    if (!input.trim()) {
       throw new ValidationError("agent command requires non-empty input", "AGENT_INPUT_REQUIRED");
     }
-    const response = await runAgent(input, {
-      ...(provider ? { provider } : {}),
-      ...(profile ? { profileId: profile } : {}),
-      ...(sessionKey ? { sessionKey } : {}),
-      ...(newSession ? { newSession } : {}),
-      ...(typeof memory === "boolean" ? { memory } : {}),
-      ...(typeof withTools === "boolean" ? { withTools } : {}),
-      ...(toolAllow ? { toolAllow } : {}),
+
+    const response = await runAgent({
+      input,
+      channelId: "cli",
+      sessionKey,
+      runtime: {
+        provider,
+        profileId: profile,
+        newSession,
+        memory,
+        withTools,
+        toolAllow,
+      },
     });
 
-    if (response.success) {
-      console.log(JSON.stringify(response, null, 2));
-      return 0;
-    }
-    return 1;
+    console.log(response);
+    return 0;
   }, {
     renderError: (error) => {
       if (error instanceof ValidationError) {

@@ -26,16 +26,16 @@ const DEFAULT_ASSISTANT_MESSAGE_PREFIX = "msg-assistant";
 export interface SessionRuntimeMessage {
   route: string;
   stage: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
 }
 
 export interface SessionTurnResult {
   route: string;
   stage: string;
   result: string;
-  provider?: string;
-  profileId?: string;
+  provider: string;
+  profileId: string;
 }
 
 export interface SessionSnapshot extends SessionLoadResult {}
@@ -58,10 +58,10 @@ export interface SessionService {
     toolResults: ToolExecutionLog[],
     route: string,
     stage: string,
-    provider?: string,
-    profileId?: string,
+    provider: string,
+    profileId: string,
   ): Promise<void>;
-  markRouteUsage(sessionKey: string, route: string, profileId?: string, provider?: string): Promise<void>;
+  markRouteUsage(sessionKey: string, route: string, profileId: string, provider: string): Promise<void>;
   compactIfNeeded(session: SessionSnapshotCompact): Promise<boolean>;
   resolveSessionMemoryPath(sessionKey: string): string;
 }
@@ -86,8 +86,8 @@ function toRouteContext(result: SessionRuntimeMessage): SessionRuntimeMessage {
   return {
     route: result.route,
     stage: result.stage,
-    ...(result.provider ? { provider: result.provider } : {}),
-    ...(result.profileId ? { profileId: result.profileId } : {}),
+    provider: result.provider,
+    profileId: result.profileId,
   };
 }
 
@@ -160,8 +160,8 @@ async function appendRuntimeMessage(
     content,
     route: routeContext.route,
     stage: routeContext.stage,
-    ...(routeContext.provider ? { provider: routeContext.provider } : {}),
-    ...(routeContext.profileId ? { profileId: routeContext.profileId } : {}),
+    provider: routeContext.provider,
+    profileId: routeContext.profileId,
   });
 }
 
@@ -181,8 +181,8 @@ function createSessionService(): SessionService {
       toolResults: ToolExecutionLog[],
       route: string,
       stage: string,
-      provider?: string,
-      profileId?: string,
+      provider: string,
+      profileId: string,
     ): Promise<void> => {
       if (toolResults.length === 0) {
         return;
@@ -195,8 +195,8 @@ function createSessionService(): SessionService {
         {
           route,
           stage,
-          ...(provider ? { provider } : {}),
-          ...(profileId ? { profileId } : {}),
+          provider,
+          profileId,
         },
         DEFAULT_TOOL_MESSAGE_PREFIX,
       );
@@ -204,8 +204,8 @@ function createSessionService(): SessionService {
     markRouteUsage: (
       sessionKey: string,
       route: string,
-      profileId?: string,
-      provider?: string,
+      profileId: string,
+      provider: string,
     ): Promise<void> => recordSessionRoute(sessionKey, route, profileId, provider),
     compactIfNeeded: async (session: SessionSnapshotCompact): Promise<boolean> => {
       if (!session.memoryEnabled) {

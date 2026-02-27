@@ -18,7 +18,7 @@ lainclaw --help
 lainclaw agent 这是一个测试输入
 ```
 
-本期实现默认采用 `pi-agent-core` 作为运行时编排内核：`agent` 与 `gateway` 共享同一执行流，按会话上下文与消息历史进行单次执行，不依赖跨请求恢复；工具调用通过现有 `tools` 执行链路执行（不再经过独立 sandbox 层）。外部命令行为与返回码保持兼容。
+本期实现默认采用 `pi-agent-core` 作为运行时编排内核：`agent` 与 `gateway` 共享同一执行流，按会话上下文与消息历史进行单次执行，不依赖跨请求恢复；工具调用通过现有 `tools` 执行链路执行（不再经过独立 sandbox 层）。外部命令行为与返回码保持兼容。调用入口层先在 `agent/invoke.ts` 做参数归一化，再进入 core 的统一协议编排。
 
 ### 会话模式（第一阶段）
 
@@ -102,7 +102,7 @@ node dist/index.js gateway start --channel local --provider <provider> --profile
 ## 飞书（Feishu）网关接入（WS-only）
 
 当前的 `feishu` 通道仅支持 **WebSocket 长连接模式**（不使用 Webhook）。统一入口为 `gateway` 命令，默认通道为 `feishu`，可通过 `--channel` 覆盖（当前实现仍仅支持 `feishu`）。
-> 内部说明：当前 `agent` 与 `gateway` 的运行编排已统一到顶层 `src/runtime`（`coordinator/context/tools/persistence/entrypoint` 等），`gateway` 层保留通道与服务边界，外部行为保持不变。MVP 阶段不承诺跨请求恢复未完成的执行过程。
+> 内部说明：当前 `agent` 与 `gateway` 的运行编排已统一到顶层 `agent` 调用入口（`src/agent/invoke.ts`），再由 `coreCoordinator` 驱动 `core` 执行；`runtime` 层负责 context 构建与 provider 适配，`gateway` 层保留通道与服务边界，外部行为保持不变。MVP 阶段不承诺跨请求恢复未完成的执行过程。
 
 ### 启动方式
 
