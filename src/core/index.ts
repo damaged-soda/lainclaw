@@ -245,6 +245,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
 
       const persistTurn = async (
         session: CoreSessionRecord,
+        turnInput: string,
         runtimeResult: Awaited<ReturnType<typeof runtimeAdapter.run>>,
         toolCalls: CoreToolCall[],
         toolResults: CoreToolExecutionLog[],
@@ -279,7 +280,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           () =>
             sessionAdapter.appendTurnMessages(
               session.sessionId,
-              input,
+              turnInput,
               {
                 route: runtimeResult.route,
                 stage: runtimeResult.stage,
@@ -444,7 +445,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         const toolCalls = runtimeResult.toolCalls ?? [];
         const toolResults = runtimeResult.toolResults ?? [];
         const toolError = toolsAdapter.firstToolErrorFromLogs(toolResults);
-        await persistTurn(session, runtimeResult, toolCalls, toolResults, toolError);
+        await persistTurn(session, turnInput, runtimeResult, toolCalls, toolResults, toolError);
 
         return {
           requestId,
