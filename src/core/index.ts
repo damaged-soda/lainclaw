@@ -114,6 +114,275 @@ async function withFailureMapping<T>(
   }
 }
 
+type RunCtx = {
+  requestId: string;
+  createdAt: string;
+  provider: string;
+  profileId: string;
+  sessionKey: string;
+  withTools: boolean;
+  toolAllow: string[];
+  memoryEnabled?: boolean;
+  cwd?: string;
+  emitEvent: CoreEventSink;
+  sessionAdapter: CoreSessionAdapter;
+  toolsAdapter: CoreToolsAdapter;
+  runtimeAdapter: CoreRuntimeAdapter;
+};
+
+type TurnContext = {
+  memorySnippet: string;
+  priorMessages: CoreSessionHistoryMessage[];
+  tools: Awaited<ReturnType<CoreToolsAdapter["listTools"]>>;
+};
+
+async function buildTurnContext(
+  ctx: RunCtx,
+  session: CoreSessionRecord,
+): Promise<TurnContext> {
+  const [memorySnippet, priorMessages] = await Promise.all([
+    withFailureMapping(
+      "core.session.loadMemory",
+      ctx.requestId,
+      session.sessionKey,
+      "SESSION_FAILURE",
+      ctx.emitEvent,
+      () => ctx.sessionAdapter.loadMemorySnippet(session.sessionKey),
+    ),
+    withFailureMapping(
+      "core.session.loadHistory",
+      ctx.requestId,
+      session.sessionKey,
+      "SESSION_FAILURE",
+      ctx.emitEvent,
+      () => ctx.sessionAdapter.loadHistory(session.sessionId),
+    ),
+  ]);
+  const tools = await withFailureMapping(
+    "core.tools.list",
+    ctx.requestId,
+    session.sessionKey,
+    "TOOL_FAILURE",
+    ctx.emitEvent,
+    () => ctx.toolsAdapter.listTools({ allowList: ctx.toolAllow }),
+  );
+
+  return { memorySnippet, priorMessages, tools };
+}
+
+async function persistTurn(
+  ctx: RunCtx,
+  session: CoreSessionRecord,
+  turnInput: string,
+  runtimeResult: Awaited<ReturnType<CoreRuntimeAdapter["run"]>>,
+  toolCalls: CoreToolCall[],
+  toolResults: CoreToolExecutionLog[],
+  toolError: CoreToolError | undefined,
+): Promise<boolean> {
+  if (toolResults.length > 0) {
+    await withFailureMapping(
+      "core.session.appendToolSummary",
+      ctx.requestId,
+      session.sessionKey,
+      "SESSION_FAILURE",
+      ctx.emitEvent,
+      () =>
+        ctx.sessionAdapter.appendToolSummary(
+          session.sessionId,
+          toolCalls,
+          toolResults,
+          runtimeResult.route,
+          runtimeResult.stage,
+          runtimeResult.provider,
+          runtimeResult.profileId,
+        ),
+    );
+  }
+
+  await withFailureMapping(
+    "core.session.appendTurnMessages",
+    ctx.requestId,
+    session.sessionKey,
+    "SESSION_FAILURE",
+    ctx.emitEvent,
+    () =>
+      ctx.sessionAdapter.appendTurnMessages(
+        session.sessionId,
+        turnInput,
+        {
+          route: runtimeResult.route,
+          stage: runtimeResult.stage,
+          result: runtimeResult.result,
+          provider: runtimeResult.provider,
+          profileId: runtimeResult.profileId,
+        },
+      ),
+  );
+
+  await withFailureMapping(
+    "core.session.markRoute",
+    ctx.requestId,
+    session.sessionKey,
+    "SESSION_FAILURE",
+    ctx.emitEvent,
+    () =>
+      ctx.sessionAdapter.markRouteUsage(
+        session.sessionKey,
+        runtimeResult.route,
+        runtimeResult.profileId,
+        runtimeResult.provider,
+      ),
+  );
+
+  const memoryUpdated = await withFailureMapping(
+    "core.session.compact",
+    ctx.requestId,
+    session.sessionKey,
+    "SESSION_FAILURE",
+    ctx.emitEvent,
+    () =>
+      ctx.sessionAdapter.compactIfNeeded({
+        sessionKey: session.sessionKey,
+        sessionId: session.sessionId,
+        memoryEnabled: session.memoryEnabled,
+        compactedMessageCount: session.compactedMessageCount,
+      }),
+  );
+
+  if (toolError) {
+    await ctx.emitEvent({
+      level: "log",
+      requestId: ctx.requestId,
+      at: nowIso(),
+      code: "TOOL_FAILURE",
+      name: "agent.runtime.tool.failed",
+      route: runtimeResult.route,
+      stage: runtimeResult.stage,
+      message: toolError.message,
+      sessionKey: session.sessionKey,
+      payload: {
+        tool: toolError.tool,
+        toolCode: toolError.code,
+      },
+    });
+  }
+
+  await ctx.emitEvent({
+    level: "event",
+    requestId: ctx.requestId,
+    at: nowIso(),
+    name: "agent.request.completed",
+    route: runtimeResult.route,
+    stage: runtimeResult.stage,
+    message: "agent request completed",
+    sessionKey: session.sessionKey,
+    payload: {
+      memoryUpdated,
+      sessionId: session.sessionId,
+      provider: runtimeResult.provider,
+      profileId: runtimeResult.profileId,
+      toolError: Boolean(toolError),
+    },
+  });
+
+  return memoryUpdated;
+}
+
+async function startNewSession(ctx: RunCtx): Promise<CoreOutcome> {
+  const newSessionRecord = await withFailureMapping(
+    "core.session.resolve",
+    ctx.requestId,
+    ctx.sessionKey,
+    "SESSION_FAILURE",
+    ctx.emitEvent,
+    () =>
+      ctx.sessionAdapter.resolveSession({
+        sessionKey: ctx.sessionKey,
+        provider: ctx.provider,
+        profileId: ctx.profileId,
+        forceNew: true,
+        ...(typeof ctx.memoryEnabled === "boolean" ? { memory: ctx.memoryEnabled } : {}),
+      }),
+  );
+
+  await ctx.emitEvent({
+    level: "event",
+    requestId: ctx.requestId,
+    at: nowIso(),
+    name: "agent.session.created",
+    route: NEW_SESSION_ROUTE,
+    stage: NEW_SESSION_STAGE,
+    message: "new session created",
+    sessionKey: newSessionRecord.sessionKey,
+    payload: { sessionId: newSessionRecord.sessionId },
+  });
+
+  return {
+    requestId: ctx.requestId,
+    sessionKey: newSessionRecord.sessionKey,
+    sessionId: newSessionRecord.sessionId,
+    text: "",
+    isNewSession: true,
+  };
+}
+
+async function runTurn(ctx: RunCtx, turnInput: string, turnCreatedAt: string): Promise<CoreOutcome> {
+  const session = await withFailureMapping(
+    "core.session.resolve",
+    ctx.requestId,
+    ctx.sessionKey,
+    "SESSION_FAILURE",
+    ctx.emitEvent,
+    () =>
+      ctx.sessionAdapter.resolveSession({
+        sessionKey: ctx.sessionKey,
+        provider: ctx.provider,
+        profileId: ctx.profileId,
+        forceNew: false,
+        ...(typeof ctx.memoryEnabled === "boolean" ? { memory: ctx.memoryEnabled } : {}),
+      }),
+  );
+
+  const { memorySnippet, priorMessages, tools } = await buildTurnContext(ctx, session);
+
+  const runtimeResult = await withFailureMapping(
+    "core.runtime.run",
+    ctx.requestId,
+    session.sessionKey,
+    "RUNTIME_FAILURE",
+    ctx.emitEvent,
+    () =>
+      ctx.runtimeAdapter.run({
+        requestId: ctx.requestId,
+        createdAt: turnCreatedAt,
+        input: turnInput,
+        sessionKey: session.sessionKey,
+        sessionId: session.sessionId,
+        priorMessages,
+        memorySnippet,
+        provider: ctx.provider,
+        profileId: ctx.profileId,
+        withTools: ctx.withTools,
+        toolAllow: ctx.toolAllow,
+        tools,
+        ...(session.memoryEnabled ? { memoryEnabled: session.memoryEnabled } : {}),
+        ...(typeof ctx.cwd === "string" ? { cwd: ctx.cwd } : {}),
+      }),
+  );
+
+  const toolCalls = runtimeResult.toolCalls ?? [];
+  const toolResults = runtimeResult.toolResults ?? [];
+  const toolError = ctx.toolsAdapter.firstToolErrorFromLogs(toolResults);
+  await persistTurn(ctx, session, turnInput, runtimeResult, toolCalls, toolResults, toolError);
+
+  return {
+    requestId: ctx.requestId,
+    text: runtimeResult.result,
+    sessionKey: session.sessionKey,
+    sessionId: session.sessionId,
+  };
+}
+
 export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): CoreCoordinator {
   const sessionAdapter = createSessionAdapter({ implementation: options.sessionAdapter });
   const toolsAdapter = createToolsAdapter({ implementation: options.toolsAdapter });
@@ -195,7 +464,6 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
     runAgent: async (rawInput: string, options: CoreRunAgentOptions) => {
       const requestId = createRequestId();
       const createdAt = nowIso();
-      const input = rawInput;
       const {
         provider,
         profileId,
@@ -204,281 +472,49 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         withTools,
         toolAllow,
         newSession,
+        cwd,
       } = options;
 
-      const buildTurnContext = async (
-        session: CoreSessionRecord,
-      ): Promise<{
-        memorySnippet: string;
-        priorMessages: CoreSessionHistoryMessage[];
-        tools: Awaited<ReturnType<CoreToolsAdapter["listTools"]>>;
-      }> => {
-        const [memorySnippet, priorMessages] = await Promise.all([
-          withFailureMapping(
-            "core.session.loadMemory",
-            requestId,
-            session.sessionKey,
-            "SESSION_FAILURE",
-            emitEvent,
-            () => sessionAdapter.loadMemorySnippet(session.sessionKey),
-          ),
-          withFailureMapping(
-            "core.session.loadHistory",
-            requestId,
-            session.sessionKey,
-            "SESSION_FAILURE",
-            emitEvent,
-            () => sessionAdapter.loadHistory(session.sessionId),
-          ),
-        ]);
-        const tools = await withFailureMapping(
-          "core.tools.list",
-          requestId,
-          session.sessionKey,
-          "TOOL_FAILURE",
-          emitEvent,
-          () => toolsAdapter.listTools({ allowList: toolAllow }),
-        );
-
-        return { memorySnippet, priorMessages, tools };
-      };
-
-      const persistTurn = async (
-        session: CoreSessionRecord,
-        turnInput: string,
-        runtimeResult: Awaited<ReturnType<typeof runtimeAdapter.run>>,
-        toolCalls: CoreToolCall[],
-        toolResults: CoreToolExecutionLog[],
-        toolError: CoreToolError | undefined,
-      ): Promise<boolean> => {
-        if (toolResults.length > 0) {
-          await withFailureMapping(
-            "core.session.appendToolSummary",
-            requestId,
-            session.sessionKey,
-            "SESSION_FAILURE",
-            emitEvent,
-            () =>
-              sessionAdapter.appendToolSummary(
-                session.sessionId,
-                toolCalls,
-                toolResults,
-                runtimeResult.route,
-                runtimeResult.stage,
-                runtimeResult.provider,
-                runtimeResult.profileId,
-              ),
-          );
-        }
-
-        await withFailureMapping(
-          "core.session.appendTurnMessages",
-          requestId,
-          session.sessionKey,
-          "SESSION_FAILURE",
-          emitEvent,
-          () =>
-            sessionAdapter.appendTurnMessages(
-              session.sessionId,
-              turnInput,
-              {
-                route: runtimeResult.route,
-                stage: runtimeResult.stage,
-                result: runtimeResult.result,
-                provider: runtimeResult.provider,
-                profileId: runtimeResult.profileId,
-              },
-            ),
-        );
-
-        await withFailureMapping(
-          "core.session.markRoute",
-          requestId,
-          session.sessionKey,
-          "SESSION_FAILURE",
-          emitEvent,
-          () =>
-            sessionAdapter.markRouteUsage(
-              session.sessionKey,
-              runtimeResult.route,
-              runtimeResult.profileId,
-              runtimeResult.provider,
-            ),
-        );
-
-        const memoryUpdated = await withFailureMapping(
-          "core.session.compact",
-          requestId,
-          session.sessionKey,
-          "SESSION_FAILURE",
-          emitEvent,
-          () =>
-            sessionAdapter.compactIfNeeded({
-              sessionKey: session.sessionKey,
-              sessionId: session.sessionId,
-              memoryEnabled: session.memoryEnabled,
-              compactedMessageCount: session.compactedMessageCount,
-            }),
-        );
-
-        if (toolError) {
-          await emitEvent({
-            level: "log",
-            requestId,
-            at: nowIso(),
-            code: "TOOL_FAILURE",
-            name: "agent.runtime.tool.failed",
-            route: runtimeResult.route,
-            stage: runtimeResult.stage,
-            message: toolError.message,
-            sessionKey: session.sessionKey,
-            payload: {
-              tool: toolError.tool,
-              toolCode: toolError.code,
-            },
-          });
-        }
-
-        await emitEvent({
-          level: "event",
-          requestId,
-          at: nowIso(),
-          name: "agent.request.completed",
-          route: runtimeResult.route,
-          stage: runtimeResult.stage,
-          message: "agent request completed",
-          sessionKey: session.sessionKey,
-          payload: {
-            memoryUpdated,
-            sessionId: session.sessionId,
-            provider: runtimeResult.provider,
-            profileId: runtimeResult.profileId,
-            toolError: Boolean(toolError),
-          },
-        });
-
-        return memoryUpdated;
-      };
-
-      const startNewSession = async (): Promise<CoreOutcome> => {
-        const newSessionRecord = await withFailureMapping(
-          "core.session.resolve",
-          requestId,
-          sessionKey,
-          "SESSION_FAILURE",
-          emitEvent,
-          () =>
-            sessionAdapter.resolveSession({
-              sessionKey,
-              provider,
-              profileId,
-              forceNew: true,
-              ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
-            }),
-        );
-
-        await emitEvent({
-          level: "event",
-          requestId,
-          at: nowIso(),
-          name: "agent.session.created",
-          route: NEW_SESSION_ROUTE,
-          stage: NEW_SESSION_STAGE,
-          message: "new session created",
-          sessionKey: newSessionRecord.sessionKey,
-          payload: { sessionId: newSessionRecord.sessionId },
-        });
-
-        return {
-          requestId,
-          sessionKey: newSessionRecord.sessionKey,
-          sessionId: newSessionRecord.sessionId,
-          text: "",
-          isNewSession: true,
-        };
-      };
-
-      const runTurn = async (turnInput: string, turnCreatedAt: string): Promise<CoreOutcome> => {
-        const session = await withFailureMapping(
-          "core.session.resolve",
-          requestId,
-          sessionKey,
-          "SESSION_FAILURE",
-          emitEvent,
-          () =>
-            sessionAdapter.resolveSession({
-              sessionKey,
-              provider,
-              profileId,
-              forceNew: !!newSession,
-              ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
-            }),
-        );
-
-        const { memorySnippet, priorMessages, tools: autoTools } = await buildTurnContext(session);
-
-        const runtimeResult = await withFailureMapping(
-          "core.runtime.run",
-          requestId,
-          session.sessionKey,
-          "RUNTIME_FAILURE",
-          emitEvent,
-          () =>
-            runtimeAdapter.run({
-              requestId,
-              createdAt: turnCreatedAt,
-              input: turnInput,
-              sessionKey: session.sessionKey,
-              sessionId: session.sessionId,
-              priorMessages,
-              memorySnippet,
-              provider,
-              profileId,
-              withTools,
-              toolAllow,
-              tools: autoTools,
-              ...(session.memoryEnabled ? { memoryEnabled: session.memoryEnabled } : {}),
-              ...(typeof options.cwd === "string" ? { cwd: options.cwd } : {}),
-            }),
-        );
-
-        const toolCalls = runtimeResult.toolCalls ?? [];
-        const toolResults = runtimeResult.toolResults ?? [];
-        const toolError = toolsAdapter.firstToolErrorFromLogs(toolResults);
-        await persistTurn(session, turnInput, runtimeResult, toolCalls, toolResults, toolError);
-
-        return {
-          requestId,
-          text: runtimeResult.result,
-          sessionKey: session.sessionKey,
-          sessionId: session.sessionId,
-        };
+      const ctx: RunCtx = {
+        requestId,
+        createdAt,
+        provider,
+        profileId,
+        sessionKey,
+        withTools,
+        toolAllow,
+        memoryEnabled,
+        cwd: typeof cwd === "string" ? cwd : undefined,
+        emitEvent,
+        sessionAdapter,
+        toolsAdapter,
+        runtimeAdapter,
       };
 
       try {
-        await emitEvent({
+        await ctx.emitEvent({
           level: "trace",
           requestId,
           at: createdAt,
           name: "agent.request.received",
           message: "agent request started",
-          sessionKey,
+          sessionKey: ctx.sessionKey,
           payload: {
-            provider,
-            profileId,
-            withTools,
-            hasToolFilter: toolAllow.length > 0,
+            provider: ctx.provider,
+            profileId: ctx.profileId,
+            withTools: ctx.withTools,
+            hasToolFilter: ctx.toolAllow.length > 0,
           },
         });
 
         if (newSession === true) {
-          return await startNewSession();
+          return await startNewSession(ctx);
         }
 
-        return await runTurn(input, createdAt);
+        return await runTurn(ctx, rawInput, createdAt);
       } catch (error) {
         const normalized = toValidationError(error, "INTERNAL_ERROR");
-        await emitEvent({
+        await ctx.emitEvent({
           level: "log",
           requestId,
           at: nowIso(),
@@ -486,10 +522,10 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           name: "agent.request.failed",
           stage: "agent.request",
           message: normalized.message,
-          sessionKey,
+          sessionKey: ctx.sessionKey,
           payload: {
-            provider,
-            profileId,
+            provider: ctx.provider,
+            profileId: ctx.profileId,
             code: normalized.code,
           },
         });
