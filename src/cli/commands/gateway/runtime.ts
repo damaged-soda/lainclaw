@@ -313,72 +313,7 @@ export async function runFeishuGatewayWithHeartbeat(
   const effectiveChannel: GatewayChannel = serviceContext.channel === "gateway" ? "feishu" : serviceContext.channel;
   if (serviceContext.serviceChild) {
     const config = await resolveFeishuGatewayRuntimeConfig(overrides, effectiveChannel);
-
-    const heartbeatHandle = config.heartbeatEnabled
-      ? startHeartbeatLoop(config.heartbeatIntervalMs, {
-          provider: config.provider,
-          ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
-          withTools: config.withTools,
-          ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
-          memory: config.memory,
-          sessionKey: config.heartbeatSessionKey,
-          onSummary: (summary) => {
-            console.log(formatHeartbeatSummary(summary));
-          },
-          onResult: (result) => {
-            if (result.status === "triggered") {
-              console.log(
-                `[heartbeat] rule=${result.ruleId} triggered message=${result.message || "(no message)"}`,
-              );
-              return;
-            }
-            if (result.status === "skipped") {
-              console.log(
-                `[heartbeat] rule=${result.ruleId} skipped reason=${result.reason || result.message || "disabled/condition not met"}`,
-              );
-              return;
-            }
-            console.error(
-              `[heartbeat] rule=${result.ruleId} errored reason=${formatHeartbeatErrorHint(
-                result.reason || result.decisionRaw || "unknown error",
-              )}`,
-            );
-          },
-          send: async ({ rule, triggerMessage }) => {
-            if (!config.heartbeatTargetOpenId) {
-              throw new Error("heartbeat is enabled but heartbeatTargetOpenId is not configured");
-            }
-            await sendFeishuTextMessage(config, {
-              openId: config.heartbeatTargetOpenId,
-              text: buildHeartbeatMessage(rule.ruleText, triggerMessage),
-            });
-          },
-        })
-      : undefined;
-
-    if (heartbeatHandle) {
-      heartbeatHandle
-        .runOnce()
-        .then((summary) => {
-          console.log(
-            `[heartbeat] startup runAt=${summary.ranAt} triggered=${summary.triggered} skipped=${summary.skipped} errors=${summary.errors}`,
-          );
-          if (summary.errors > 0) {
-            for (const result of summary.results) {
-              if (result.status === "errored") {
-                console.error(
-                  `[heartbeat] startup rule=${result.ruleId} error=${formatHeartbeatErrorHint(
-                    result.reason || result.decisionRaw || "unknown error",
-                  )}`,
-                );
-              }
-            }
-          }
-        })
-        .catch((error) => {
-          console.error(`[heartbeat] startup run failed: ${String(error instanceof Error ? error.message : error)}`);
-        });
-    }
+    const heartbeatHandle = startHeartbeatIfEnabled(config);
 
     try {
       await runFeishuGatewayServer(
@@ -432,15 +367,32 @@ export async function runFeishuGatewayWithHeartbeat(
   }
 
   const config = await resolveFeishuGatewayRuntimeConfig(overrides, effectiveChannel);
+  const heartbeatHandle = startHeartbeatIfEnabled(config);
 
-    const heartbeatHandle = config.heartbeatEnabled
-      ? startHeartbeatLoop(config.heartbeatIntervalMs, {
-          provider: config.provider,
-          ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
-          withTools: config.withTools,
-          ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
-          memory: config.memory,
-          sessionKey: config.heartbeatSessionKey,
+  try {
+    await runFeishuGatewayServer(
+      overrides,
+      {
+        onFailureHint,
+      },
+      effectiveChannel,
+    );
+  } finally {
+    heartbeatHandle?.stop();
+  }
+}
+
+function startHeartbeatIfEnabled(
+  config: FeishuGatewayConfig,
+): ReturnType<typeof startHeartbeatLoop> | undefined {
+  const heartbeatHandle = config.heartbeatEnabled
+    ? startHeartbeatLoop(config.heartbeatIntervalMs, {
+        provider: config.provider,
+        ...(typeof config.profileId === "string" && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),
+        withTools: config.withTools,
+        ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
+        memory: config.memory,
+        sessionKey: config.heartbeatSessionKey,
         onSummary: (summary) => {
           console.log(formatHeartbeatSummary(summary));
         },
@@ -499,17 +451,7 @@ export async function runFeishuGatewayWithHeartbeat(
       });
   }
 
-  try {
-    await runFeishuGatewayServer(
-      overrides,
-      {
-        onFailureHint,
-      },
-      effectiveChannel,
-    );
-  } finally {
-    heartbeatHandle?.stop();
-  }
+  return heartbeatHandle;
 }
 
 export async function runGatewayServiceForChannels(
