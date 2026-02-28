@@ -13,6 +13,7 @@ import {
 } from "./adapters/tools.js";
 import {
   CoreCoordinator,
+  type CoreOutcome,
   type CoreErrorCode,
   type CoreEventSink,
   type CoreRunAgentOptions,
@@ -205,13 +206,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         newSession,
       } = options;
 
-      const startNewSession = async (): Promise<{
-        requestId: string;
-        sessionKey: string;
-        sessionId: string;
-        text: string;
-        isNewSession: true;
-      }> => {
+      const startNewSession = async (): Promise<CoreOutcome> => {
         const newSessionRecord = await withFailureMapping(
           "core.session.resolve",
           requestId,
@@ -249,12 +244,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         };
       };
 
-      const runTurn = async (): Promise<{
-        requestId: string;
-        sessionKey: string;
-        sessionId: string;
-        text: string;
-      }> => {
+      const runTurn = async (): Promise<CoreOutcome> => {
         const session = await withFailureMapping(
           "core.session.resolve",
           requestId,
