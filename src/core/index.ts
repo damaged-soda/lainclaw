@@ -206,61 +206,13 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         newSession,
       } = options;
 
-      const startNewSession = async (): Promise<CoreOutcome> => {
-        const newSessionRecord = await withFailureMapping(
-          "core.session.resolve",
-          requestId,
-          sessionKey,
-          "SESSION_FAILURE",
-          emitEvent,
-          () =>
-            sessionAdapter.resolveSession({
-              sessionKey,
-              provider,
-              profileId,
-              forceNew: true,
-              ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
-            }),
-        );
-
-        await emitEvent({
-          level: "event",
-          requestId,
-          at: nowIso(),
-          name: "agent.session.created",
-          route: NEW_SESSION_ROUTE,
-          stage: NEW_SESSION_STAGE,
-          message: "new session created",
-          sessionKey: newSessionRecord.sessionKey,
-          payload: { sessionId: newSessionRecord.sessionId },
-        });
-
-        return {
-          requestId,
-          sessionKey: newSessionRecord.sessionKey,
-          sessionId: newSessionRecord.sessionId,
-          text: "",
-          isNewSession: true,
-        };
-      };
-
-      const runTurn = async (): Promise<CoreOutcome> => {
-        const session = await withFailureMapping(
-          "core.session.resolve",
-          requestId,
-          sessionKey,
-          "SESSION_FAILURE",
-          emitEvent,
-          () =>
-            sessionAdapter.resolveSession({
-              sessionKey,
-              provider,
-              profileId,
-              forceNew: !!newSession,
-              ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
-            }),
-        );
-
+      const buildTurnContext = async (
+        session: CoreSessionRecord,
+      ): Promise<{
+        memorySnippet: string;
+        priorMessages: CoreSessionHistoryMessage[];
+        tools: Awaited<ReturnType<CoreToolsAdapter["listTools"]>>;
+      }> => {
         const [memorySnippet, priorMessages] = await Promise.all([
           withFailureMapping(
             "core.session.loadMemory",
@@ -279,8 +231,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
             () => sessionAdapter.loadHistory(session.sessionId),
           ),
         ]);
-
-        const autoTools = await withFailureMapping(
+        const tools = await withFailureMapping(
           "core.tools.list",
           requestId,
           session.sessionKey,
@@ -289,35 +240,16 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           () => toolsAdapter.listTools({ allowList: toolAllow }),
         );
 
-        const runtimeResult = await withFailureMapping(
-          "core.runtime.run",
-          requestId,
-          session.sessionKey,
-          "RUNTIME_FAILURE",
-          emitEvent,
-          () =>
-            runtimeAdapter.run({
-              requestId,
-              createdAt,
-              input,
-              sessionKey: session.sessionKey,
-              sessionId: session.sessionId,
-              priorMessages,
-              memorySnippet,
-              provider,
-              profileId,
-              withTools,
-              toolAllow,
-              tools: autoTools,
-              ...(session.memoryEnabled ? { memoryEnabled: session.memoryEnabled } : {}),
-              ...(typeof options.cwd === "string" ? { cwd: options.cwd } : {}),
-            }),
-        );
+        return { memorySnippet, priorMessages, tools };
+      };
 
-        const toolCalls = runtimeResult.toolCalls ?? [];
-        const toolResults = runtimeResult.toolResults ?? [];
-        const toolError = toolsAdapter.firstToolErrorFromLogs(toolResults);
-
+      const persistTurn = async (
+        session: CoreSessionRecord,
+        runtimeResult: Awaited<ReturnType<typeof runtimeAdapter.run>>,
+        toolCalls: CoreToolCall[],
+        toolResults: CoreToolExecutionLog[],
+        toolError: CoreToolError | undefined,
+      ): Promise<boolean> => {
         if (toolResults.length > 0) {
           await withFailureMapping(
             "core.session.appendToolSummary",
@@ -424,6 +356,96 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           },
         });
 
+        return memoryUpdated;
+      };
+
+      const startNewSession = async (): Promise<CoreOutcome> => {
+        const newSessionRecord = await withFailureMapping(
+          "core.session.resolve",
+          requestId,
+          sessionKey,
+          "SESSION_FAILURE",
+          emitEvent,
+          () =>
+            sessionAdapter.resolveSession({
+              sessionKey,
+              provider,
+              profileId,
+              forceNew: true,
+              ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
+            }),
+        );
+
+        await emitEvent({
+          level: "event",
+          requestId,
+          at: nowIso(),
+          name: "agent.session.created",
+          route: NEW_SESSION_ROUTE,
+          stage: NEW_SESSION_STAGE,
+          message: "new session created",
+          sessionKey: newSessionRecord.sessionKey,
+          payload: { sessionId: newSessionRecord.sessionId },
+        });
+
+        return {
+          requestId,
+          sessionKey: newSessionRecord.sessionKey,
+          sessionId: newSessionRecord.sessionId,
+          text: "",
+          isNewSession: true,
+        };
+      };
+
+      const runTurn = async (turnInput: string, turnCreatedAt: string): Promise<CoreOutcome> => {
+        const session = await withFailureMapping(
+          "core.session.resolve",
+          requestId,
+          sessionKey,
+          "SESSION_FAILURE",
+          emitEvent,
+          () =>
+            sessionAdapter.resolveSession({
+              sessionKey,
+              provider,
+              profileId,
+              forceNew: !!newSession,
+              ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
+            }),
+        );
+
+        const { memorySnippet, priorMessages, tools: autoTools } = await buildTurnContext(session);
+
+        const runtimeResult = await withFailureMapping(
+          "core.runtime.run",
+          requestId,
+          session.sessionKey,
+          "RUNTIME_FAILURE",
+          emitEvent,
+          () =>
+            runtimeAdapter.run({
+              requestId,
+              createdAt: turnCreatedAt,
+              input: turnInput,
+              sessionKey: session.sessionKey,
+              sessionId: session.sessionId,
+              priorMessages,
+              memorySnippet,
+              provider,
+              profileId,
+              withTools,
+              toolAllow,
+              tools: autoTools,
+              ...(session.memoryEnabled ? { memoryEnabled: session.memoryEnabled } : {}),
+              ...(typeof options.cwd === "string" ? { cwd: options.cwd } : {}),
+            }),
+        );
+
+        const toolCalls = runtimeResult.toolCalls ?? [];
+        const toolResults = runtimeResult.toolResults ?? [];
+        const toolError = toolsAdapter.firstToolErrorFromLogs(toolResults);
+        await persistTurn(session, runtimeResult, toolCalls, toolResults, toolError);
+
         return {
           requestId,
           text: runtimeResult.result,
@@ -452,7 +474,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           return await startNewSession();
         }
 
-        return await runTurn();
+        return await runTurn(input, createdAt);
       } catch (error) {
         const normalized = toValidationError(error, "INTERNAL_ERROR");
         await emitEvent({
