@@ -11,17 +11,17 @@ import {
   createToolsAdapter,
   type CoreToolsAdapter,
 } from "./adapters/tools.js";
-import {
+import type {
   CoreCoordinator,
-  type CoreOutcome,
-  type CoreErrorCode,
-  type CoreEventSink,
-  type CoreRunAgentOptions,
-  type CoreSessionRecord,
-  type CoreSessionHistoryMessage,
-  type CoreToolCall,
-  type CoreToolError,
-  type CoreToolExecutionLog,
+  CoreOutcome,
+  CoreErrorCode,
+  CoreEventSink,
+  CoreRunAgentOptions,
+  CoreSessionRecord,
+  CoreSessionHistoryMessage,
+  CoreToolCall,
+  CoreToolError,
+  CoreToolExecutionLog,
 } from "./contracts.js";
 
 export interface CreateCoreCoordinatorOptions {
@@ -472,11 +472,3 @@ async function runTurn(ctx: RunCtx, turnInput: string, turnCreatedAt: string): P
     sessionId: session.sessionId,
   };
 }
-
-export type {
-  CoreCoordinator,
-  CoreErrorCode,
-  CoreRunAgentOptions,
-  CoreRuntimeInput,
-  CoreRuntimeInput as CoreRuntimePayload,
-} from "./contracts.js";
