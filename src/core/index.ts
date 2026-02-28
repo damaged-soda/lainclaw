@@ -1,4 +1,3 @@
-import { ValidationError } from "../shared/types.js";
 import {
   createRuntimeAdapter,
   type CoreRuntimeAdapter,
@@ -18,6 +17,7 @@ import type {
   CoreRunAgentOptions,
 } from "./contracts.js";
 import type { RunCtx } from "./internal.js";
+import { nowIso, toValidationError } from "./errors.js";
 import { runTurn, startNewSession } from "./steps.js";
 
 export interface CreateCoreCoordinatorOptions {
@@ -47,35 +47,8 @@ function createEventSink(handler: CoreEventSink): CoreEventSink {
   };
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
 function createRequestId(): string {
   return `lc-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
-}
-
-function isCoreErrorCode(value: string | undefined): value is CoreErrorCode {
-  return (
-    value === "VALIDATION_ERROR" ||
-    value === "MISSING_PROVIDER" ||
-    value === "SESSION_FAILURE" ||
-    value === "RUNTIME_FAILURE" ||
-    value === "TOOL_FAILURE" ||
-    value === "INTERNAL_ERROR"
-  );
-}
-
-function toValidationError(error: unknown, fallback: CoreErrorCode): ValidationError {
-  if (error instanceof ValidationError) {
-    const code = typeof error.code === "string" ? error.code : undefined;
-    if (isCoreErrorCode(code)) {
-      return error;
-    }
-    return new ValidationError(error.message, fallback);
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  return new ValidationError(message || "agent request failed", fallback);
 }
 
 // === CoreCoordinator factory (public entrypoint) ===
