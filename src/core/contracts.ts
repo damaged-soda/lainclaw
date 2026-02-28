@@ -205,25 +205,4 @@ export type CoreAgentResult = CoreOutcome;
 
 export interface CoreCoordinator {
   runAgent(rawInput: string, options: CoreRunAgentOptions): Promise<CoreAgentResult>;
-  runRuntime(input: CoreRuntimeInput): Promise<CoreRuntimeResult>;
-  resolveSession(input: CoreSessionLoadInput): Promise<CoreSessionRecord>;
-  listTools(options?: CoreToolQueryOptions): CoreToolSpec[];
-  executeTool(call: CoreToolCall, context: CoreToolContext): Promise<CoreToolExecutionLog>;
-  firstToolErrorFromLogs(logs: CoreToolExecutionLog[] | undefined): CoreToolError | undefined;
-  compactSession(input: CoreSessionSnapshotCompact): Promise<boolean>;
-  appendTurnMessages(sessionId: string, userInput: string, finalResult: CoreSessionTurnResult): Promise<void>;
-  appendToolSummary(
-    sessionId: string,
-    toolCalls: CoreToolCall[],
-    toolResults: CoreToolExecutionLog[],
-    route: string,
-    stage: string,
-    provider: string,
-    profileId: string,
-  ): Promise<void>;
-  markRouteUsage(sessionKey: string, route: string, profileId: string, provider: string): Promise<void>;
-  loadHistory(sessionId: string): Promise<CoreSessionHistoryMessage[]>;
-  loadMemorySnippet(sessionKey: string): Promise<string>;
-  resolveSessionMemoryPath(sessionKey: string): string;
-  emitEvent(event: CoreTraceEvent): Promise<void>;
 }

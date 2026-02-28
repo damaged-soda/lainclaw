@@ -17,15 +17,11 @@ import {
   type CoreErrorCode,
   type CoreEventSink,
   type CoreRunAgentOptions,
-  type CoreSessionLoadInput,
   type CoreSessionRecord,
-  type CoreSessionSnapshotCompact,
-  type CoreSessionTurnResult,
   type CoreSessionHistoryMessage,
   type CoreToolCall,
   type CoreToolError,
   type CoreToolExecutionLog,
-  type CoreRuntimeInput,
 } from "./contracts.js";
 
 export interface CreateCoreCoordinatorOptions {
@@ -390,77 +386,6 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
   const emitEvent = createEventSink(options.emitEvent ?? createDefaultEmitEvent());
 
   const coordinator: CoreCoordinator = {
-    emitEvent,
-    runRuntime: (input: CoreRuntimeInput) => {
-      return withFailureMapping(
-        "core.runtime.runRuntime",
-        input.requestId,
-        input.sessionKey,
-        "RUNTIME_FAILURE",
-        emitEvent,
-        () => runtimeAdapter.run(input),
-      );
-    },
-    resolveSession: (input: CoreSessionLoadInput): Promise<CoreSessionRecord> => {
-      return sessionAdapter.resolveSession(input);
-    },
-    listTools: (options) => {
-      return toolsAdapter.listTools(options);
-    },
-    executeTool: (call: CoreToolCall, context) => {
-      return toolsAdapter.executeTool(call, context);
-    },
-    firstToolErrorFromLogs: (
-      logs: CoreToolExecutionLog[] | undefined,
-    ): CoreToolError | undefined => {
-      return toolsAdapter.firstToolErrorFromLogs(logs);
-    },
-    compactSession: (input: CoreSessionSnapshotCompact): Promise<boolean> => {
-      return sessionAdapter.compactIfNeeded(input);
-    },
-    appendTurnMessages: (
-      sessionId: string,
-      userInput: string,
-      finalResult: CoreSessionTurnResult,
-    ): Promise<void> => {
-      return sessionAdapter.appendTurnMessages(sessionId, userInput, finalResult);
-    },
-    appendToolSummary: async (
-      sessionId: string,
-      toolCalls,
-      toolResults,
-      route,
-      stage,
-      provider,
-      profileId,
-    ): Promise<void> => {
-      await sessionAdapter.appendToolSummary(
-        sessionId,
-        toolCalls,
-        toolResults,
-        route,
-        stage,
-        provider,
-        profileId,
-      );
-    },
-    markRouteUsage: (
-      sessionKey: string,
-      route: string,
-      profileId: string,
-      provider: string,
-    ): Promise<void> => {
-      return sessionAdapter.markRouteUsage(sessionKey, route, profileId, provider);
-    },
-    loadHistory: (sessionId: string): Promise<CoreSessionHistoryMessage[]> => {
-      return sessionAdapter.loadHistory(sessionId);
-    },
-    loadMemorySnippet: (sessionKey: string): Promise<string> => {
-      return sessionAdapter.loadMemorySnippet(sessionKey);
-    },
-    resolveSessionMemoryPath: (sessionKey: string): string => {
-      return sessionAdapter.resolveSessionMemoryPath(sessionKey);
-    },
     runAgent: async (rawInput: string, options: CoreRunAgentOptions) => {
       const requestId = createRequestId();
       const createdAt = nowIso();
