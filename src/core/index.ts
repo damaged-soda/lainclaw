@@ -220,8 +220,8 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           },
         });
 
-      if (requestIsNewSession) {
-        const newSession = await withFailureMapping(
+        if (requestIsNewSession) {
+          const newSession = await withFailureMapping(
             "core.session.resolve",
             requestId,
             sessionKey,
