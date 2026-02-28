@@ -195,69 +195,66 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
       const requestId = createRequestId();
       const createdAt = nowIso();
       const input = rawInput;
-      const requestIsNewSession = options.newSession === true;
+      const {
+        provider,
+        profileId,
+        memory: memoryEnabled,
+        sessionKey,
+        withTools,
+        toolAllow,
+        newSession,
+      } = options;
 
-      const provider = options.provider;
-      const profileId = options.profileId;
-      const memoryEnabled = options.memory;
-      const sessionKey = options.sessionKey;
-      const withTools = options.withTools;
-      const toolAllow = options.toolAllow;
-
-      try {
-        await emitEvent({
-          level: "trace",
+      const startNewSession = async (): Promise<{
+        requestId: string;
+        sessionKey: string;
+        sessionId: string;
+        text: string;
+        isNewSession: true;
+      }> => {
+        const newSessionRecord = await withFailureMapping(
+          "core.session.resolve",
           requestId,
-          at: createdAt,
-          name: "agent.request.received",
-          message: "agent request started",
           sessionKey,
-          payload: {
-            provider,
-            profileId,
-            withTools,
-            hasToolFilter: toolAllow.length > 0,
-          },
+          "SESSION_FAILURE",
+          emitEvent,
+          () =>
+            sessionAdapter.resolveSession({
+              sessionKey,
+              provider,
+              profileId,
+              forceNew: true,
+              ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
+            }),
+        );
+
+        await emitEvent({
+          level: "event",
+          requestId,
+          at: nowIso(),
+          name: "agent.session.created",
+          route: NEW_SESSION_ROUTE,
+          stage: NEW_SESSION_STAGE,
+          message: "new session created",
+          sessionKey: newSessionRecord.sessionKey,
+          payload: { sessionId: newSessionRecord.sessionId },
         });
 
-        if (requestIsNewSession) {
-          const newSession = await withFailureMapping(
-            "core.session.resolve",
-            requestId,
-            sessionKey,
-            "SESSION_FAILURE",
-            emitEvent,
-            () =>
-              sessionAdapter.resolveSession({
-                sessionKey,
-                provider,
-                profileId,
-                forceNew: true,
-                ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
-              }),
-          );
+        return {
+          requestId,
+          sessionKey: newSessionRecord.sessionKey,
+          sessionId: newSessionRecord.sessionId,
+          text: "",
+          isNewSession: true,
+        };
+      };
 
-          await emitEvent({
-            level: "event",
-            requestId,
-            at: nowIso(),
-            name: "agent.session.created",
-            route: NEW_SESSION_ROUTE,
-            stage: NEW_SESSION_STAGE,
-            message: "new session created",
-            sessionKey: newSession.sessionKey,
-            payload: { sessionId: newSession.sessionId },
-          });
-
-          return {
-            requestId,
-            sessionKey: newSession.sessionKey,
-            sessionId: newSession.sessionId,
-            text: "",
-            isNewSession: true,
-          };
-        }
-
+      const runTurn = async (): Promise<{
+        requestId: string;
+        sessionKey: string;
+        sessionId: string;
+        text: string;
+      }> => {
         const session = await withFailureMapping(
           "core.session.resolve",
           requestId,
@@ -269,7 +266,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
               sessionKey,
               provider,
               profileId,
-              forceNew: !!options.newSession,
+              forceNew: !!newSession,
               ...(typeof memoryEnabled === "boolean" ? { memory: memoryEnabled } : {}),
             }),
         );
@@ -443,6 +440,29 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           sessionKey: session.sessionKey,
           sessionId: session.sessionId,
         };
+      };
+
+      try {
+        await emitEvent({
+          level: "trace",
+          requestId,
+          at: createdAt,
+          name: "agent.request.received",
+          message: "agent request started",
+          sessionKey,
+          payload: {
+            provider,
+            profileId,
+            withTools,
+            hasToolFilter: toolAllow.length > 0,
+          },
+        });
+
+        if (newSession === true) {
+          return await startNewSession();
+        }
+
+        return await runTurn();
       } catch (error) {
         const normalized = toValidationError(error, "INTERNAL_ERROR");
         await emitEvent({
