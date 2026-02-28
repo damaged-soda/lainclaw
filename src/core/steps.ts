@@ -202,7 +202,7 @@ export async function startNewSession(ctx: RunCtx): Promise<CoreOutcome> {
   };
 }
 
-export async function runTurn(ctx: RunCtx, turnInput: string, turnCreatedAt: string): Promise<CoreOutcome> {
+async function resolveTurnSession(ctx: RunCtx): Promise<CoreSessionRecord> {
   const session = await withFailureMapping(
     "core.session.resolve",
     ctx.requestId,
@@ -214,14 +214,21 @@ export async function runTurn(ctx: RunCtx, turnInput: string, turnCreatedAt: str
         sessionKey: ctx.sessionKey,
         provider: ctx.provider,
         profileId: ctx.profileId,
-        forceNew: false, // newSession is handled in runAgent; runTurn itself never creates a new session.
+        forceNew: false, // newSession 已在 index.ts 的分支里处理，runTurn 不再创建新会话
         ...(typeof ctx.memoryEnabled === "boolean" ? { memory: ctx.memoryEnabled } : {}),
       }),
   );
+  return session;
+}
 
-  const { memorySnippet, priorMessages, tools } = await buildTurnContext(ctx, session);
-
-  const runtimeResult = await withFailureMapping(
+async function runRuntimeForTurn(
+  ctx: RunCtx,
+  turnInput: string,
+  turnCreatedAt: string,
+  session: CoreSessionRecord,
+  turnContext: TurnContext,
+): Promise<CoreRuntimeResult> {
+  return withFailureMapping(
     "core.runtime.run",
     ctx.requestId,
     session.sessionKey,
@@ -234,22 +241,36 @@ export async function runTurn(ctx: RunCtx, turnInput: string, turnCreatedAt: str
         input: turnInput,
         sessionKey: session.sessionKey,
         sessionId: session.sessionId,
-        priorMessages,
-        memorySnippet,
+        priorMessages: turnContext.priorMessages,
+        memorySnippet: turnContext.memorySnippet,
         provider: ctx.provider,
         profileId: ctx.profileId,
         withTools: ctx.withTools,
         toolAllow: ctx.toolAllow,
-        tools,
+        tools: turnContext.tools,
         ...(session.memoryEnabled ? { memoryEnabled: session.memoryEnabled } : {}),
         ...(typeof ctx.cwd === "string" ? { cwd: ctx.cwd } : {}),
       }),
   );
+}
 
+async function finalizeTurn(
+  ctx: RunCtx,
+  turnInput: string,
+  session: CoreSessionRecord,
+  runtimeResult: CoreRuntimeResult,
+): Promise<void> {
   const toolCalls = runtimeResult.toolCalls ?? [];
   const toolResults = runtimeResult.toolResults ?? [];
   const toolError = ctx.toolsAdapter.firstToolErrorFromLogs(toolResults);
   await persistTurn(ctx, session, turnInput, runtimeResult, toolCalls, toolResults, toolError);
+}
+
+export async function runTurn(ctx: RunCtx, turnInput: string, turnCreatedAt: string): Promise<CoreOutcome> {
+  const session = await resolveTurnSession(ctx);
+  const turnContext = await buildTurnContext(ctx, session);
+  const runtimeResult = await runRuntimeForTurn(ctx, turnInput, turnCreatedAt, session, turnContext);
+  await finalizeTurn(ctx, turnInput, session, runtimeResult);
 
   return {
     requestId: ctx.requestId,
