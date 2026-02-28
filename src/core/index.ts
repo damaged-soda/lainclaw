@@ -18,11 +18,11 @@ import type {
   CoreEventSink,
   CoreRunAgentOptions,
   CoreSessionRecord,
-  CoreSessionHistoryMessage,
   CoreToolCall,
   CoreToolError,
   CoreToolExecutionLog,
 } from "./contracts.js";
+import type { RunCtx, TurnContext } from "./internal.js";
 
 export interface CreateCoreCoordinatorOptions {
   sessionAdapter: CoreSessionAdapter;
@@ -203,28 +203,6 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
 export const createCoordinator = createCoreCoordinator;
 
 // === Internal execution helpers (RunCtx + steps) ===
-
-type RunCtx = {
-  requestId: string;
-  createdAt: string;
-  provider: string;
-  profileId: string;
-  sessionKey: string;
-  withTools: boolean;
-  toolAllow: string[];
-  memoryEnabled?: boolean;
-  cwd?: string;
-  emitEvent: CoreEventSink;
-  sessionAdapter: CoreSessionAdapter;
-  toolsAdapter: CoreToolsAdapter;
-  runtimeAdapter: CoreRuntimeAdapter;
-};
-
-type TurnContext = {
-  memorySnippet: string;
-  priorMessages: CoreSessionHistoryMessage[];
-  tools: Awaited<ReturnType<CoreToolsAdapter["listTools"]>>;
-};
 
 async function buildTurnContext(
   ctx: RunCtx,
