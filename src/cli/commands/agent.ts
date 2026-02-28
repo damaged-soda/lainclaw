@@ -33,7 +33,12 @@ export async function runAgentCommand(args: string[]): Promise<number> {
       },
     });
 
-    console.log(response);
+    if (response.text.length === 0 && response.isNewSession === true) {
+      console.log(`New session started. sessionId=${response.sessionId}`);
+      return 0;
+    }
+
+    console.log(response.text);
     return 0;
   }, {
     renderError: (error) => {

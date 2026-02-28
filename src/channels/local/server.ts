@@ -4,7 +4,7 @@ import os from "node:os";
 import { runAgent } from "../../gateway/index.js";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
 
-type RunAgentText = Awaited<ReturnType<typeof runAgent>>;
+type RunAgentText = Awaited<ReturnType<typeof runAgent>>["text"];
 
 export interface LocalGatewayOverrides {
   provider?: string;
@@ -277,7 +277,7 @@ export async function runLocalGatewayServer(
             runtime: runAgentDefaults,
           });
 
-          const record = buildRunboxRecord(result, input, requestSource, sessionKey);
+          const record = buildRunboxRecord(result.text, input, requestSource, sessionKey);
           await appendLine(outboxPath, writeRunboxRecordSafe(record));
           console.log(
             `[local] ${requestSource} ok`,

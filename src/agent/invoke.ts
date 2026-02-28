@@ -2,7 +2,13 @@ import { coreCoordinator } from "../bootstrap/coreCoordinator.js";
 
 type NormalizedCoreResult = Awaited<ReturnType<typeof coreCoordinator.runAgent>>;
 
-type RunAgentOutput = string;
+interface RunAgentOutput {
+  requestId: string;
+  sessionKey: string;
+  sessionId: string;
+  text: string;
+  isNewSession?: boolean;
+}
 
 interface RunAgentRuntimeContext {
   provider?: unknown;
@@ -33,10 +39,16 @@ interface NormalizedRunAgentInput {
 }
 
 function toRunAgentResult(result: NormalizedCoreResult): RunAgentOutput {
-  return result.result;
+  return {
+    requestId: result.requestId,
+    sessionKey: result.sessionKey,
+    sessionId: result.sessionId,
+    text: result.text,
+    isNewSession: result.isNewSession,
+  };
 }
 
-async function runAgentCore(input: string, request: RunAgentRequest): Promise<string> {
+async function runAgentCore(input: string, request: RunAgentRequest): Promise<RunAgentOutput> {
   const invocation = resolveRunAgentInput(request);
   const result = await coreCoordinator.runAgent(input, {
     provider: invocation.provider,
@@ -51,7 +63,7 @@ async function runAgentCore(input: string, request: RunAgentRequest): Promise<st
   return toRunAgentResult(result);
 }
 
-export async function runAgent(request: RunAgentRequest): Promise<string> {
+export async function runAgent(request: RunAgentRequest): Promise<RunAgentOutput> {
   return runAgentCore(
     request.input,
     request,

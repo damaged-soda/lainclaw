@@ -390,8 +390,9 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         sessionKey: invocation.sessionKey,
         runtime: invocation.runtime,
       });
+      const reply = agentResult.text;
 
-      const parsed = parseDecision(agentResult);
+      const parsed = parseDecision(reply);
       void appendHeartbeatLog({
         eventType: "rule-result",
         runId,
@@ -402,7 +403,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         profileId: invocation.runtime.profileId,
         withTools: invocation.runtime.withTools,
         toolAllow: invocation.runtime.toolAllow,
-        rawDecision: resolveLogPayloadLimit(agentResult ?? ""),
+        rawDecision: resolveLogPayloadLimit(reply ?? ""),
         parsedDecision: parsed.decision,
         parseError: parsed.parseError,
         sessionKey: invocation.sessionKey,
@@ -435,7 +436,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           profileId: invocation.runtime.profileId,
           withTools: invocation.runtime.withTools,
           toolAllow: invocation.runtime.toolAllow,
-          rawDecision: resolveLogPayloadLimit(agentResult ?? ""),
+        rawDecision: resolveLogPayloadLimit(reply ?? ""),
           parsedDecision: parsed.decision,
           status: triggeredResult.status,
           reason: triggeredResult.message || triggeredResult.decisionRaw,
@@ -481,7 +482,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
               parsedDecision: "error",
               status: erroredResult.status,
               reason: failure,
-              rawDecision: resolveLogPayloadLimit(agentResult ?? ""),
+            rawDecision: resolveLogPayloadLimit(reply ?? ""),
               message: parsed.message,
               sessionKey: invocation.sessionKey,
             });
@@ -517,7 +518,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           profileId: invocation.runtime.profileId,
           withTools: invocation.runtime.withTools,
           toolAllow: invocation.runtime.toolAllow,
-          rawDecision: resolveLogPayloadLimit(agentResult ?? ""),
+            rawDecision: resolveLogPayloadLimit(reply ?? ""),
           parsedDecision: parsed.decision,
           parseError: parsed.parseError,
           status: skippedResult.status,

@@ -348,20 +348,18 @@ async function handleWsPayload(
 
     const sessionKey = `feishu:dm:${inbound.openId}`;
     const runResult = await Promise.race([
-      runAgent(
-        {
-          input: inbound.input,
-          channelId: "feishu",
-          sessionKey,
-          runtime: runAgentDefaults,
-        },
-      ),
+      runAgent({
+        input: inbound.input,
+        channelId: "feishu",
+        sessionKey,
+        runtime: runAgentDefaults,
+      }),
       new Promise<never>((_, reject) => {
         setTimeout(() => {
           reject(new Error(`agent timeout after ${REPLY_TIMEOUT_MS}ms`));
         }, REPLY_TIMEOUT_MS);
       }),
-    ]);
+    ]).then((result) => result.text);
 
     await sendFeishuTextMessage(config, {
       openId: inbound.openId,

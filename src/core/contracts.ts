@@ -193,25 +193,15 @@ export interface CoreRuntimePort {
   run(input: CoreRuntimeInput): Promise<CoreRuntimeResult>;
 }
 
-export interface CoreAgentResult {
-  success: boolean;
+export type CoreOutcome = {
   requestId: string;
-  createdAt: string;
-  route: string;
-  stage: string;
-  result: string;
-  toolCalls?: CoreToolCall[];
-  toolResults?: CoreToolExecutionLog[];
-  toolError?: CoreToolError;
-  sessionContextUpdated?: boolean;
   sessionKey: string;
   sessionId: string;
-  provider: string;
-  profileId: string;
-  memoryEnabled: boolean;
-  memoryUpdated: boolean;
-  memoryFile?: string;
-}
+  text: string;
+  isNewSession?: boolean;
+};
+
+export type CoreAgentResult = CoreOutcome;
 
 export interface CoreCoordinator {
   runAgent(rawInput: string, options: CoreRunAgentOptions): Promise<CoreAgentResult>;

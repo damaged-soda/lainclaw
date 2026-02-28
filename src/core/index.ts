@@ -220,8 +220,8 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           },
         });
 
-        if (requestIsNewSession) {
-          const newSession = await withFailureMapping(
+      if (requestIsNewSession) {
+        const newSession = await withFailureMapping(
             "core.session.resolve",
             requestId,
             sessionKey,
@@ -237,10 +237,6 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
               }),
           );
 
-          const memoryFile = newSession.memoryEnabled
-            ? sessionAdapter.resolveSessionMemoryPath(newSession.sessionKey)
-            : undefined;
-
           await emitEvent({
             level: "event",
             requestId,
@@ -254,20 +250,11 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           });
 
           return {
-            success: true,
             requestId,
-            createdAt,
-            route: NEW_SESSION_ROUTE,
-            stage: NEW_SESSION_STAGE,
-            result: `New session started. sessionId=${newSession.sessionId}`,
-            provider,
-            profileId,
             sessionKey: newSession.sessionKey,
             sessionId: newSession.sessionId,
-            memoryEnabled: !!newSession.memoryEnabled,
-            memoryUpdated: false,
-            ...(memoryFile ? { memoryFile } : {}),
-            sessionContextUpdated: false,
+            text: "",
+            isNewSession: true,
           };
         }
 
@@ -343,7 +330,6 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         const toolCalls = runtimeResult.toolCalls ?? [];
         const toolResults = runtimeResult.toolResults ?? [];
         const toolError = toolsAdapter.firstToolErrorFromLogs(toolResults);
-        const sessionContextUpdated = toolResults.length > 0;
 
         if (toolResults.length > 0) {
           await withFailureMapping(
@@ -452,25 +438,10 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         });
 
         return {
-          success: true,
           requestId,
-          createdAt,
-          route: runtimeResult.route,
-          stage: runtimeResult.stage,
-          result: runtimeResult.result,
-          provider: runtimeResult.provider,
-          profileId: runtimeResult.profileId,
+          text: runtimeResult.result,
           sessionKey: session.sessionKey,
           sessionId: session.sessionId,
-          memoryEnabled: session.memoryEnabled,
-          memoryUpdated,
-          ...(session.memoryEnabled
-            ? { memoryFile: sessionAdapter.resolveSessionMemoryPath(session.sessionKey) }
-            : {}),
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          toolResults: toolResults.length > 0 ? toolResults : undefined,
-          ...(toolError ? { toolError } : {}),
-          sessionContextUpdated,
         };
       } catch (error) {
         const normalized = toValidationError(error, "INTERNAL_ERROR");
