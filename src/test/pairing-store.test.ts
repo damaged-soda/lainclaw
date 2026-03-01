@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { runCli } from "../cli/cli.js";
-import { parseModelCommandArgs } from "../cli/shared/args.js";
 import { resolveFeishuGatewayConfig } from "../channels/feishu/config.js";
 import {
   approveChannelPairingCode,
@@ -205,10 +204,7 @@ test("expired pairing requests are pruned and revoked entries can be removed", a
 });
 
 test("model command parser rejects removed tool max steps flag", () => {
-  assert.throws(
-    () => parseModelCommandArgs(["--tool-max-steps", "5"], { allowMemory: false, strictUnknown: true }),
-    /Unknown option: --tool-max-steps/,
-  );
+  return runCli(["agent", "--tool-max-steps", "5", "hello"]).then((code) => assert.equal(code, 1));
 });
 
 test("agent args parser rejects removed tool max steps flag", () => {

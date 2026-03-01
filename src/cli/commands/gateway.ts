@@ -1,15 +1,24 @@
 import { Command, Option } from 'commander';
-import { parsePositiveIntValue } from '../../shared/args.js';
-import { setExitCode } from '../../shared/exitCode.js';
-import { normalizeGatewayChannels, resolveGatewayChannel } from '../../../gateway/runtime/channelRegistry.js';
+import {
+  parsePositiveInt,
+  addModelOptions,
+  buildBooleanValueOption,
+  buildNoBooleanOption,
+} from '../shared/options.js';
+import { setExitCode } from '../shared/exitCode.js';
+import { normalizeGatewayChannels, resolveGatewayChannel } from '../../gateway/runtime/channelRegistry.js';
 import type {
   GatewayChannel,
   GatewayConfigParsedCommand,
   GatewayParsedCommand,
   GatewayStartOverrides,
-} from '../../../gateway/runtime/contracts.js';
-import { runGatewayConfigCommand, runGatewayStart, runGatewayStatusOrStop } from '../../../gateway/runtime/start.js';
-import type { FeishuGatewayConfig } from '../../../channels/feishu/config.js';
+} from '../../gateway/runtime/contracts.js';
+import {
+  runGatewayConfigCommand,
+  runGatewayStart,
+  runGatewayStatusOrStop,
+} from '../../gateway/runtime/start.js';
+import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
 
 type GatewayCommonOptions = {
   channel?: string[];
@@ -81,24 +90,6 @@ const FEISHU_ONLY_OPTIONS: Array<[keyof GatewayCommonOptions & keyof GatewayConf
   ['requestTimeoutMs', 'request-timeout-ms'],
 ];
 
-function parseBooleanFlag(raw: string): boolean {
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === '1' || normalized === 'on' || normalized === 'yes' || normalized === 'true') {
-    return true;
-  }
-  if (normalized === '0' || normalized === 'off' || normalized === 'no' || normalized === 'false') {
-    return false;
-  }
-  throw new Error(`Invalid value for boolean option: ${raw}`);
-}
-
-function parseCsv(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
-
 function normalizeText(raw: string | undefined): string | undefined {
   const value = raw?.trim();
   if (!value) {
@@ -118,7 +109,7 @@ function normalizePositiveIntValue(raw: string | undefined, label: string): numb
   if (!raw) {
     return undefined;
   }
-  return parsePositiveIntValue(raw.trim(), 1, `--${label}`);
+  return parsePositiveInt(raw.trim(), `--${label}`);
 }
 
 function normalizePairingPolicy(raw: unknown): FeishuGatewayConfig['pairingPolicy'] | undefined {
@@ -358,29 +349,34 @@ function buildGatewayConfigParsedCommand(
   };
 }
 
+function addModelRuntimeOptions(command: Command, includeMemory: boolean): void {
+  addModelOptions(command, {
+    includeMemory,
+    providerDescription: 'Model provider override.',
+    profileDescription: 'Model profile override.',
+    withToolsDescription: 'Enable/disable tool calls.',
+    noWithToolsDescription: 'Disable tool calls.',
+    toolAllowDescription: 'Limit allowed tool names.',
+    ...(includeMemory
+      ? {
+        memoryDescription: includeMemory ? 'Enable/disable memory persistence.' : undefined,
+        noMemoryDescription: 'Disable memory persistence.',
+      }
+      : {}),
+  });
+  command
+    .addOption(buildBooleanValueOption('heartbeat-enabled', 'Enable/disable heartbeat behavior.'))
+    .addOption(buildNoBooleanOption('heartbeat-enabled', 'Disable heartbeat behavior.'));
+}
+
 function buildGatewayStartOptions(command: Command): void {
   command
     .addOption(new Option('--channel <channel...>', 'Select gateway runtime channel.'))
     .addOption(new Option('--pid-file <path>', 'Gateway service state file path.'))
     .addOption(new Option('--log-file <path>', 'Gateway service log file path.'))
     .addOption(new Option('--service-child', 'Run gateway process as child service.'))
-    .addOption(new Option('--provider <provider>', 'Model provider override.'))
-    .addOption(new Option('--profile <profile>', 'Model profile override.'))
-    .addOption(new Option('--with-tools [value]', 'Enable/disable tool calls.')
-      .argParser(parseBooleanFlag)
-      .default(undefined))
-    .addOption(new Option('--no-with-tools'))
-    .addOption(new Option('--tool-allow <tools>', 'Limit allowed tool names.')
-      .argParser(parseCsv))
-    .addOption(new Option('--memory [value]', 'Enable/disable memory persistence.')
-      .argParser(parseBooleanFlag)
-      .default(undefined))
-    .addOption(new Option('--no-memory'))
-    .addOption(new Option('--heartbeat-enabled [value]', 'Enable/disable heartbeat behavior.')
-      .argParser(parseBooleanFlag)
-      .default(undefined))
-    .addOption(new Option('--no-heartbeat-enabled'))
-    .addOption(new Option('--heartbeat-interval-ms <ms>', 'Heartbeat interval in ms.'))
+    .addOption(new Option('--debug', 'Enable local debug output.'))
+    .addOption(new Option('--daemon', 'Run gateway service in daemon mode.'))
     .addOption(new Option('--heartbeat-target-open-id <openId>', 'Heartbeat target open-id.'))
     .addOption(new Option('--heartbeat-session-key <key>', 'Heartbeat session key.'))
     .addOption(new Option('--pairing-policy <open|allowlist|pairing|disabled>', 'Pairing policy.'))
@@ -389,32 +385,18 @@ function buildGatewayStartOptions(command: Command): void {
     .addOption(new Option('--pairing-pending-max <n>', 'Pairing pending max count.'))
     .addOption(new Option('--app-id <id>', 'Feishu app id.'))
     .addOption(new Option('--app-secret <secret>', 'Feishu app secret.'))
-    .addOption(new Option('--request-timeout-ms <ms>', 'Request timeout ms.'))
-    .addOption(new Option('--debug', 'Enable local debug output.'))
-    .addOption(new Option('--daemon', 'Run gateway service in daemon mode.'));
+    .addOption(new Option('--heartbeat-interval-ms <ms>', 'Heartbeat interval in ms.'))
+    .addOption(new Option('--request-timeout-ms <ms>', 'Request timeout ms.'));
+  addModelRuntimeOptions(command, true);
 }
 
 function buildGatewayConfigOptions(command: Command): void {
   command
     .addOption(new Option('--channel <channel>', 'Select gateway config channel.'))
-    .addOption(new Option('--provider <provider>', 'Persist provider override.'))
-    .addOption(new Option('--profile <profile>', 'Persist profile override.'))
     .addOption(new Option('--app-id <id>', 'Persist feishu app id.'))
-    .addOption(new Option('--app-secret <secret>', 'Persist feishu app secret.'))
-    .addOption(new Option('--with-tools [value]', 'Persist with-tools default.')
-      .argParser(parseBooleanFlag)
-      .default(undefined))
-    .addOption(new Option('--no-with-tools'))
-    .addOption(new Option('--tool-allow <tools>', 'Persist tool allow list.')
-      .argParser(parseCsv))
-    .addOption(new Option('--memory [value]', 'Persist memory behavior.')
-      .argParser(parseBooleanFlag)
-      .default(undefined))
-    .addOption(new Option('--no-memory'))
-    .addOption(new Option('--heartbeat-enabled [value]', 'Persist heartbeat status.')
-      .argParser(parseBooleanFlag)
-      .default(undefined))
-    .addOption(new Option('--no-heartbeat-enabled'))
+    .addOption(new Option('--app-secret <secret>', 'Persist feishu app secret.'));
+  addModelRuntimeOptions(command, true);
+  command
     .addOption(new Option('--heartbeat-interval-ms <ms>', 'Persist heartbeat interval ms.'))
     .addOption(new Option('--heartbeat-target-open-id <openId>', 'Persist heartbeat target.'))
     .addOption(new Option('--heartbeat-session-key <key>', 'Persist heartbeat session key.'))
@@ -475,7 +457,10 @@ export function buildGatewayCommand(program: Command): Command {
       ].join('\n'),
     )
     .action(async (options: GatewayStartOptions, command: Command) => {
-      setExitCode(command, await runGatewayStart(buildGatewayStartParsedCommand(command, options, 'start')));
+      setExitCode(
+        command,
+        await runGatewayStart(buildGatewayStartParsedCommand(command, options, 'start')),
+      );
     });
 
   const status = gateway.command('status').description('Show gateway service status.');
@@ -490,10 +475,13 @@ export function buildGatewayCommand(program: Command): Command {
       ].join('\n'),
     )
     .action(async (options: GatewayStatusStopOptions, command: Command) => {
-      setExitCode(command, await runGatewayStatusOrStop(
-        buildGatewayStatusStopParsedCommand(command, options, 'status'),
-        'status',
-      ));
+      setExitCode(
+        command,
+        await runGatewayStatusOrStop(
+          buildGatewayStatusStopParsedCommand(command, options, 'status'),
+          'status',
+        ),
+      );
     });
 
   const stop = gateway.command('stop').description('Stop gateway service.');
@@ -508,20 +496,27 @@ export function buildGatewayCommand(program: Command): Command {
       ].join('\n'),
     )
     .action(async (options: GatewayStatusStopOptions, command: Command) => {
-      setExitCode(command, await runGatewayStatusOrStop(
-        buildGatewayStatusStopParsedCommand(command, options, 'stop'),
-        'stop',
-      ));
+      setExitCode(
+        command,
+        await runGatewayStatusOrStop(
+          buildGatewayStatusStopParsedCommand(command, options, 'stop'),
+          'stop',
+        ),
+      );
     });
 
   const config = gateway.command('config').description('Manage gateway config.');
   const set = config.command('set').description('Set gateway config fields.');
   buildGatewayConfigOptions(set);
-  set.addHelpText('after', ['Examples:', '  lainclaw gateway config set --app-id <appId> --app-secret <appSecret>'].join('\n'));
-  set.action(async (options: GatewayConfigOptions, command: Command) => {
-    const parsedOptions = { ...(command.opts<GatewayConfigOptions>()), ...options };
-    setExitCode(command, await runGatewayConfigCommand(buildGatewayConfigParsedCommand('set', parsedOptions)));
-  });
+  set
+    .addHelpText(
+      'after',
+      ['Examples:', '  lainclaw gateway config set --app-id <appId> --app-secret <appSecret>'].join('\n'),
+    )
+    .action(async (options: GatewayConfigOptions, command: Command) => {
+      const parsedOptions = { ...(command.opts<GatewayConfigOptions>()), ...options };
+      setExitCode(command, await runGatewayConfigCommand(buildGatewayConfigParsedCommand('set', parsedOptions)));
+    });
 
   const show = config.command('show').description('Show gateway config.');
   show.addOption(new Option('--channel <channel>', 'Select gateway config channel.'));

@@ -2,30 +2,16 @@ import { runCommand } from '../shared/result.js';
 import { executeTool } from '../../tools/executor.js';
 import { getTool, listTools } from '../../tools/registry.js';
 import type { ToolCall, ToolContext } from '../../tools/types.js';
+import { Command } from 'commander';
+import { setExitCode } from '../shared/exitCode.js';
 
 export type ToolsCommandInput =
-  | { kind: 'missing' }
-  | { kind: 'unknown'; subcommand: string }
-  | { kind: 'invalid'; message: string }
   | { kind: 'list' }
   | { kind: 'info'; name: string }
   | { kind: 'invoke'; name: string; rawArgs?: string };
 
 export async function runToolsCommand(parsed: ToolsCommandInput): Promise<number> {
   return runCommand(async () => {
-    if (parsed.kind === 'missing') {
-      console.error('Usage: lainclaw tools <list|info|invoke>');
-      return 1;
-    }
-    if (parsed.kind === 'unknown') {
-      console.error(`Unknown tools subcommand: ${parsed.subcommand}`);
-      console.error('Usage: lainclaw tools <list|info|invoke>');
-      return 1;
-    }
-    if (parsed.kind === 'invalid') {
-      console.error(parsed.message);
-      return 1;
-    }
     if (parsed.kind === 'list') {
       const tools = listTools().map((tool) => ({
         name: tool.name,
@@ -83,4 +69,52 @@ export async function runToolsCommand(parsed: ToolsCommandInput): Promise<number
     }
     return 1;
   });
+}
+
+export function buildToolsCommand(program: Command): Command {
+  const tools = program.command('tools').description('Run tools command');
+
+  tools
+    .addHelpText(
+      'after',
+      [
+        'Examples:',
+        '  lainclaw tools list',
+        '  lainclaw tools info <name>',
+        '  lainclaw tools invoke <name> [--args <json>]',
+      ].join('\n'),
+    );
+
+  tools
+    .command('list')
+    .description('List tools.')
+    .action(async (_options: never, command: Command) => {
+      const code = await runToolsCommand({ kind: 'list' });
+      setExitCode(command, code);
+    });
+
+  tools
+    .command('info')
+    .description('Show tool info.')
+    .argument('<name>', 'Tool name.')
+    .action(async (name: string, _options: never, command: Command) => {
+      const code = await runToolsCommand({ kind: 'info', name });
+      setExitCode(command, code);
+    });
+
+  tools
+    .command('invoke')
+    .description('Invoke tool.')
+    .argument('<name>', 'Tool name.')
+    .option('--args [json]', 'Tool arguments in json string.')
+    .action(async (name: string, options: { args?: string }, command: Command) => {
+      const code = await runToolsCommand({
+        kind: 'invoke',
+        name,
+        rawArgs: options.args,
+      });
+      setExitCode(command, code);
+    });
+
+  return tools;
 }

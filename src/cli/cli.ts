@@ -1,6 +1,5 @@
 import { Command } from 'commander';
 import { buildProgram } from './program.js';
-import { VERSION } from './version.js';
 
 function installExitOverride(command: Command): void {
   command.exitOverride();
@@ -27,10 +26,6 @@ export async function runCli(argv: string[]): Promise<number> {
     if (isCommandNotFound(error)) {
       const message = String(error.message ?? '');
       if (error.code === 'commander.help' || error.code === 'commander.helpDisplayed') {
-        return 0;
-      }
-      if (error.code === 'commander.version') {
-        console.log(`lainclaw v${VERSION}`);
         return 0;
       }
       if (error.code === 'commander.unknownCommand') {

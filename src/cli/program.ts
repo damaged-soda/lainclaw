@@ -1,10 +1,10 @@
 import { Command } from 'commander';
-import { buildAuthCommand } from './commands/auth/register.js';
-import { buildGatewayCommand } from './commands/gateway/register.js';
-import { buildHeartbeatCommand } from './commands/heartbeat/register.js';
-import { buildPairingCommand } from './commands/pairing/register.js';
-import { buildToolsCommand } from './commands/tools/register.js';
-import { buildAgentCommand } from './commands/agent/register.js';
+import { buildAuthCommand } from './commands/auth.js';
+import { buildGatewayCommand } from './commands/gateway.js';
+import { buildHeartbeatCommand } from './commands/heartbeat.js';
+import { buildPairingCommand } from './commands/pairing.js';
+import { buildToolsCommand } from './commands/tools.js';
+import { buildAgentCommand } from './commands/agent.js';
 import { setExitCode } from './shared/exitCode.js';
 import { VERSION } from './version.js';
 
