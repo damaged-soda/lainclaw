@@ -56,10 +56,10 @@ function safeChannelKey(channel: PairingChannel): string {
 }
 
 function resolveGatewayConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(resolveAuthDirectory(env.HOME), FEISHU_GATEWAY_CONFIG_FILE);
+  return path.join(resolveAuthDirectory(env.HOME), GATEWAY_CONFIG_FILE);
 }
 
-const FEISHU_GATEWAY_CONFIG_FILE = "gateway.json";
+const GATEWAY_CONFIG_FILE = "gateway.json";
 
 const storeLocks = new Map<string, Promise<void>>();
 

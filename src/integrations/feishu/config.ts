@@ -89,7 +89,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 const DEFAULT_PAIRING_POLICY = "open" as PairingPolicy;
 const DEFAULT_TOOL_ALLOW = getBuiltinToolNames();
-const FEISHU_GATEWAY_CONFIG_FILE = "gateway.json";
+const GATEWAY_CONFIG_FILE = "gateway.json";
 const LEGACY_FEISHU_GATEWAY_CONFIG_SUFFIX = "-gateway.json";
 const CURRENT_VERSION = 1 as const;
 const DEFAULT_CHANNEL = "default";
@@ -227,7 +227,7 @@ function normalizeChannelOverrides(raw: Partial<FeishuGatewayConfig>): Partial<F
 
 function resolveConfigPath(rawChannel: string = DEFAULT_CHANNEL): string {
   void rawChannel;
-  return path.join(resolveAuthDirectory(), FEISHU_GATEWAY_CONFIG_FILE);
+  return path.join(resolveAuthDirectory(), GATEWAY_CONFIG_FILE);
 }
 
 function resolveLegacyConfigPath(rawChannel: string = DEFAULT_RUNTIME_CHANNEL): string {
@@ -483,7 +483,7 @@ export async function listLegacyFeishuGatewayConfigChannels(): Promise<string[]>
       if (!entry.name.endsWith(LEGACY_FEISHU_GATEWAY_CONFIG_SUFFIX)) {
         continue;
       }
-      if (entry.name === FEISHU_GATEWAY_CONFIG_FILE) {
+      if (entry.name === GATEWAY_CONFIG_FILE) {
         continue;
       }
       const channel = entry.name.slice(
