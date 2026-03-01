@@ -1,4 +1,4 @@
-import { parseGatewayArgs, parseFeishuServerArgs, parseLocalGatewayArgs } from '../../parsers/gateway.js';
+import { parseGatewayArgs } from '../../parsers/gateway.js';
 import { parseGatewayConfigArgs } from '../../parsers/gatewayConfig.js';
 import { sendFeishuTextMessage } from '../../../channels/feishu/outbound.js';
 import { printUsage } from '../../usage.js';
@@ -29,23 +29,19 @@ import { runCommand } from '../../shared/result.js';
 import {
   formatHeartbeatErrorHint,
   inspectHeartbeatTargetOpenId,
-  makeFeishuFailureHint,
   maskConfigValue,
 } from '../../../channels/feishu/diagnostics.js';
 import { validateFeishuGatewayCredentials } from '../../../channels/feishu/credentials.js';
-
-type GatewayChannel = "feishu" | "local";
-type GatewayServiceChannel = GatewayChannel | "gateway";
-type GatewayAction = "start" | "status" | "stop";
-type GatewayStartOverrides = Partial<FeishuGatewayConfig> & Partial<LocalGatewayOverrides>;
+import {
+  type GatewayChannel,
+  type GatewayServiceRunContext,
+  type GatewayStartOverrides,
+  normalizeGatewayChannels,
+  resolveGatewayChannelPlugin,
+} from '../../../gateway/runtime/channelRegistry.js';
 
 export type GatewayParsedCommand = ReturnType<typeof parseGatewayArgs>;
 
-export interface GatewayChannelPlugin {
-  name: GatewayChannel;
-  parseStartArgs: (argv: string[]) => GatewayStartOverrides;
-  run: (overrides: GatewayStartOverrides, context: GatewayServiceRunContext) => Promise<void>;
-}
 
 export async function runGatewayCommand(args: string[]): Promise<number> {
   return runCommand(async () => {
@@ -105,54 +101,6 @@ export async function runGatewayCommand(args: string[]): Promise<number> {
       return 1;
     }
   });
-}
-
-interface GatewayServiceRunContext {
-  channel: GatewayServiceChannel;
-  action?: GatewayAction;
-  daemon?: boolean;
-  statePath?: string;
-  logPath?: string;
-  serviceChild?: boolean;
-  serviceArgv: string[];
-  channels?: GatewayChannel[];
-  debug?: boolean;
-}
-
-const GATEWAY_CHANNEL_PLUGINS: Record<GatewayChannel, GatewayChannelPlugin> = {
-  feishu: {
-    name: "feishu",
-    parseStartArgs: parseFeishuServerArgs,
-    run: (overrides, context) => runFeishuGatewayWithHeartbeat(
-      overrides,
-      makeFeishuFailureHint,
-      context,
-    ),
-  },
-  local: {
-    name: "local",
-    parseStartArgs: parseLocalGatewayArgs,
-    run: (overrides, context) => runLocalGatewayService(overrides, context),
-  },
-};
-
-function resolveGatewayChannelPlugin(rawChannel: string): GatewayChannelPlugin {
-  const channel = rawChannel.trim().toLowerCase();
-  const plugin = GATEWAY_CHANNEL_PLUGINS[channel as GatewayChannel];
-  if (!plugin) {
-    throw new Error(`Unsupported channel: ${rawChannel}`);
-  }
-  return plugin;
-}
-
-function normalizeGatewayChannels(rawChannels: GatewayChannel[]): GatewayChannel[] {
-  const output: GatewayChannel[] = [];
-  for (const channel of rawChannels) {
-    if (!output.includes(channel)) {
-      output.push(channel);
-    }
-  }
-  return output;
 }
 
 export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<number> {
