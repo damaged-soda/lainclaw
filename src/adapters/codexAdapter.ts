@@ -9,6 +9,8 @@ import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
 import { buildRuntimeToolNameMap, createToolAdapter, resolveTools } from "../tools/runtimeTools.js";
 import { isToolAllowed } from "../tools/registry.js";
 import { executeTool } from "../tools/executor.js";
+import { createToolCallId } from "../shared/ids.js";
+import { resolveBooleanFlag } from "../shared/envFlags.js";
 import { parseToolCallsFromResponse } from "./codex/toolCallParser.js";
 import { buildToolErrorLog, createToolExecutionState } from "./codex/toolExecutionState.js";
 import { toText } from "./codex/messageText.js";
@@ -16,17 +18,6 @@ import { toText } from "./codex/messageText.js";
 // 该系统提示词是 MVP 阶段的临时兜底：用于让 provider responses 在最小路径下可直接返回结果。
 // 这是可替换配置，不是对外契约；后续接手时可按体验目标调整文案、样式或完全替换。
 const OPENAI_CODEX_SYSTEM_PROMPT = "You are a concise and reliable coding assistant.";
-
-const RANDOM_ID_BASE = 16;
-const RANDOM_ID_PAD_LENGTH = 4;
-
-function randomHexSegment(): string {
-  return Math.floor(Math.random() * 10000).toString(RANDOM_ID_BASE).padStart(RANDOM_ID_PAD_LENGTH, "0");
-}
-
-function createToolCallId(rawToolName: string): string {
-  return `lc-tool-${Date.now()}-${randomHexSegment()}-${randomHexSegment()}-${rawToolName}`;
-}
 
 function isAbortError(error: unknown): error is Error {
   return (
@@ -38,14 +29,6 @@ function isAbortError(error: unknown): error is Error {
 
 function getAdapterStage(route: string, profileId: string, hasFailure: boolean): string {
   return `${route}.${profileId}${hasFailure ? ".failed" : ""}`;
-}
-
-function resolveBooleanFlag(raw: string | undefined): boolean {
-  if (typeof raw !== "string") {
-    return false;
-  }
-  const value = raw.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
 function shouldPrefixResponse(profileId: string, provider: string): string {
