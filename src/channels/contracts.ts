@@ -1,7 +1,7 @@
 export type ChannelId = "feishu" | "local";
 
 export interface InboundMessageBase {
-  integration: ChannelId;
+  channel: ChannelId;
   requestId: string;
   actorId: string;
   conversationId: string;
@@ -31,7 +31,7 @@ export interface OutboundMessage {
 export type InboundHandler = (inbound: InboundMessage) => Promise<OutboundMessage | void>;
 
 export interface ChannelRunContext {
-  integration: ChannelId;
+  channel: ChannelId;
   [key: string]: unknown;
 }
 

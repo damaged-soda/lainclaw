@@ -56,7 +56,7 @@ export async function handleInbound(
       text: decision.replyText,
       meta: {
         ...(message.meta || {}),
-        inboundIntegration: inbound.integration,
+        inboundChannel: inbound.channel,
       },
     };
   }
@@ -64,7 +64,7 @@ export async function handleInbound(
   try {
     const responseText = await runAgentWithTimeout({
       input,
-      integrationId: message.integration,
+      channelId: message.channel,
       sessionKey,
       runtime: options.runtime,
       timeoutMs: options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
@@ -88,7 +88,7 @@ export async function handleInbound(
 
 interface AgentRequest {
   input: string;
-  integrationId: string;
+  channelId: string;
   sessionKey: string;
   runtime: AgentRuntimeContext;
   timeoutMs: number;
@@ -101,7 +101,7 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
 
   const invoke = runAgent({
     input: params.input,
-    channelId: params.integrationId,
+    channelId: params.channelId,
     sessionKey: params.sessionKey,
     runtime: {
       provider: params.runtime.provider,

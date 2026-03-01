@@ -187,7 +187,7 @@ export async function runGatewayServiceForChannels(
     for (const channel of normalizedChannels) {
       const runtime = channelsRegistry[channel];
       if (runtime.preflight) {
-        await runtime.preflight(overrides, { integration: channel } as ChannelRunContext);
+        await runtime.preflight(overrides, { channel } as ChannelRunContext);
       }
     }
 
@@ -232,7 +232,7 @@ async function runChannelRuntime(
   overrides: GatewayStartOverrides,
   serviceContext: GatewayServiceRunContext,
 ): Promise<void> {
-  const context: ChannelRunContext = { integration: channel };
+  const context: ChannelRunContext = { channel };
   const shouldPreflightInProcess = !serviceContext.daemon || serviceContext.serviceChild === true;
 
   const runInProcess = async (): Promise<void> => {

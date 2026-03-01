@@ -48,7 +48,7 @@ async function runCoreInbound(
   });
 }
 
-export const localIntegration: Channel = {
+export const localChannel: Channel = {
   id: 'local',
   preflight: async (overrides?: unknown): Promise<LocalGatewayOverrides> => {
     return normalizeLocalOverrides(overrides);

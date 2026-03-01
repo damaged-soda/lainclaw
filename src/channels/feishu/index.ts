@@ -26,8 +26,8 @@ function normalizeFeishuOverrides(overrides: unknown): Partial<FeishuGatewayConf
 }
 
 async function toRuntimeConfig(overrides: unknown, context?: ChannelRunContext): Promise<FeishuGatewayConfig> {
-  const integration = context?.integration ?? 'feishu';
-  return resolveFeishuGatewayConfig(normalizeFeishuOverrides(overrides), integration);
+  const channel = context?.channel ?? 'feishu';
+  return resolveFeishuGatewayConfig(normalizeFeishuOverrides(overrides), channel);
 }
 
 function buildRunInboundRuntime(config: FeishuGatewayConfig): FeishuRuntimeOptions {
@@ -59,12 +59,12 @@ async function resolveRuntimeConfigForSendText(
     runtimeConfig?: unknown;
   } | undefined;
   if (candidate && candidate.runtimeConfig && typeof candidate.runtimeConfig === 'object') {
-    return toRuntimeConfig(candidate.runtimeConfig, { integration: 'feishu' } as ChannelRunContext);
+    return toRuntimeConfig(candidate.runtimeConfig, { channel: 'feishu' } as ChannelRunContext);
   }
-  return toRuntimeConfig({}, { integration: 'feishu' } as ChannelRunContext);
+  return toRuntimeConfig({}, { channel: 'feishu' } as ChannelRunContext);
 }
 
-export const feishuIntegration: Channel = {
+export const feishuChannel: Channel = {
   id: 'feishu',
   preflight: async (overrides?: unknown, context?: ChannelRunContext): Promise<FeishuGatewayConfig> => {
     const config = await toRuntimeConfig(overrides, context);
@@ -123,7 +123,7 @@ export const feishuIntegration: Channel = {
       config,
       onFailureHint: makeFeishuFailureHint,
       outbound: {
-        sendText: (replyTo, text) => feishuIntegration.sendText(replyTo, text, { runtimeConfig: config }),
+        sendText: (replyTo, text) => feishuChannel.sendText(replyTo, text, { runtimeConfig: config }),
       },
     });
   },

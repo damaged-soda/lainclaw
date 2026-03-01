@@ -127,7 +127,7 @@ export function buildPairingCommand(program: Command): Command {
     .description('List pending access-control requests.')
     .option('--json', 'Output list result as JSON.')
     .option('--account <accountId>', 'Account scope for list.')
-    .option('--channel <channel>', 'Access control integration id.')
+    .option('--channel <channel>', 'Access control channel id.')
     .action(async (options: { channel?: string; account?: string; json?: boolean }, command: Command) => {
       setExitCode(command, await runPairingCommand({
         kind: 'list',
@@ -142,7 +142,7 @@ export function buildPairingCommand(program: Command): Command {
     .description('Approve access-control request.')
     .argument('<code>', 'Access-control code.')
     .option('--account <accountId>', 'Account scope for approval.')
-    .option('--channel <channel>', 'Access control integration id.')
+    .option('--channel <channel>', 'Access control channel id.')
     .action(async (code: string, options: { channel?: string; account?: string }, command: Command) => {
       setExitCode(command, await runPairingCommand({
         kind: 'approve',
@@ -157,7 +157,7 @@ export function buildPairingCommand(program: Command): Command {
     .description('Revoke access-control allowlist entry.')
     .argument('<entry>', 'Access-control entry id.')
     .option('--account <accountId>', 'Account scope for revoke.')
-    .option('--channel <channel>', 'Access control integration id.')
+    .option('--channel <channel>', 'Access control channel id.')
     .action(async (entry: string, options: { channel?: string; account?: string }, command: Command) => {
       setExitCode(command, await runPairingCommand({
         kind: 'revoke',

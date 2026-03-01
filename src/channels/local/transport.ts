@@ -261,7 +261,7 @@ export async function runLocalTransport(inboundHandler: InboundHandler): Promise
         const replyTo = conversationId || requestId;
         const inbound: MessageInboundMessage = {
           kind: 'message',
-          integration: 'local',
+          channel: 'local',
           requestId,
           text,
           actorId,

@@ -143,7 +143,7 @@ function parseFeishuInbound(data: unknown, requestId: string): MessageInboundMes
   if (!chatType) {
     return {
       kind: 'ignored',
-      integration: 'feishu',
+      channel: 'feishu',
       requestId,
       reason: 'missing-chat-type',
       actorId,
@@ -156,7 +156,7 @@ function parseFeishuInbound(data: unknown, requestId: string): MessageInboundMes
   if (!FEISHU_DM_CHAT_TYPES.has(chatType)) {
     return {
       kind: 'ignored',
-      integration: 'feishu',
+      channel: 'feishu',
       requestId,
       reason: 'non-direct-chat',
       actorId,
@@ -169,7 +169,7 @@ function parseFeishuInbound(data: unknown, requestId: string): MessageInboundMes
   if (messageType && messageType !== FEISHU_TEXT_MESSAGE_TYPE) {
     return {
       kind: 'ignored',
-      integration: 'feishu',
+      channel: 'feishu',
       requestId,
       reason: 'non-text-message',
       actorId,
@@ -182,7 +182,7 @@ function parseFeishuInbound(data: unknown, requestId: string): MessageInboundMes
   if (actorId === 'unknown' || !text) {
     return {
       kind: 'ignored',
-      integration: 'feishu',
+      channel: 'feishu',
       requestId,
       reason: 'missing-open-id-or-content',
       actorId,
@@ -194,7 +194,7 @@ function parseFeishuInbound(data: unknown, requestId: string): MessageInboundMes
 
   return {
     kind: 'message',
-    integration: 'feishu',
+    channel: 'feishu',
     requestId,
     text,
     actorId,

@@ -1,6 +1,6 @@
 import { buildPairingQueueFullReply, buildPairingReply } from '../../../channels/feishu/pairing/pairing-messages.js';
 import { readChannelAllowFromStore, upsertChannelPairingRequest } from '../../../channels/feishu/pairing/pairing-store.js';
-import { type InboundMessage, type ChannelId } from '../../../channels/contracts.js';
+import { type ChannelId, type InboundMessage } from '../../../channels/contracts.js';
 
 const ACCESS_DENIED_MESSAGE = '当前策略不允许当前用户发起会话，请联系管理员配置后重试。';
 
@@ -80,7 +80,7 @@ export async function evaluateAccessPolicy(input: AccessPolicyInput): Promise<Ac
     };
   }
 
-  const channel = input.inbound.integration;
+  const channel = input.inbound.channel;
   if (!isChannelConfig(input.config)) {
     return { allowed: true };
   }
