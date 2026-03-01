@@ -53,6 +53,9 @@ export const localIntegration: Integration = {
   preflight: async (overrides?: unknown): Promise<LocalGatewayOverrides> => {
     return normalizeLocalOverrides(overrides);
   },
+  sendText: async () => {
+    throw new Error('Local integration does not support outbound sendText capability');
+  },
   run: async (onInbound, overrides?: unknown, _context?: IntegrationRunContext): Promise<void> => {
     const runtimeOverrides = normalizeLocalOverrides(overrides);
 

@@ -39,9 +39,14 @@ export interface SidecarHandle {
   stop: () => Promise<void> | void;
 }
 
+export interface IntegrationOutboundTextCapability {
+  sendText: (replyTo: string, text: string, meta?: Record<string, unknown>) => Promise<void>;
+}
+
 export interface Integration {
   id: IntegrationId;
   preflight: (overrides?: unknown, context?: IntegrationRunContext) => Promise<unknown>;
   run: (onInbound: InboundHandler, overrides?: unknown, context?: IntegrationRunContext) => Promise<void>;
+  sendText: IntegrationOutboundTextCapability["sendText"];
   startSidecars?: (overrides?: unknown, context?: IntegrationRunContext, preflightResult?: unknown) => Promise<SidecarHandle | void>;
 }

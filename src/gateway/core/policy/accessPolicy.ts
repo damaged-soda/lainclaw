@@ -14,14 +14,14 @@ export interface AccessPolicyDecision {
   replyText?: string;
 }
 
-interface FeishuLikePolicyConfig {
+interface AccessControlPolicyConfig {
   pairingPolicy?: string;
   pairingPendingTtlMs?: number;
   pairingPendingMax?: number;
   pairingAllowFrom?: string[];
 }
 
-function isIntegrationConfig(raw: unknown): raw is FeishuLikePolicyConfig {
+function isIntegrationConfig(raw: unknown): raw is AccessControlPolicyConfig {
   return !!raw && typeof raw === 'object';
 }
 

@@ -8,16 +8,17 @@ import {
 } from '../../pairing/pairing-store.js';
 import { resolvePairingIdLabel } from '../../pairing/pairing-labels.js';
 import { setExitCode } from '../shared/exitCode.js';
+import { integrationIds } from '../../gateway/runtime/integrationRegistry.js';
 
-const FEISHU_PAIRING_CHANNEL = 'feishu';
-const DEFAULT_PAIRING_CHANNEL: PairingChannel = 'feishu';
+const DEFAULT_ACCESS_CONTROL_CHANNEL = 'feishu';
+const SUPPORTED_ACCESS_CONTROL_CHANNELS = new Set<string>(integrationIds);
 
-function resolvePairingChannel(raw: string): PairingChannel {
-  const normalized = raw.trim().toLowerCase() || FEISHU_PAIRING_CHANNEL;
-  if (normalized === FEISHU_PAIRING_CHANNEL) {
-    return DEFAULT_PAIRING_CHANNEL;
+function resolveAccessControlChannel(raw: string | undefined): PairingChannel {
+  const normalized = toPairingChannel(raw);
+  if (!SUPPORTED_ACCESS_CONTROL_CHANNELS.has(normalized)) {
+    throw new Error(`不支持该 ${normalized} 的访问控制存储。`);
   }
-  throw new Error(`Unsupported channel: ${raw}. only "feishu" is supported in pairing command.`);
+  return normalized as PairingChannel;
 }
 
 export interface PairingCommandInput {
@@ -41,7 +42,7 @@ export async function runPairingCommand(parsed: PairingCommandInput): Promise<nu
       }
 
       if (requests.length === 0) {
-        console.log(`No pending ${parsed.channel} pairing requests.`);
+        console.log(`No pending ${parsed.channel} access-control requests.`);
         return 0;
       }
 
@@ -65,7 +66,7 @@ export async function runPairingCommand(parsed: PairingCommandInput): Promise<nu
         : await approveChannelPairingCode({ channel: parsed.channel, code });
 
       if (!approved) {
-        throw new Error(`No pending pairing request found for code: ${code}`);
+        throw new Error(`No pending access-control request found for code: ${code}`);
       }
 
       const idLabel = resolvePairingIdLabel();
@@ -87,8 +88,8 @@ export async function runPairingCommand(parsed: PairingCommandInput): Promise<nu
       return 0;
     }
 
-    console.log(`Revoked ${entry} on ${parsed.channel}.`);
-    console.log(`Current allow-from entries: ${allowFrom.length}`);
+    console.log(`Revoked ${entry} from ${parsed.channel} access-control allowlist.`);
+    console.log(`Current allow entries: ${allowFrom.length}`);
     return 0;
   }, {
     renderError: (error) => {
@@ -106,11 +107,11 @@ export async function runPairingCommand(parsed: PairingCommandInput): Promise<nu
 }
 
 function toPairingChannel(raw: string | undefined): string {
-  return (raw ?? '').trim() || 'feishu';
+  return (raw ?? '').trim().toLowerCase() || DEFAULT_ACCESS_CONTROL_CHANNEL;
 }
 
 export function buildPairingCommand(program: Command): Command {
-  const pairing = program.command('pairing').description('Run pairing command');
+  const pairing = program.command('pairing').description('Run access control command');
   pairing.addHelpText(
     'after',
     [
@@ -123,14 +124,14 @@ export function buildPairingCommand(program: Command): Command {
 
   pairing
     .command('list')
-    .description('List pending pairing requests.')
+    .description('List pending access-control requests.')
     .option('--json', 'Output list result as JSON.')
     .option('--account <accountId>', 'Account scope for list.')
-    .option('--channel <channel>', 'Pairing channel, only feishu supported.')
+    .option('--channel <channel>', 'Access control integration id.')
     .action(async (options: { channel?: string; account?: string; json?: boolean }, command: Command) => {
       setExitCode(command, await runPairingCommand({
         kind: 'list',
-        channel: resolvePairingChannel(toPairingChannel(options.channel)),
+        channel: resolveAccessControlChannel(options.channel),
         ...(options.account ? { accountId: options.account } : {}),
         ...(options.json ? { json: true } : {}),
       }));
@@ -138,30 +139,30 @@ export function buildPairingCommand(program: Command): Command {
 
   pairing
     .command('approve')
-    .description('Approve pairing request.')
-    .argument('<code>', 'Pairing code.')
+    .description('Approve access-control request.')
+    .argument('<code>', 'Access-control code.')
     .option('--account <accountId>', 'Account scope for approval.')
-    .option('--channel <channel>', 'Pairing channel, only feishu supported.')
+    .option('--channel <channel>', 'Access control integration id.')
     .action(async (code: string, options: { channel?: string; account?: string }, command: Command) => {
       setExitCode(command, await runPairingCommand({
         kind: 'approve',
         codeOrEntry: code,
-        channel: resolvePairingChannel(toPairingChannel(options.channel)),
+        channel: resolveAccessControlChannel(options.channel),
         ...(options.account ? { accountId: options.account } : {}),
       }));
     });
 
   pairing
     .command('revoke')
-    .description('Revoke pairing allow entry.')
-    .argument('<entry>', 'Pairing entry id.')
+    .description('Revoke access-control allowlist entry.')
+    .argument('<entry>', 'Access-control entry id.')
     .option('--account <accountId>', 'Account scope for revoke.')
-    .option('--channel <channel>', 'Pairing channel, only feishu supported.')
+    .option('--channel <channel>', 'Access control integration id.')
     .action(async (entry: string, options: { channel?: string; account?: string }, command: Command) => {
       setExitCode(command, await runPairingCommand({
         kind: 'revoke',
         codeOrEntry: entry,
-        channel: resolvePairingChannel(toPairingChannel(options.channel)),
+        channel: resolveAccessControlChannel(options.channel),
         ...(options.account ? { accountId: options.account } : {}),
       }));
     });

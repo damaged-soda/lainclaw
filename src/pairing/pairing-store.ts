@@ -10,7 +10,7 @@ const PAIRING_CODE_LENGTH = 8;
 const PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CURRENT_VERSION = 1 as const;
 
-export type PairingChannel = "feishu" | "local";
+export type PairingChannel = string;
 export type PairingPolicy = "open" | "allowlist" | "pairing" | "disabled";
 
 export type PairingStoreLimits = {

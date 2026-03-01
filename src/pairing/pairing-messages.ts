@@ -3,7 +3,7 @@ export function buildPairingReply(params: {
   idLine: string;
   code: string;
 }): string {
-  const command = `lainclaw pairing approve ${params.channel} ${params.code}`;
+  const command = `lainclaw pairing approve --channel ${params.channel} ${params.code}`;
   return [
     "Lainclaw: access not configured.",
     "",
@@ -22,4 +22,3 @@ export function buildPairingQueueFullReply(): string {
     "你可以向管理员确认是否已有太多未处理的待审批请求。",
   ].join("\n");
 }
-

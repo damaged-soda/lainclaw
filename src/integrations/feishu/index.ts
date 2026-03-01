@@ -6,6 +6,7 @@ import { runFeishuTransport } from './transport.js';
 import { handleInbound } from '../../gateway/core/handleInbound.js';
 import { makeFeishuFailureHint } from './diagnostics.js';
 import { type Integration, type IntegrationRunContext, type SidecarHandle } from '../contracts.js';
+import { sendFeishuTextMessage } from './outbound.js';
 
 const DEFAULT_AGENT_TIMEOUT_MS = 10000;
 
@@ -51,6 +52,18 @@ async function runCoreInbound(
   });
 }
 
+async function resolveRuntimeConfigForSendText(
+  meta?: unknown,
+): Promise<FeishuGatewayConfig> {
+  const candidate = (meta && typeof meta === 'object' ? meta : undefined) as {
+    runtimeConfig?: unknown;
+  } | undefined;
+  if (candidate && candidate.runtimeConfig && typeof candidate.runtimeConfig === 'object') {
+    return toRuntimeConfig(candidate.runtimeConfig, { integration: 'feishu' } as IntegrationRunContext);
+  }
+  return toRuntimeConfig({}, { integration: 'feishu' } as IntegrationRunContext);
+}
+
 export const feishuIntegration: Integration = {
   id: 'feishu',
   preflight: async (overrides?: unknown, context?: IntegrationRunContext): Promise<FeishuGatewayConfig> => {
@@ -71,6 +84,16 @@ export const feishuIntegration: Integration = {
     }
     return config;
   },
+  sendText: async (replyTo, text, meta): Promise<void> => {
+    if (!replyTo || !text.trim()) {
+      return;
+    }
+    const config = await resolveRuntimeConfigForSendText(meta);
+    await sendFeishuTextMessage(config, {
+      openId: replyTo,
+      text,
+    });
+  },
   run: async (onInbound, overrides?: unknown, context?: IntegrationRunContext): Promise<void> => {
     const config = await toRuntimeConfig(overrides, context);
 
@@ -89,9 +112,19 @@ export const feishuIntegration: Integration = {
       onInbound: (inbound) => runInbound(inbound),
     });
   },
-  startSidecars: async (overrides?: unknown, context?: IntegrationRunContext, preflightResult?: unknown): Promise<SidecarHandle | void> => {
+  startSidecars: async (
+    overrides?: unknown,
+    context?: IntegrationRunContext,
+    preflightResult?: unknown,
+  ): Promise<SidecarHandle | void> => {
     const config = (preflightResult as FeishuGatewayConfig | undefined)
       ?? (await toRuntimeConfig(overrides, context));
-    return startFeishuHeartbeatSidecar(config, makeFeishuFailureHint);
+    return startFeishuHeartbeatSidecar({
+      config,
+      onFailureHint: makeFeishuFailureHint,
+      integration: {
+        sendText: (replyTo, text) => feishuIntegration.sendText(replyTo, text, { runtimeConfig: config }),
+      },
+    });
   },
 };
