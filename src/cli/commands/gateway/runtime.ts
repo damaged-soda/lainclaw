@@ -16,17 +16,23 @@ import {
 } from '../../../channels/feishu/config.js';
 import { startHeartbeatLoop } from '../../../heartbeat/runner.js';
 import {
-  clearGatewayServiceState,
-  isProcessAlive,
-  readGatewayServiceState,
+  getGatewayServiceSnapshot,
   resolveGatewayServicePaths,
   spawnGatewayServiceProcess,
-  terminateGatewayProcess,
+  resolveGatewayServiceStatus,
+  stopGatewayService,
   type GatewayServicePaths,
   type GatewayServiceState,
   writeGatewayServiceState,
 } from '../../../gateway/service.js';
 import { runCommand } from '../../shared/result.js';
+import {
+  formatHeartbeatErrorHint,
+  inspectHeartbeatTargetOpenId,
+  makeFeishuFailureHint,
+  maskConfigValue,
+} from '../../../channels/feishu/diagnostics.js';
+import { validateFeishuGatewayCredentials } from '../../../channels/feishu/credentials.js';
 
 type GatewayChannel = "feishu" | "local";
 type GatewayServiceChannel = GatewayChannel | "gateway";
@@ -290,15 +296,12 @@ export async function runGatewayServiceLifecycleAction(
     throw new Error(`Unsupported gateway action: ${serviceContext.action}`);
   }
 
-  const snapshot = await resolveGatewayServiceState(paths);
+  const snapshot = await getGatewayServiceSnapshot(paths);
   if (!snapshot.state || !snapshot.running) {
     console.log("gateway service already stopped");
-    if (snapshot.state) {
-      await clearGatewayServiceState(paths.statePath);
-    }
     return;
   }
-  await stopGatewayServiceIfRunning(paths, snapshot.state);
+  await stopGatewayService(paths, snapshot.state);
   console.log(`gateway service stopped (pid=${snapshot.state.pid})`);
 }
 
@@ -337,7 +340,7 @@ export async function runFeishuGatewayWithHeartbeat(
   if (serviceContext.daemon) {
     await resolveFeishuGatewayRuntimeConfig(overrides, effectiveChannel);
 
-    const snapshot = await resolveGatewayServiceState(paths);
+    const snapshot = await getGatewayServiceSnapshot(paths);
     if (snapshot.running) {
       throw new Error(`Gateway already running (pid=${snapshot.state?.pid})`);
     }
@@ -465,11 +468,11 @@ export async function runGatewayServiceForChannels(
   }
 
   if (serviceContext.daemon) {
-    const paths = resolveGatewayServicePaths("gateway", {
+  const paths = resolveGatewayServicePaths("gateway", {
       statePath: serviceContext.statePath,
       logPath: serviceContext.logPath,
     });
-    const snapshot = await resolveGatewayServiceState(paths);
+    const snapshot = await getGatewayServiceSnapshot(paths);
     if (snapshot.running) {
       throw new Error(`Gateway already running (pid=${snapshot.state?.pid})`);
     }
@@ -533,7 +536,7 @@ export async function runLocalGatewayService(
   });
 
   if (serviceContext.daemon) {
-    const snapshot = await resolveGatewayServiceState(paths);
+    const snapshot = await getGatewayServiceSnapshot(paths);
     if (snapshot.running) {
       throw new Error(`Gateway already running (pid=${snapshot.state?.pid})`);
     }
@@ -572,87 +575,6 @@ export function printGatewayServiceStatus(
   return resolveGatewayServiceStatus(paths, channel);
 }
 
-function stopGatewayServiceIfRunning(
-  paths: GatewayServicePaths,
-  state: GatewayServiceState,
-): Promise<void> {
-  return (async () => {
-    const stopped = await terminateGatewayProcess(state.pid);
-    if (!stopped) {
-      throw new Error(`Failed to stop gateway process (pid=${state.pid})`);
-    }
-    await clearGatewayServiceState(paths.statePath);
-  })();
-}
-
-async function resolveGatewayServiceState(
-  paths: GatewayServicePaths,
-): Promise<{ state: GatewayServiceState | null; running: boolean; stale: boolean }> {
-  const state = await readGatewayServiceState(paths.statePath);
-  if (!state) {
-    return { state: null, running: false, stale: false };
-  }
-
-  const alive = isProcessAlive(state.pid);
-  if (!alive) {
-    await clearGatewayServiceState(paths.statePath);
-    return { state, running: false, stale: true };
-  }
-
-  return { state, running: true, stale: false };
-}
-
-function getGatewayStateChannels(state: GatewayServiceState): string[] {
-  if (Array.isArray(state.channels) && state.channels.length > 0) {
-    return [...new Set(state.channels.filter((item) => item.trim().length > 0))];
-  }
-  return [state.channel];
-}
-
-async function resolveGatewayServiceStatus(
-  paths: GatewayServicePaths,
-  channel: string,
-): Promise<void> {
-  const snapshot = await resolveGatewayServiceState(paths);
-  if (!snapshot.state) {
-    console.log(
-      JSON.stringify(
-        {
-          status: "stopped",
-          running: false,
-          pid: null,
-          channel,
-          channels: [channel],
-          statePath: paths.statePath,
-          logPath: paths.logPath,
-        },
-        null,
-        2,
-      ),
-    );
-    return;
-  }
-
-  console.log(
-    JSON.stringify(
-      {
-        status: snapshot.running ? "running" : "stopped",
-        running: snapshot.running,
-        channel: snapshot.state.channel,
-        channels: getGatewayStateChannels(snapshot.state),
-        pid: snapshot.state.pid,
-        startedAt: snapshot.state.startedAt,
-        statePath: snapshot.state.statePath,
-        logPath: snapshot.state.logPath,
-        command: snapshot.state.command,
-        argv: snapshot.state.argv,
-      },
-      null,
-      2,
-    ),
-  );
-}
-
 async function resolveFeishuGatewayRuntimeConfig(
   overrides: Partial<FeishuGatewayConfig>,
   channel: GatewayChannel,
@@ -675,31 +597,6 @@ async function resolveFeishuGatewayRuntimeConfig(
   return config;
 }
 
-function parseHeartbeatSummaryTarget(rawMessage: string): string {
-  const normalized = rawMessage || "";
-  if (normalized.includes("agent timeout")) {
-    return "模型处理超时，请稍后重试；若持续超时请检查网络或加长 timeout 配置。";
-  }
-  if (isAuthError(normalized)) {
-    return "未检测到可用认证配置，请先执行 `lainclaw auth login openai-codex` 并检查登录信息。";
-  }
-  return "模型调用失败，请联系管理员查看服务日志；或检查 provider/profile 配置后重试。";
-}
-
-function parseHeartbeatDecisionMessage(rawMessage: string): string {
-  if (rawMessage.includes("contact:user.employee_id:readonly")) {
-    return `${rawMessage}。请在飞书应用后台为应用补充 “联系人-查看员工个人资料-只读（contact:user.employee_id:readonly）” 权限，并重装应用后重试。`;
-  }
-  if (rawMessage.includes("not a valid") && rawMessage.includes("Invalid ids: [oc_")) {
-    return `${rawMessage}。检测到目标 ID 为 oc_ 前缀，通常需要传入用户 open_id（ou_）或可用的 user_id；请确认你配置的是接收人个人 open_id。`;
-  }
-  return rawMessage;
-}
-
-function makeFeishuFailureHint(rawMessage: string): string {
-  return parseHeartbeatSummaryTarget(rawMessage);
-}
-
 function formatHeartbeatSummary(summary: {
   ranAt: string;
   total: number;
@@ -714,113 +611,4 @@ function buildHeartbeatMessage(ruleText: string, triggerMessage: string): string
   const body = triggerMessage.trim() || "已触发";
   const lines = ["【Lainclaw 心跳提醒】", `规则：${ruleText}`, `内容：${body}`];
   return lines.join("\n");
-}
-
-function formatHeartbeatErrorHint(rawMessage: string): string {
-  return parseHeartbeatDecisionMessage(rawMessage);
-}
-
-function validateFeishuGatewayCredentials(config: { appId?: string; appSecret?: string }): void {
-  const configPath = resolveFeishuGatewayConfigPath("feishu");
-  if (!config.appId || !config.appSecret) {
-    throw new Error(
-      "Missing FEISHU_APP_ID or FEISHU_APP_SECRET for websocket mode. "
-      + "请执行 `lainclaw gateway start --app-id <真实AppID> --app-secret <真实AppSecret>` "
-      + `或清理当前频道网关缓存后重试：` + "`rm " + `${configPath}` + "`。",
-    );
-  }
-
-  if (isPlaceholderLikely(config.appId) || isPlaceholderLikely(config.appSecret)) {
-    throw new Error(
-      `Detected invalid/placeholder Feishu credentials (appId=${maskCredential(config.appId)}, `
-      + `appSecret=${maskCredential(config.appSecret)}). `
-      + "请确认使用真实飞书应用凭据，再清理当前频道网关缓存并重启 gateway。"
-      + `（路径：${configPath}）`,
-    );
-  }
-}
-
-function inspectHeartbeatTargetOpenId(raw: string): {
-  kind: "open-user-id" | "chat-id" | "legacy-user-id" | "unknown";
-  warning?: string;
-} {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return {
-      kind: "unknown",
-      warning: "heartbeat target open id is empty, heartbeat is effectively disabled",
-    };
-  }
-
-  if (trimmed.startsWith("ou_") || trimmed.startsWith("on_")) {
-    return {
-      kind: "open-user-id",
-    };
-  }
-
-  if (trimmed.startsWith("oc_")) {
-    return {
-      kind: "chat-id",
-      warning: "检测到 oc_ 前缀，通常为会话ID/群ID；当前会尝试按会话消息发送，若期望私聊提醒请改为用户 open_id（ou_/on_）。",
-    };
-  }
-
-  if (trimmed.startsWith("u_") || trimmed.startsWith("user_")) {
-    return {
-      kind: "legacy-user-id",
-      warning: "检测到疑似旧 user_id，飞书发送可能需要换用 open_id（ou_/on_）；系统会继续尝试发送。",
-    };
-  }
-
-  return {
-    kind: "unknown",
-    warning: "heartbeat target open id 前缀不在已识别范围内（ou_/on_/oc_）。系统会继续尝试发送，但建议你确认是否为有效接收人 open_id。",
-  };
-}
-
-function isAuthError(rawMessage: string): boolean {
-  return (
-    rawMessage.includes("profile found") ||
-    rawMessage.includes("No profile found") ||
-    rawMessage.includes("Failed to read OAuth credentials")
-  );
-}
-
-function isPlaceholderLikely(value: string | undefined): boolean {
-  const trimmed = (value || "").trim();
-  if (!trimmed) {
-    return true;
-  }
-  if (trimmed.length < 6) {
-    return true;
-  }
-  if (/^\d+$/.test(trimmed)) {
-    return true;
-  }
-  if (/^(test|demo|fake|dummy|sample|example|placeholder|abc|aaa|xxx)+$/i.test(trimmed)) {
-    return true;
-  }
-  return false;
-}
-
-function maskCredential(value: string | undefined): string {
-  const trimmed = (value || "").trim();
-  if (!trimmed) {
-    return "<empty>";
-  }
-  if (trimmed.length <= 6) {
-    return "*".repeat(trimmed.length);
-  }
-  return `${trimmed.slice(0, 3)}***${trimmed.slice(-3)}`;
-}
-
-function maskConfigValue(raw: string | undefined): string | undefined {
-  const trimmed = (raw || "").trim();
-  if (!trimmed) {
-    return undefined;
-  }
-  if (trimmed.length <= 6) {
-    return "*".repeat(trimmed.length);
-  }
-  return `${trimmed.slice(0, 3)}***${trimmed.slice(-3)}`;
 }
