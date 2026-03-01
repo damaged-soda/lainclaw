@@ -1,4 +1,4 @@
-import { coreCoordinator } from "../bootstrap/coreCoordinator.js";
+import { coreCoordinator } from "../app/coreCoordinator.js";
 
 type NormalizedCoreResult = Awaited<ReturnType<typeof coreCoordinator.runAgent>>;
 

@@ -1,9 +1,10 @@
-import path from "node:path";
-import { resolveAdapter } from "../adapters/registry.js";
 import { ValidationError } from "../shared/types.js";
 import {
   buildRuntimeRequestContext,
 } from "./context.js";
+import {
+  runRuntime,
+} from "./entrypoint.js";
 import {
   type CoreContextToolSpec,
   type CoreRuntimeInput,
@@ -49,21 +50,13 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
           memoryEnabled: input.memoryEnabled ?? true,
         });
 
-        const resolved = resolveAdapter(input.provider);
-        const route = `adapter.${resolved.provider}`;
-        const toolAllow = input.toolAllow;
-        const withTools = input.withTools;
-
-        const adapterInput = {
+        const { adapter: adapterResult } = await runRuntime({
           requestContext: requestContext.requestContext,
-          route,
-          withTools,
-          toolAllow,
-          ...(typeof input.cwd === "string" ? { cwd: path.resolve(input.cwd) } : {}),
+          withTools: input.withTools,
+          toolAllow: input.toolAllow,
+          ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
           ...(Array.isArray(input.tools) ? { toolSpecs: toCoreContextTools(input.tools) } : {}),
-        };
-
-        const adapterResult = await resolved.run(adapterInput);
+        });
 
         return {
           route: adapterResult.route,
