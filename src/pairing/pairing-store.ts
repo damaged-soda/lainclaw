@@ -692,7 +692,8 @@ export async function approveChannelPairingCode(params: {
       return null;
     }
     pruned.splice(idx, 1);
-    const accountId = normalizedPairingAccountId(params.accountId) || (entry.meta?.accountId ? entry.meta.accountId : undefined);
+    const accountId = normalizePairingAccountId(params.accountId)
+      || (entry.meta?.accountId ? entry.meta.accountId : undefined);
     const nextState: GatewayPairingChannelState = {
       ...currentState,
       requests: pruned,
@@ -721,8 +722,4 @@ export async function approveChannelPairingCode(params: {
 
     return { id: entry.id, entry };
   });
-}
-
-function normalizedPairingAccountId(accountId?: string): string {
-  return normalizePairingAccountId(accountId);
 }
