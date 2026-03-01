@@ -27,6 +27,7 @@ import {
 import {
   formatHeartbeatErrorHint,
   inspectHeartbeatTargetOpenId,
+  makeFeishuFailureHint,
   maskConfigValue,
 } from '../../channels/feishu/diagnostics.js';
 import { validateFeishuGatewayCredentials } from '../../channels/feishu/credentials.js';
@@ -35,7 +36,7 @@ import {
   type GatewayServiceRunContext,
   type GatewayStartOverrides,
   normalizeGatewayChannels,
-  resolveGatewayChannelPlugin,
+  resolveGatewayChannel,
 } from './channelRegistry.js';
 
 export type GatewayParsedCommand = ReturnType<typeof parseGatewayArgs>;
@@ -76,20 +77,35 @@ export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<num
     return 0;
   }
 
-  const channelPlugin = resolveGatewayChannelPlugin(channel);
-  await channelPlugin.run(
-    gatewayOptions as GatewayStartOverrides,
-    {
-      channel,
-      action,
-      debug,
-      serviceChild,
-      daemon,
-      statePath,
-      logPath,
-      serviceArgv,
-    },
-  );
+  const runtimeChannel = resolveGatewayChannel(channel);
+  if (runtimeChannel === 'feishu') {
+    await runFeishuGatewayWithHeartbeat(
+      gatewayOptions as GatewayStartOverrides,
+      makeFeishuFailureHint,
+      {
+        channel,
+        action,
+        debug,
+        serviceChild,
+        daemon,
+        statePath,
+        logPath,
+        serviceArgv,
+      },
+    );
+    return 0;
+  }
+
+  await runLocalGatewayService(gatewayOptions as GatewayStartOverrides, {
+    channel,
+    action,
+    debug,
+    serviceChild,
+    daemon,
+    statePath,
+    logPath,
+    serviceArgv,
+  });
   return 0;
 }
 
@@ -396,8 +412,13 @@ export async function runGatewayServiceForChannels(
   }
 
   const startedChannels = normalizedChannels.map((channel) => {
-    const plugin = resolveGatewayChannelPlugin(channel);
-    return plugin.run(overrides, {
+    if (channel === 'feishu') {
+      return runFeishuGatewayWithHeartbeat(overrides, makeFeishuFailureHint, {
+        ...serviceContext,
+        channel,
+      });
+    }
+    return runLocalGatewayService(overrides, {
       ...serviceContext,
       channel,
     });
