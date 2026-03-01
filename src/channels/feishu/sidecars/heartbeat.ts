@@ -1,4 +1,4 @@
-import { startHeartbeatSidecar } from '../../../gateway/runtime/sidecars/heartbeat.js';
+import { startHeartbeatSidecar } from '../../../gateway/commands/sidecars/heartbeat.js';
 import type { FeishuGatewayConfig } from '../config.js';
 import type { HeartbeatLoopHandle } from '../../../heartbeat/runner.js';
 import type { ChannelOutboundTextCapability } from '../../../channels/contracts.js';

@@ -21,7 +21,7 @@ import {
 } from './contracts.js';
 import { normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
 import { runGatewayServiceRunner } from './serviceRunner.js';
-import { integrationRegistry } from './integrationRegistry.js';
+import { channelsRegistry } from './channelsRegistry.js';
 import type { ChannelRunContext, Channel } from '../../channels/contracts.js';
 
 export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<number> {
@@ -60,9 +60,9 @@ export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<num
   }
 
   const runtimeChannel = resolveGatewayChannel(channel);
-  const runtime = integrationRegistry[runtimeChannel];
+  const runtime = channelsRegistry[runtimeChannel];
 
-  await runIntegrationRuntime(runtime, runtimeChannel, overrides, {
+  await runChannelRuntime(runtime, runtimeChannel, overrides, {
     ...serviceContext,
     channel: runtimeChannel,
   });
@@ -185,7 +185,7 @@ export async function runGatewayServiceForChannels(
 
   if (serviceContext.daemon) {
     for (const channel of normalizedChannels) {
-      const runtime = integrationRegistry[channel];
+      const runtime = channelsRegistry[channel];
       if (runtime.preflight) {
         await runtime.preflight(overrides, { integration: channel } as ChannelRunContext);
       }
@@ -205,8 +205,8 @@ export async function runGatewayServiceForChannels(
 
   await Promise.all(
     normalizedChannels.map((channel) => {
-      const runtime = integrationRegistry[channel];
-      return runIntegrationRuntime(
+      const runtime = channelsRegistry[channel];
+      return runChannelRuntime(
         runtime,
         channel,
         overrides,
@@ -226,7 +226,7 @@ export async function printGatewayServiceStatus(
   return resolveGatewayServiceStatus(paths, channel);
 }
 
-async function runIntegrationRuntime(
+async function runChannelRuntime(
   runtime: Channel,
   channel: GatewayChannel,
   overrides: GatewayStartOverrides,

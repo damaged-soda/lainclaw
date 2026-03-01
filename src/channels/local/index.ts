@@ -1,5 +1,5 @@
 import { runLocalTransport } from './transport.js';
-import { handleInbound } from '../../gateway/core/handleInbound.js';
+import { handleInbound } from '../../gateway/handlers/handleInbound.js';
 import {
   type Channel,
   type ChannelRunContext,

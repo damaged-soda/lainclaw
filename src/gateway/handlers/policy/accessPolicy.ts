@@ -21,7 +21,7 @@ interface AccessControlPolicyConfig {
   pairingAllowFrom?: string[];
 }
 
-function isIntegrationConfig(raw: unknown): raw is AccessControlPolicyConfig {
+function isChannelConfig(raw: unknown): raw is AccessControlPolicyConfig {
   return !!raw && typeof raw === 'object';
 }
 
@@ -45,11 +45,11 @@ function buildPairingRequestText(
   requestId: string,
   actorId: string,
   code: string,
-  integration: ChannelId,
+  channel: ChannelId,
 ): string {
   return buildPairingReply({
-    channel: integration,
-    idLine: `${integration}: ${actorId}`,
+    channel,
+    idLine: `${channel}: ${actorId}`,
     code,
   }) || `请在当前会话发送配对码: ${code}（requestId: ${requestId}）`;
 }
@@ -80,8 +80,8 @@ export async function evaluateAccessPolicy(input: AccessPolicyInput): Promise<Ac
     };
   }
 
-  const integration = input.inbound.integration;
-  if (!isIntegrationConfig(input.config)) {
+  const channel = input.inbound.integration;
+  if (!isChannelConfig(input.config)) {
     return { allowed: true };
   }
 
@@ -98,7 +98,7 @@ export async function evaluateAccessPolicy(input: AccessPolicyInput): Promise<Ac
   }
 
   const allowFrom = toList(input.config.pairingAllowFrom);
-  const allowFromFromStore = await readChannelAllowFromStore(integration).catch(() => []);
+  const allowFromFromStore = await readChannelAllowFromStore(channel).catch(() => []);
   const finalAllowFrom = Array.from(
     new Set([
       ...allowFrom,
@@ -122,7 +122,7 @@ export async function evaluateAccessPolicy(input: AccessPolicyInput): Promise<Ac
   }
 
   const reply = await upsertChannelPairingRequest({
-    channel: integration,
+    channel,
     id: actorId,
     limits: {
       ttlMs: parsePositiveInt(input.config.pairingPendingTtlMs),
@@ -145,6 +145,6 @@ export async function evaluateAccessPolicy(input: AccessPolicyInput): Promise<Ac
 
   return {
     allowed: false,
-    replyText: buildPairingRequestText(input.inbound.requestId, input.inbound.actorId, reply.code, integration),
+    replyText: buildPairingRequestText(input.inbound.requestId, input.inbound.actorId, reply.code, channel),
   };
 }

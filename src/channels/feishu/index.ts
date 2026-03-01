@@ -3,7 +3,7 @@ import { validateFeishuGatewayCredentials } from './credentials.js';
 import { startFeishuHeartbeatSidecar } from './sidecars/heartbeat.js';
 import { resolveFeishuGatewayConfig, type FeishuGatewayConfig } from './config.js';
 import { runFeishuTransport } from './transport.js';
-import { handleInbound } from '../../gateway/core/handleInbound.js';
+import { handleInbound } from '../../gateway/handlers/handleInbound.js';
 import { makeFeishuFailureHint } from './diagnostics.js';
 import { type Channel, type ChannelRunContext, type SidecarHandle } from '../contracts.js';
 import { sendFeishuTextMessage } from './outbound.js';

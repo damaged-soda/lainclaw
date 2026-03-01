@@ -8,10 +8,10 @@ import {
 } from '../../pairing/pairing-store.js';
 import { resolvePairingIdLabel } from '../../pairing/pairing-labels.js';
 import { setExitCode } from '../shared/exitCode.js';
-import { integrationIds } from '../../gateway/runtime/integrationRegistry.js';
+import { channelIds } from '../../gateway/commands/channelsRegistry.js';
 
 const DEFAULT_ACCESS_CONTROL_CHANNEL = 'feishu';
-const SUPPORTED_ACCESS_CONTROL_CHANNELS = new Set<string>(integrationIds);
+const SUPPORTED_ACCESS_CONTROL_CHANNELS = new Set<string>(channelIds);
 
 function resolveAccessControlChannel(raw: string | undefined): PairingChannel {
   const normalized = toPairingChannel(raw);

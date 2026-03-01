@@ -6,18 +6,18 @@ import {
   buildNoBooleanOption,
 } from '../shared/options.js';
 import { setExitCode } from '../shared/exitCode.js';
-import { normalizeGatewayChannels, resolveGatewayChannel } from '../../gateway/runtime/channelRegistry.js';
+import { normalizeGatewayChannels, resolveGatewayChannel } from '../../gateway/commands/channelRegistry.js';
 import type {
   GatewayChannel,
   GatewayConfigParsedCommand,
   GatewayParsedCommand,
   GatewayStartOverrides,
-} from '../../gateway/runtime/contracts.js';
+} from '../../gateway/commands/contracts.js';
 import {
   runGatewayConfigCommand,
   runGatewayStart,
   runGatewayStatusOrStop,
-} from '../../gateway/runtime/start.js';
+} from '../../gateway/commands/start.js';
 import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
 
 type GatewayCommonOptions = {
