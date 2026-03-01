@@ -1,1 +1,1 @@
-export { runPairingCommand } from '../cli/commands/pairing.js';
+export { runPairingCommand } from '../channels/feishu/pairing/cli.js';

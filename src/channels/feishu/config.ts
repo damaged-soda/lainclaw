@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
-import type { PairingPolicy, PairingRequest } from "../../pairing/pairing-store.js";
-import { DEFAULT_PAIRING_PENDING_MAX, DEFAULT_PAIRING_PENDING_TTL_MS } from "../../pairing/pairing-store.js";
+import type { PairingPolicy, PairingRequest } from "./pairing/pairing-store.js";
+import { DEFAULT_PAIRING_PENDING_MAX, DEFAULT_PAIRING_PENDING_TTL_MS } from "./pairing/pairing-store.js";
 import { getBuiltinToolNames } from "../../tools/registry.js";
 
 export interface FeishuGatewayConfig {
