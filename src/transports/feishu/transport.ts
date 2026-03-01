@@ -1,10 +1,10 @@
 import * as Lark from '@larksuiteoapi/node-sdk';
 
 import {
-  type FeishuTextOutboundAction,
-  type InboundMessage,
   type InboundHandler,
+  type InboundMessage,
   type OutboundAction,
+  type ReplyTextOutboundAction,
 } from '../contracts.js';
 import { sendFeishuTextMessage } from '../../channels/feishu/outbound.js';
 import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
@@ -106,16 +106,33 @@ function isReplay(eventId: string, ttlMs: number): boolean {
   return false;
 }
 
+function resolveActorId(rawSender?: FeishuWsMessage['sender']): string {
+  return firstNonEmpty(
+    rawSender?.sender_id?.open_id,
+    rawSender?.sender_id?.user_id,
+    rawSender?.sender_id?.union_id,
+  ) || 'unknown';
+}
+
+function resolveConversationId(actorId: string): string {
+  return `dm:${actorId}`;
+}
+
+function parseEventId(data: unknown): string | undefined {
+  const event = data as Partial<FeishuWsMessage>;
+  return firstNonEmpty(event.message?.message_id);
+}
+
 function parseFeishuInbound(data: unknown, requestId: string): InboundMessage {
   const event = data as Partial<FeishuWsMessage>;
   const message = event.message;
-  const sender = event.sender;
 
-  const messageId = firstNonEmpty(message?.message_id);
   const chatId = firstNonEmpty(message?.chat_id);
   const chatType = normalizeChatType(message?.chat_type) || inferChatType(chatId);
   const messageType = firstNonEmpty(message?.message_type);
-  const openId = firstNonEmpty(sender?.sender_id?.open_id, sender?.sender_id?.user_id, sender?.sender_id?.union_id);
+  const actorId = resolveActorId(event.sender);
+  const conversationId = resolveConversationId(actorId);
+  const replyTo = actorId;
   const content = parseTextContent(message?.content);
 
   if (!chatType) {
@@ -124,8 +141,9 @@ function parseFeishuInbound(data: unknown, requestId: string): InboundMessage {
       channel: 'feishu',
       requestId,
       reason: 'missing-chat-type',
-      sessionHint: chatId,
-      openId,
+      actorId,
+      conversationId,
+      replyTo,
       input: content,
     };
   }
@@ -136,8 +154,9 @@ function parseFeishuInbound(data: unknown, requestId: string): InboundMessage {
       channel: 'feishu',
       requestId,
       reason: 'non-direct-chat',
-      sessionHint: chatId,
-      openId,
+      actorId,
+      conversationId,
+      replyTo,
       input: content,
     };
   }
@@ -148,20 +167,22 @@ function parseFeishuInbound(data: unknown, requestId: string): InboundMessage {
       channel: 'feishu',
       requestId,
       reason: 'non-text-message',
-      sessionHint: chatId,
-      openId,
+      actorId,
+      conversationId,
+      replyTo,
       input: content,
     };
   }
 
-  if (!openId || !content) {
+  if (actorId === "unknown" || !content) {
     return {
       kind: 'ignored',
       channel: 'feishu',
       requestId,
       reason: 'missing-open-id-or-content',
-      sessionHint: chatId,
-      openId,
+      actorId,
+      conversationId,
+      replyTo,
       input: content,
     };
   }
@@ -170,23 +191,23 @@ function parseFeishuInbound(data: unknown, requestId: string): InboundMessage {
     kind: 'message',
     channel: 'feishu',
     requestId,
-    requestSource: messageId,
-    openId,
-    sessionHint: messageId,
     input: content,
+    actorId,
+    conversationId,
+    replyTo,
   };
 }
 
-async function executeOutboundAction(config: FeishuGatewayConfig, action: FeishuTextOutboundAction): Promise<void> {
+async function executeOutboundAction(config: FeishuGatewayConfig, action: ReplyTextOutboundAction): Promise<void> {
   await sendFeishuTextMessage(config, {
-    openId: action.openId,
+    openId: action.replyTo,
     text: action.text,
   });
 }
 
 async function executeOutboundActions(config: FeishuGatewayConfig, actions: readonly OutboundAction[]): Promise<void> {
-  const filtered = actions.filter((action): action is FeishuTextOutboundAction =>
-    action.channel === 'feishu' && action.kind === 'feishu.sendText'
+  const filtered = actions.filter((action): action is ReplyTextOutboundAction =>
+    action.channel === 'feishu' && action.kind === 'reply.text'
   );
 
   for (const action of filtered) {
@@ -204,13 +225,14 @@ export async function runFeishuTransport(options: FeishuTransportOptions): Promi
   const eventDispatcher = new Lark.EventDispatcher({});
   eventDispatcher.register({
     'im.message.receive_v1': async (data) => {
-      const requestId = createRequestId();
+      const messageEventId = parseEventId(data);
+      const requestId = messageEventId || createRequestId();
       const inbound = parseFeishuInbound(data, requestId);
       if (inbound.kind !== 'message') {
         return;
       }
 
-      const eventId = inbound.sessionHint || requestId;
+      const eventId = messageEventId || inbound.requestId;
       if (isReplay(eventId, EVENT_ID_TTL_MS)) {
         return;
       }

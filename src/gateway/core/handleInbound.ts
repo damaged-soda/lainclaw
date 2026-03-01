@@ -1,10 +1,9 @@
 import { runAgent } from "../index.js";
-import {
-  type FeishuTextOutboundAction,
-  type InboundMessage,
-  type LocalOutboxErrorAction,
-  type LocalOutboxSuccessAction,
-  type OutboundAction,
+import type {
+  FeishuInboundMessage,
+  InboundMessage,
+  OutboundAction,
+  ReplyTextOutboundAction,
 } from "../../transports/contracts.js";
 import type { FeishuGatewayConfig } from "../../channels/feishu/config.js";
 import { evaluateFeishuAccessPolicy } from "./policy/accessPolicy.js";
@@ -47,7 +46,7 @@ export async function handleInbound(
     return [];
   }
 
-  const input = (inbound.input || "").trim();
+  const input = inbound.input.trim();
   if (!input) {
     return [];
   }
@@ -59,72 +58,35 @@ export async function handleInbound(
       throw new Error("feishu handler received non-feishu message");
     }
     const decision = await evaluateFeishuAccessPolicy({
-      inbound,
+      inbound: inbound as FeishuInboundMessage,
       config: options.config,
     });
     if (!decision.allowed) {
-      return decision.outboundActions;
+      if (!decision.replyText) {
+        return [];
+      }
+      return [buildReplyTextAction(inbound, decision.replyText)];
     }
   }
 
   try {
     const responseText = await runAgentWithTimeout({
       input,
-      channelId: options.channel,
+      channelId: inbound.channel,
       sessionKey,
       runtime: options.runtime,
       timeoutMs: options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
     });
 
-    if (options.channel === "feishu") {
-      if (inbound.channel !== "feishu") {
-        throw new Error("feishu handler received non-feishu message");
-      }
-      return [
-        buildFeishuReplyAction(inbound.requestId, inbound.openId, responseText),
-      ];
-    }
-
-    const requestSource = inbound.requestSource || inbound.requestId;
-    return [
-      {
-        kind: "local.outbox.success",
-        channel: "local",
-        requestId: inbound.requestId,
-        requestSource,
-        sessionKey,
-        input,
-        output: responseText,
-      },
-    ];
+    return [buildReplyTextAction(inbound, responseText)];
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : String(error);
     const hint = options.onFailureHint ? options.onFailureHint(rawMessage) : rawMessage;
-
-    if (options.channel === "feishu") {
-      if (inbound.channel !== "feishu") {
-        throw new Error("feishu handler received non-feishu message");
-      }
-      return [
-        buildFeishuReplyAction(
-          inbound.requestId,
-          inbound.openId,
-          `[Lainclaw] ${hint}（requestId: ${inbound.requestId}）`,
-        ),
-      ];
-    }
-
-    const requestSource = inbound.requestSource || inbound.requestId;
     return [
-      {
-        kind: "local.outbox.error",
-        channel: "local",
-        requestId: inbound.requestId,
-        requestSource,
-        sessionKey,
-        input,
-        error: rawMessage,
-      },
+      buildReplyTextAction(
+        inbound,
+        `[Lainclaw] ${hint}（requestId: ${inbound.requestId}）`,
+      ),
     ];
   }
 }
@@ -166,29 +128,23 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
 }
 
 function resolveSessionKey(inbound: InboundMessage): string {
-  if (inbound.channel === "feishu") {
-    return `feishu:dm:${inbound.openId}`;
+  const actorId = inbound.actorId.trim() || inbound.requestId;
+  const conversationId = inbound.conversationId.trim() || inbound.requestId;
+  if (inbound.channel === "local") {
+    return `${actorId}:${conversationId}`;
   }
-
-  const sessionHint = inbound.sessionHint?.trim();
-  if (sessionHint) {
-    return sessionHint;
-  }
-
-  const accountId = inbound.accountId?.trim();
-  if (accountId) {
-    return `local:${accountId}`;
-  }
-
-  return "local:main";
+  return `${inbound.channel}:${actorId}:${conversationId}`;
 }
 
-function buildFeishuReplyAction(requestId: string, openId: string, text: string): FeishuTextOutboundAction {
+function buildReplyTextAction(
+  inbound: InboundMessage,
+  text: string,
+): ReplyTextOutboundAction {
   return {
-    kind: "feishu.sendText",
-    channel: "feishu",
-    requestId,
-    openId,
+    kind: "reply.text",
+    channel: inbound.channel,
+    requestId: inbound.requestId,
+    replyTo: inbound.replyTo,
     text,
   };
 }

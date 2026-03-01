@@ -2,11 +2,7 @@ import { type FeishuGatewayConfig } from "../../../channels/feishu/config.js";
 import { buildPairingQueueFullReply, buildPairingReply } from "../../../pairing/pairing-messages.js";
 import { readChannelAllowFromStore, upsertChannelPairingRequest } from "../../../pairing/pairing-store.js";
 import { resolvePairingIdLabel } from "../../../pairing/pairing-labels.js";
-import type {
-  FeishuInboundMessage,
-  FeishuTextOutboundAction,
-  OutboundAction,
-} from "../../../transports/contracts.js";
+import type { FeishuInboundMessage } from "../../../transports/contracts.js";
 
 const FEISHU_DENY_MESSAGE = "当前策略不允许当前用户发起会话，请联系管理员配置后重试。";
 
@@ -17,7 +13,7 @@ interface FeishuPolicyInput {
 
 export interface FeishuPolicyDecision {
   allowed: boolean;
-  outboundActions: readonly OutboundAction[];
+  replyText?: string;
 }
 
 function isMatchingPairingPolicy(value: string | undefined): value is FeishuGatewayConfig["pairingPolicy"] {
@@ -48,68 +44,47 @@ function resolvePairingPolicy(policy: string | undefined, configPolicy: FeishuGa
   return "open";
 }
 
-function buildDeniedReplyAction(requestId: string, openId: string): FeishuTextOutboundAction {
-  return {
-    kind: "feishu.sendText",
-    channel: "feishu",
-    requestId,
-    openId,
-    text: FEISHU_DENY_MESSAGE,
-  };
+function buildDeniedReplyText(): string {
+  return FEISHU_DENY_MESSAGE;
 }
 
-function buildPairingQueueFullAction(requestId: string, openId: string): FeishuTextOutboundAction {
-  return {
-    kind: "feishu.sendText",
-    channel: "feishu",
-    requestId,
-    openId,
-    text: buildPairingQueueFullReply(),
-  };
+function buildPairingQueueFullText(): string {
+  return buildPairingQueueFullReply();
 }
 
 function buildPairingRequestAction(
-  requestId: string,
-  openId: string,
+  _requestId: string,
+  _openId: string,
   code: string,
-): FeishuTextOutboundAction {
-  return {
-    kind: "feishu.sendText",
+): string {
+  return buildPairingReply({
     channel: "feishu",
-    requestId,
-    openId,
-    text: buildPairingReply({
-      channel: "feishu",
-      idLine: `${resolvePairingIdLabel()}: ${openId}`,
-      code,
-    }),
-  };
+    idLine: `${resolvePairingIdLabel()}: ${_openId}`,
+    code,
+  });
 }
 
 export async function evaluateFeishuAccessPolicy(params: FeishuPolicyInput): Promise<FeishuPolicyDecision> {
-  const normalizedOpenId = (params.inbound.openId || "").trim().toLowerCase();
+  const normalizedOpenId = (params.inbound.actorId || "").trim().toLowerCase();
   const policy = resolvePairingPolicy(undefined, params.config.pairingPolicy);
 
   if (!normalizedOpenId) {
     return {
       allowed: false,
-      outboundActions: [
-        buildDeniedReplyAction(params.inbound.requestId, params.inbound.openId),
-      ],
+      replyText: buildDeniedReplyText(),
     };
   }
 
   if (policy === "open") {
     return {
       allowed: true,
-      outboundActions: [],
     };
   }
 
   if (policy === "disabled") {
     return {
       allowed: false,
-      outboundActions: [buildDeniedReplyAction(params.inbound.requestId, params.inbound.openId)],
+      replyText: buildDeniedReplyText(),
     };
   }
 
@@ -120,21 +95,19 @@ export async function evaluateFeishuAccessPolicy(params: FeishuPolicyInput): Pro
   if (isWildcardAllowFrom(allowFrom) && allowFrom.length > 0) {
     return {
       allowed: true,
-      outboundActions: [],
     };
   }
 
   if (allowFrom.includes(normalizedOpenId)) {
     return {
       allowed: true,
-      outboundActions: [],
     };
   }
 
   if (policy === "allowlist") {
     return {
       allowed: false,
-      outboundActions: [buildDeniedReplyAction(params.inbound.requestId, params.inbound.openId)],
+      replyText: buildDeniedReplyText(),
     };
   }
 
@@ -150,19 +123,18 @@ export async function evaluateFeishuAccessPolicy(params: FeishuPolicyInput): Pro
   if (!reply.code) {
     return {
       allowed: false,
-      outboundActions: [buildPairingQueueFullAction(params.inbound.requestId, params.inbound.openId)],
+      replyText: buildPairingQueueFullText(),
     };
   }
 
   if (!reply.created) {
     return {
       allowed: false,
-      outboundActions: [],
     };
   }
 
   return {
     allowed: false,
-    outboundActions: [buildPairingRequestAction(params.inbound.requestId, params.inbound.openId, reply.code)],
+    replyText: buildPairingRequestAction(params.inbound.requestId, params.inbound.actorId, reply.code),
   };
 }

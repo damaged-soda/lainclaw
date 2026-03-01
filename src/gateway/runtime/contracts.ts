@@ -1,7 +1,8 @@
 import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
 import type { LocalGatewayOverrides } from '../../channels/local/server.js';
+import type { GatewayRuntimeChannel } from './channelRegistry.js';
 
-export type GatewayChannel = 'feishu' | 'local';
+export type GatewayChannel = GatewayRuntimeChannel;
 
 export type GatewayFeishuStartOverrides = Partial<FeishuGatewayConfig>;
 export type GatewayLocalStartOverrides = Partial<LocalGatewayOverrides>;

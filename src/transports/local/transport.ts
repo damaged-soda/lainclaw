@@ -5,9 +5,8 @@ import path from 'node:path';
 import {
   type InboundHandler,
   type InboundMessage,
-  type LocalOutboxErrorAction,
-  type LocalOutboxSuccessAction,
   type OutboundAction,
+  type ReplyTextOutboundAction,
 } from '../contracts.js';
 
 const LOCAL_INBOX_FILE = 'local-gateway-inbox.jsonl';
@@ -21,8 +20,10 @@ function resolveLocalGatewayDirectory(home = os.homedir()): string {
 
 interface LocalMessage {
   input?: string;
-  sessionKey?: string;
+  actorId?: string;
+  conversationId?: string;
   accountId?: string;
+  sessionKey?: string;
   requestId?: string;
 }
 
@@ -35,39 +36,6 @@ function parseIntegerMs(raw: string | undefined): number {
     return LOCAL_POLL_MS_DEFAULT;
   }
   return value;
-}
-
-function defaultSessionKey(): string {
-  return process.env.LAINCLAW_LOCAL_SESSION_KEY?.trim() || 'local:main';
-}
-
-function resolveLocalSessionKey(payload: {
-  sessionKey?: string;
-  accountId?: string;
-}): string {
-  const explicit = payload.sessionKey?.trim();
-  if (explicit) {
-    return explicit;
-  }
-  const accountId = payload.accountId?.trim();
-  if (accountId) {
-    return `local:${accountId}`;
-  }
-  return defaultSessionKey();
-}
-
-function resolveInboxPath(): string {
-  return process.env.LAINCLAW_LOCAL_INBOX_PATH?.trim()
-    || path.join(resolveLocalGatewayDirectory(), LOCAL_INBOX_FILE);
-}
-
-function resolveOutboxPath(): string {
-  return process.env.LAINCLAW_LOCAL_OUTBOX_PATH?.trim()
-    || path.join(resolveLocalGatewayDirectory(), LOCAL_OUTBOX_FILE);
-}
-
-function resolvePollMs(): number {
-  return parseIntegerMs(process.env.LAINCLAW_LOCAL_POLL_MS);
 }
 
 function nowIso(): string {
@@ -106,8 +74,14 @@ function parseMessageLine(line: string): LocalMessage | undefined {
       }
       return {
         input,
-        sessionKey: typeof parsed.sessionKey === 'string' ? parsed.sessionKey : undefined,
+        actorId: typeof parsed.actorId === 'string' ? parsed.actorId : undefined,
         accountId: typeof parsed.accountId === 'string' ? parsed.accountId : undefined,
+        conversationId:
+          typeof parsed.conversationId === 'string'
+            ? parsed.conversationId
+            : typeof parsed.sessionKey === 'string'
+              ? parsed.sessionKey
+              : undefined,
         requestId: typeof parsed.requestId === 'string' ? parsed.requestId : undefined,
       };
     } catch {
@@ -123,6 +97,43 @@ function parseMessageLine(line: string): LocalMessage | undefined {
   return {
     input,
   };
+}
+
+function normalizeActorId(raw: string | undefined): string {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return 'local';
+  }
+  return trimmed;
+}
+
+function normalizeConversationId(raw: string | undefined): string {
+  const trimmed = raw?.trim();
+  if (!trimmed) {
+    return 'main';
+  }
+  return trimmed;
+}
+
+function resolveLocalSessionKey(payload: {
+  actorId: string;
+  conversationId: string;
+}): string {
+  return `${payload.actorId.trim()}:${payload.conversationId.trim()}`;
+}
+
+function resolveInboxPath(): string {
+  return process.env.LAINCLAW_LOCAL_INBOX_PATH?.trim()
+    || path.join(resolveLocalGatewayDirectory(), LOCAL_INBOX_FILE);
+}
+
+function resolveOutboxPath(): string {
+  return process.env.LAINCLAW_LOCAL_OUTBOX_PATH?.trim()
+    || path.join(resolveLocalGatewayDirectory(), LOCAL_OUTBOX_FILE);
+}
+
+function resolvePollMs(): number {
+  return parseIntegerMs(process.env.LAINCLAW_LOCAL_POLL_MS);
 }
 
 async function ensureDirectory(targetPath: string): Promise<void> {
@@ -146,7 +157,6 @@ function appendLine(filePath: string, payload: string): Promise<void> {
 
 function buildRunboxRecord(record: {
   requestId: string;
-  requestSource: string;
   sessionKey: string;
   input: string;
   output: string;
@@ -155,7 +165,6 @@ function buildRunboxRecord(record: {
     channel: 'local',
     recordedAt: nowIso(),
     requestId: record.requestId,
-    requestSource: record.requestSource,
     sessionKey: record.sessionKey,
     input: record.input,
     output: record.output,
@@ -164,7 +173,6 @@ function buildRunboxRecord(record: {
 
 function buildErrorRecord(record: {
   requestId: string;
-  requestSource: string;
   sessionKey: string;
   input: string;
   error: string;
@@ -173,42 +181,32 @@ function buildErrorRecord(record: {
     channel: 'local',
     recordedAt: nowIso(),
     requestId: record.requestId,
-    requestSource: record.requestSource,
     sessionKey: record.sessionKey,
     input: record.input,
     error: record.error,
   });
 }
 
-async function executeOutboundActions(actions: readonly OutboundAction[], outboxPath: string): Promise<void> {
+async function executeOutboundActions(
+  actions: readonly OutboundAction[],
+  outboxPath: string,
+  sessionKey: string,
+  input: string,
+): Promise<void> {
   for (const action of actions) {
-    if (action.channel !== 'local') {
+    if (action.channel !== 'local' || action.kind !== 'reply.text') {
       continue;
     }
-
-    if (action.kind === 'local.outbox.success') {
-      const payload: LocalOutboxSuccessAction = action;
-      await appendLine(outboxPath, buildRunboxRecord({
+    const payload: ReplyTextOutboundAction = action;
+    await appendLine(
+      outboxPath,
+      buildRunboxRecord({
         requestId: payload.requestId,
-        requestSource: payload.requestSource,
-        sessionKey: payload.sessionKey,
-        input: payload.input,
-        output: payload.output,
-      }));
-      continue;
-    }
-
-    if (action.kind === 'local.outbox.error') {
-      const payload: LocalOutboxErrorAction = action;
-      await appendLine(outboxPath, buildErrorRecord({
-        requestId: payload.requestId,
-        requestSource: payload.requestSource,
-        sessionKey: payload.sessionKey,
-        input: payload.input,
-        error: payload.error,
-      }));
-      continue;
-    }
+        sessionKey,
+        input,
+        output: payload.text,
+      }),
+    );
   }
 }
 
@@ -259,33 +257,44 @@ export async function runLocalTransport(inboundHandler: InboundHandler): Promise
           continue;
         }
 
+        const actorId = normalizeActorId(payload.actorId || payload.accountId);
+        const conversationId = normalizeConversationId(payload.conversationId || payload.sessionKey);
         const requestId = payload.requestId || `seq-${requestSeq++}`;
+        const replyTo = actorId;
         const inbound: InboundMessage = {
           kind: 'message',
           channel: 'local',
           requestId,
-          requestSource: requestId,
-          accountId: payload.accountId?.trim() || undefined,
-          sessionHint: payload.sessionKey,
           input,
+          actorId,
+          conversationId,
+          replyTo,
         };
 
-        const actions = await inboundHandler(inbound).catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(`[local] ${requestId} failed: ${message}`);
-          const record: LocalOutboxErrorAction = {
-            kind: 'local.outbox.error',
-            channel: 'local',
-            requestId,
-            requestSource: requestId,
-            sessionKey: resolveLocalSessionKey(inbound),
-            input,
-            error: message,
-          };
-          return [record];
+        const sessionKey = resolveLocalSessionKey({
+          actorId,
+          conversationId,
         });
 
-        await executeOutboundActions(actions, outboxPath);
+        let actions: readonly OutboundAction[];
+        try {
+          actions = await inboundHandler(inbound);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[local] ${requestId} failed: ${message}`);
+          await appendLine(
+            outboxPath,
+            buildErrorRecord({
+              requestId,
+              sessionKey,
+              input,
+              error: message,
+            }),
+          );
+          continue;
+        }
+
+        await executeOutboundActions(actions, outboxPath, sessionKey, input);
       }
     }
 

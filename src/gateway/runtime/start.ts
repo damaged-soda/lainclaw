@@ -13,7 +13,7 @@ import {
   stopGatewayService,
   resolveGatewayServiceStatus,
 } from '../../gateway/service.js';
-import { makeFeishuFailureHint, maskConfigValue } from '../../channels/feishu/diagnostics.js';
+import { maskConfigValue } from '../../channels/feishu/diagnostics.js';
 import {
   type GatewayParsedCommand,
   type GatewayConfigParsedCommand,
@@ -24,33 +24,9 @@ import {
   type GatewayChannel,
 } from './contracts.js';
 import { normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
-import { runFeishuGatewayWithHeartbeat } from './channels/feishu.js';
-import { runLocalGatewayService } from './channels/local.js';
+import { gatewayRuntimes } from './runtimes.js';
 import { runGatewayServiceRunner } from './serviceRunner.js';
-import { resolveFeishuGatewayRuntimeConfig } from './channels/feishu.js';
-
-interface GatewayRuntimeEntry {
-  start: (overrides: GatewayStartOverrides, serviceContext: GatewayServiceRunContext) => Promise<void>;
-  validate?: (overrides: GatewayStartOverrides, channel: GatewayChannel) => Promise<void>;
-}
-
-const gatewayRuntimes: Record<GatewayChannel, GatewayRuntimeEntry> = {
-  feishu: {
-    start: (overrides, serviceContext) =>
-      runFeishuGatewayWithHeartbeat(
-        overrides as GatewayFeishuStartOverrides,
-        makeFeishuFailureHint,
-        serviceContext,
-      ),
-    validate: async (overrides) => {
-      await resolveFeishuGatewayRuntimeConfig(overrides as GatewayFeishuStartOverrides, 'feishu');
-    },
-  },
-  local: {
-    start: (overrides, serviceContext) =>
-      runLocalGatewayService(overrides as GatewayLocalStartOverrides, serviceContext),
-  },
-};
+import type { GatewayRuntimeEntry } from './runtimes.js';
 
 export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<number> {
   const {
@@ -89,7 +65,7 @@ export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<num
   }
 
   const runtimeChannel = resolveGatewayChannel(channel);
-  const runtime = gatewayRuntimes[runtimeChannel];
+  const runtime = gatewayRuntimes[runtimeChannel] as GatewayRuntimeEntry;
 
   await runtime.start(
     normalizeGatewayRuntimeOverrides(gatewayOptions as GatewayStartOverrides, runtimeChannel),
@@ -217,11 +193,11 @@ export async function runGatewayServiceForChannels(
 
   if (serviceContext.daemon) {
     for (const channel of normalizedChannels) {
-      const runtime = gatewayRuntimes[channel];
+      const runtime = gatewayRuntimes[channel] as GatewayRuntimeEntry;
       await runtime.validate?.(overrides, channel);
     }
 
-    await runGatewayServiceRunner({
+  await runGatewayServiceRunner({
       serviceContext: {
         ...serviceContext,
         channel: 'gateway',
@@ -234,7 +210,7 @@ export async function runGatewayServiceForChannels(
   }
 
   const startedChannels = normalizedChannels.map((channel) => {
-    const runtime = gatewayRuntimes[channel];
+    const runtime = gatewayRuntimes[channel] as GatewayRuntimeEntry;
     const nextOverrides = normalizeGatewayRuntimeOverrides(overrides, channel);
     return runtime.start(nextOverrides, {
       ...serviceContext,
@@ -254,8 +230,6 @@ function normalizeGatewayRuntimeOverrides(
   }
   return overrides as GatewayLocalStartOverrides;
 }
-
-export { runFeishuGatewayWithHeartbeat, runLocalGatewayService };
 
 export function printGatewayServiceStatus(
   paths: { statePath: string; logPath: string },

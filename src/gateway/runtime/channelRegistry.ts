@@ -1,6 +1,9 @@
-import type { GatewayChannel } from './contracts.js';
+import { gatewayRuntimes } from './runtimes.js';
 
-const GATEWAY_CHANNELS: GatewayChannel[] = ['feishu', 'local'];
+export type GatewayRuntimeChannel = keyof typeof gatewayRuntimes;
+export type GatewayChannel = GatewayRuntimeChannel;
+
+const GATEWAY_CHANNELS: GatewayChannel[] = Object.keys(gatewayRuntimes) as GatewayChannel[];
 
 export function resolveGatewayChannel(rawChannel: string): GatewayChannel {
   const channel = rawChannel.trim().toLowerCase();
