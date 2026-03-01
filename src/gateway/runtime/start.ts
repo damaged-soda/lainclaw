@@ -10,12 +10,8 @@ import {
 import {
   getGatewayServiceSnapshot,
   resolveGatewayServicePaths,
-  spawnGatewayServiceProcess,
-  type GatewayServicePaths,
-  type GatewayServiceState,
-  resolveGatewayServiceStatus,
   stopGatewayService,
-  writeGatewayServiceState,
+  resolveGatewayServiceStatus,
 } from '../../gateway/service.js';
 import { makeFeishuFailureHint, maskConfigValue } from '../../channels/feishu/diagnostics.js';
 import {
@@ -28,11 +24,33 @@ import {
   type GatewayChannel,
 } from './contracts.js';
 import { normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
-import {
-  resolveFeishuGatewayRuntimeConfig,
-  runFeishuGatewayWithHeartbeat,
-} from './channels/feishu.js';
+import { runFeishuGatewayWithHeartbeat } from './channels/feishu.js';
 import { runLocalGatewayService } from './channels/local.js';
+import { runGatewayServiceRunner } from './serviceRunner.js';
+import { resolveFeishuGatewayRuntimeConfig } from './channels/feishu.js';
+
+interface GatewayRuntimeEntry {
+  start: (overrides: GatewayStartOverrides, serviceContext: GatewayServiceRunContext) => Promise<void>;
+  validate?: (overrides: GatewayStartOverrides, channel: GatewayChannel) => Promise<void>;
+}
+
+const gatewayRuntimes: Record<GatewayChannel, GatewayRuntimeEntry> = {
+  feishu: {
+    start: (overrides, serviceContext) =>
+      runFeishuGatewayWithHeartbeat(
+        overrides as GatewayFeishuStartOverrides,
+        makeFeishuFailureHint,
+        serviceContext,
+      ),
+    validate: async (overrides) => {
+      await resolveFeishuGatewayRuntimeConfig(overrides as GatewayFeishuStartOverrides, 'feishu');
+    },
+  },
+  local: {
+    start: (overrides, serviceContext) =>
+      runLocalGatewayService(overrides as GatewayLocalStartOverrides, serviceContext),
+  },
+};
 
 export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<number> {
   const {
@@ -71,34 +89,21 @@ export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<num
   }
 
   const runtimeChannel = resolveGatewayChannel(channel);
-  if (runtimeChannel === 'feishu') {
-    await runFeishuGatewayWithHeartbeat(
-      gatewayOptions as GatewayFeishuStartOverrides,
-      makeFeishuFailureHint,
-      {
-        channel,
-        action,
-        debug,
-        serviceChild,
-        daemon,
-        statePath,
-        logPath,
-        serviceArgv,
-      },
-    );
-    return 0;
-  }
+  const runtime = gatewayRuntimes[runtimeChannel];
 
-  await runLocalGatewayService(gatewayOptions as GatewayLocalStartOverrides, {
-    channel,
-    action,
-    debug,
-    serviceChild,
-    daemon,
-    statePath,
-    logPath,
-    serviceArgv,
-  });
+  await runtime.start(
+    normalizeGatewayRuntimeOverrides(gatewayOptions as GatewayStartOverrides, runtimeChannel),
+    {
+      channel,
+      action,
+      debug,
+      serviceChild,
+      daemon,
+      statePath,
+      logPath,
+      serviceArgv,
+    },
+  );
   return 0;
 }
 
@@ -184,7 +189,7 @@ export async function runGatewayServiceLifecycleAction(
   });
 
   if (serviceContext.action === 'status') {
-    await printGatewayServiceStatus(paths);
+    await resolveGatewayServiceStatus(paths);
     return;
   }
   if (serviceContext.action !== 'stop') {
@@ -211,67 +216,30 @@ export async function runGatewayServiceForChannels(
   }
 
   if (serviceContext.daemon) {
-    const paths = resolveGatewayServicePaths('gateway', {
-      statePath: serviceContext.statePath,
-      logPath: serviceContext.logPath,
-    });
-    const snapshot = await getGatewayServiceSnapshot(paths);
-    if (snapshot.running) {
-      throw new Error(`Gateway already running (pid=${snapshot.state?.pid})`);
-    }
-
     for (const channel of normalizedChannels) {
-      if (channel === 'feishu') {
-        await resolveFeishuGatewayRuntimeConfig(
-          normalizeGatewayRuntimeOverrides(overrides, channel),
-          channel,
-        );
-        continue;
-      }
+      const runtime = gatewayRuntimes[channel];
+      await runtime.validate?.(overrides, channel);
     }
 
-    const daemonArgv = ['gateway', 'start', ...serviceContext.serviceArgv, '--service-child'];
-    const scriptPath = process.argv[1];
-    if (!scriptPath) {
-      throw new Error('Cannot locate service entrypoint');
-    }
-
-    const daemonPid = await spawnGatewayServiceProcess(scriptPath, daemonArgv, paths);
-    const daemonState: GatewayServiceState = {
-      channel: 'gateway',
-      channels: normalizedChannels,
-      pid: daemonPid,
-      startedAt: new Date().toISOString(),
-      command: `${process.execPath} ${scriptPath} ${daemonArgv.join(' ')}`.trim(),
-      statePath: paths.statePath,
-      logPath: paths.logPath,
-      argv: [scriptPath, ...daemonArgv],
-    };
-    await writeGatewayServiceState(daemonState);
-    console.log(`gateway service started as daemon: pid=${daemonPid}`);
-    console.log(`status: ${paths.statePath}`);
-    console.log(`log: ${paths.logPath}`);
+    await runGatewayServiceRunner({
+      serviceContext: {
+        ...serviceContext,
+        channel: 'gateway',
+      },
+      stateChannel: 'gateway',
+      stateChannels: normalizedChannels,
+      runInProcess: async () => Promise.resolve(),
+    });
     return;
   }
 
   const startedChannels = normalizedChannels.map((channel) => {
-    if (channel === 'feishu') {
-      return runFeishuGatewayWithHeartbeat(
-        normalizeGatewayRuntimeOverrides(overrides, channel),
-        makeFeishuFailureHint,
-        {
-          ...serviceContext,
-          channel,
-        },
-      );
-    }
-    return runLocalGatewayService(
-      normalizeGatewayRuntimeOverrides(overrides, channel),
-      {
-        ...serviceContext,
-        channel,
-      },
-    );
+    const runtime = gatewayRuntimes[channel];
+    const nextOverrides = normalizeGatewayRuntimeOverrides(overrides, channel);
+    return runtime.start(nextOverrides, {
+      ...serviceContext,
+      channel,
+    });
   });
 
   await Promise.all(startedChannels);
@@ -290,7 +258,7 @@ function normalizeGatewayRuntimeOverrides(
 export { runFeishuGatewayWithHeartbeat, runLocalGatewayService };
 
 export function printGatewayServiceStatus(
-  paths: GatewayServicePaths,
+  paths: { statePath: string; logPath: string },
   channel = 'gateway',
 ): Promise<void> {
   return resolveGatewayServiceStatus(paths, channel);
