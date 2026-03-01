@@ -1,9 +1,6 @@
 import { Command } from 'commander';
 import { runToolsCommand, type ToolsCommandInput } from '../tools.js';
-
-function setExitCode(command: Command, code: number): void {
-  (command as { exitCode?: number }).exitCode = code;
-}
+import { setExitCode } from '../../shared/exitCode.js';
 
 export function buildToolsCommand(program: Command): Command {
   const tools = program.command('tools').description('Run tools command');
@@ -15,7 +12,7 @@ export function buildToolsCommand(program: Command): Command {
         'Examples:',
         '  lainclaw tools list',
         '  lainclaw tools info <name>',
-        '  lainclaw tools invoke <name> --args <json>',
+        '  lainclaw tools invoke <name> [--args <json>]',
       ].join('\n'),
     );
 
@@ -42,8 +39,8 @@ export function buildToolsCommand(program: Command): Command {
     .command('invoke')
     .description('Invoke tool.')
     .argument('<name>', 'Tool name.')
-    .requiredOption('--args <json>', 'Tool arguments in json string.')
-    .action(async (name: string, options: { args: string }, command: Command) => {
+    .option('--args [json]', 'Tool arguments in json string.')
+    .action(async (name: string, options: { args?: string }, command: Command) => {
       const parsed: ToolsCommandInput = {
         kind: 'invoke',
         name,

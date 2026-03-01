@@ -1,5 +1,6 @@
 import { Command, Option } from 'commander';
 import { runAgentCommand } from '../agent.js';
+import { setExitCode } from '../../shared/exitCode.js';
 
 interface ParsedAgentCommand {
   input: string;
@@ -31,10 +32,6 @@ function parseCsv(raw: string): string[] {
     .split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
-}
-
-function setExitCode(command: Command, code: number): void {
-  (command as { exitCode?: number }).exitCode = code;
 }
 
 function normalizeInput(input: string[]): string {

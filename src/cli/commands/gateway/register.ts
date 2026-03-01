@@ -1,10 +1,18 @@
 import { Command, Option } from 'commander';
-import { runGatewayCommand } from './runtime.js';
-import { parseGatewayArgs } from '../../../gateway/runtime/cli/parseGatewayArgs.js';
-import { parseGatewayConfigArgs } from '../../../gateway/runtime/cli/parseGatewayConfigArgs.js';
+import { parsePositiveIntValue } from '../../shared/args.js';
+import { setExitCode } from '../../shared/exitCode.js';
+import { normalizeGatewayChannels, resolveGatewayChannel } from '../../../gateway/runtime/channelRegistry.js';
+import type {
+  GatewayChannel,
+  GatewayConfigParsedCommand,
+  GatewayParsedCommand,
+  GatewayStartOverrides,
+} from '../../../gateway/runtime/contracts.js';
+import { runGatewayConfigCommand, runGatewayStart, runGatewayStatusOrStop } from '../../../gateway/runtime/start.js';
+import type { FeishuGatewayConfig } from '../../../channels/feishu/config.js';
 
 type GatewayCommonOptions = {
-  channel?: string | string[];
+  channel?: string[];
   pidFile?: string;
   logFile?: string;
   serviceChild?: boolean;
@@ -14,16 +22,16 @@ type GatewayCommonOptions = {
   toolAllow?: string[];
   memory?: boolean;
   heartbeatEnabled?: boolean;
-  heartbeatIntervalMs?: string | number;
+  heartbeatIntervalMs?: string;
   heartbeatTargetOpenId?: string;
   heartbeatSessionKey?: string;
   pairingPolicy?: string;
   pairingAllowFrom?: string[];
-  pairingPendingTtlMs?: string | number;
-  pairingPendingMax?: number | string;
+  pairingPendingTtlMs?: string;
+  pairingPendingMax?: string;
   appId?: string;
   appSecret?: string;
-  requestTimeoutMs?: string | number;
+  requestTimeoutMs?: string;
 };
 
 type GatewayStartOptions = GatewayCommonOptions & {
@@ -41,26 +49,37 @@ type GatewayConfigOptions = {
   toolAllow?: string[];
   memory?: boolean;
   heartbeatEnabled?: boolean;
-  heartbeatIntervalMs?: string | number;
+  heartbeatIntervalMs?: string;
   heartbeatTargetOpenId?: string;
   heartbeatSessionKey?: string;
   pairingPolicy?: string;
   pairingAllowFrom?: string[];
-  pairingPendingTtlMs?: string | number;
-  pairingPendingMax?: string | number;
-  requestTimeoutMs?: string | number;
+  pairingPendingTtlMs?: string;
+  pairingPendingMax?: string;
+  requestTimeoutMs?: string;
   dryRun?: boolean;
 };
 
 type GatewayStatusStopOptions = {
-  channel?: string | string[];
+  channel?: string[];
   pidFile?: string;
   logFile?: string;
+  serviceChild?: boolean;
 };
 
-function setExitCode(command: Command, code: number): void {
-  (command as { exitCode?: number }).exitCode = code;
-}
+const FEISHU_ONLY_OPTIONS: Array<[keyof GatewayCommonOptions & keyof GatewayConfigOptions, string]> = [
+  ['appId', 'app-id'],
+  ['appSecret', 'app-secret'],
+  ['heartbeatEnabled', 'heartbeat-enabled'],
+  ['heartbeatIntervalMs', 'heartbeat-interval-ms'],
+  ['heartbeatTargetOpenId', 'heartbeat-target-open-id'],
+  ['heartbeatSessionKey', 'heartbeat-session-key'],
+  ['pairingPolicy', 'pairing-policy'],
+  ['pairingAllowFrom', 'pairing-allow-from'],
+  ['pairingPendingTtlMs', 'pairing-pending-ttl-ms'],
+  ['pairingPendingMax', 'pairing-pending-max'],
+  ['requestTimeoutMs', 'request-timeout-ms'],
+];
 
 function parseBooleanFlag(raw: string): boolean {
   const normalized = raw.trim().toLowerCase();
@@ -80,116 +99,263 @@ function parseCsv(raw: string): string[] {
     .filter((entry) => entry.length > 0);
 }
 
-function parseGatewayStringOptions(
-  options: GatewayCommonOptions | GatewayConfigOptions | GatewayStartOptions,
-): string[] {
-  return toArgv(options);
+function normalizeText(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) {
+    return undefined;
+  }
+  return value;
 }
 
-function toArgv(
-  options: GatewayCommonOptions | GatewayConfigOptions | GatewayStartOptions,
-): string[] {
-  const normalized = options as GatewayCommonOptions & GatewayStartOptions;
-  const argv: string[] = [];
-  appendMultiString(argv, 'channel', normalized.channel);
-  appendString(argv, 'pid-file', normalized.pidFile);
-  appendString(argv, 'log-file', normalized.logFile);
-  appendBoolean(argv, 'service-child', normalized.serviceChild);
-  appendString(argv, 'provider', normalized.provider);
-  appendString(argv, 'profile', normalized.profile);
-  appendBoolean(argv, 'with-tools', normalized.withTools);
-  appendStringList(argv, 'tool-allow', normalized.toolAllow);
-  appendBoolean(argv, 'memory', normalized.memory);
-  appendBoolean(argv, 'heartbeat-enabled', normalized.heartbeatEnabled);
-  appendNumber(argv, 'heartbeat-interval-ms', normalized.heartbeatIntervalMs);
-  appendString(argv, 'heartbeat-target-open-id', normalized.heartbeatTargetOpenId);
-  appendString(argv, 'heartbeat-session-key', normalized.heartbeatSessionKey);
-  appendString(argv, 'pairing-policy', normalized.pairingPolicy);
-  appendStringList(argv, 'pairing-allow-from', normalized.pairingAllowFrom);
-  appendNumber(argv, 'pairing-pending-ttl-ms', normalized.pairingPendingTtlMs);
-  appendNumber(argv, 'pairing-pending-max', normalized.pairingPendingMax);
-  appendString(argv, 'app-id', normalized.appId);
-  appendString(argv, 'app-secret', normalized.appSecret);
-  appendNumber(argv, 'request-timeout-ms', normalized.requestTimeoutMs);
-  appendBoolean(argv, 'debug', normalized.debug);
-  appendBoolean(argv, 'daemon', normalized.daemon);
-  return argv;
+function parseOptionalString(raw: string | undefined): string | undefined {
+  if (typeof raw === 'string') {
+    return raw;
+  }
+  return undefined;
 }
 
-function parseGatewayStatusStopArgv(options: GatewayStatusStopOptions): string[] {
-  const argv: string[] = [];
-  appendMultiString(argv, 'channel', options.channel);
-  appendString(argv, 'pid-file', options.pidFile);
-  appendString(argv, 'log-file', options.logFile);
-  return argv;
+function normalizePositiveIntValue(raw: string | undefined, label: string): number | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  return parsePositiveIntValue(raw.trim(), 1, `--${label}`);
 }
 
-function buildGatewayConfigSetArgv(command: 'set' | 'show' | 'clear' | 'migrate', options: GatewayConfigOptions): string[] {
+function normalizePairingPolicy(raw: unknown): FeishuGatewayConfig['pairingPolicy'] | undefined {
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+  const normalized = normalizeText(raw)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (
+    normalized === 'open'
+    || normalized === 'allowlist'
+    || normalized === 'pairing'
+    || normalized === 'disabled'
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function parseFeishuGatewayConfigFromOptions(
+  options: GatewayCommonOptions | GatewayConfigOptions,
+): Partial<FeishuGatewayConfig> {
+  const provider = parseOptionalString(options.provider);
+  const profile = parseOptionalString(options.profile);
+  const heartbeatIntervalMs = normalizePositiveIntValue(normalizeText(options.heartbeatIntervalMs), 'heartbeat-interval-ms');
+  const pairingPendingTtlMs = normalizePositiveIntValue(normalizeText(options.pairingPendingTtlMs), 'pairing-pending-ttl-ms');
+  const pairingPendingMax = normalizePositiveIntValue(normalizeText(options.pairingPendingMax), 'pairing-pending-max');
+  const requestTimeoutMs = normalizePositiveIntValue(normalizeText(options.requestTimeoutMs), 'request-timeout-ms');
+
+  return {
+    ...(provider ? { provider } : {}),
+    ...(profile ? { profileId: profile } : {}),
+    ...(typeof options.withTools === 'boolean' ? { withTools: options.withTools } : {}),
+    ...(typeof options.memory === 'boolean' ? { memory: options.memory } : {}),
+    ...(Array.isArray(options.toolAllow) && options.toolAllow.length > 0 ? { toolAllow: options.toolAllow } : {}),
+    ...(parseOptionalString(options.appId) !== undefined ? { appId: parseOptionalString(options.appId)! } : {}),
+    ...(parseOptionalString(options.appSecret) !== undefined ? { appSecret: parseOptionalString(options.appSecret)! } : {}),
+    ...(requestTimeoutMs ? { requestTimeoutMs } : {}),
+    ...(typeof options.heartbeatEnabled === 'boolean' ? { heartbeatEnabled: options.heartbeatEnabled } : {}),
+    ...(heartbeatIntervalMs ? { heartbeatIntervalMs } : {}),
+    ...(parseOptionalString(options.heartbeatTargetOpenId) !== undefined
+      ? { heartbeatTargetOpenId: parseOptionalString(options.heartbeatTargetOpenId)! }
+      : {}),
+    ...(parseOptionalString(options.heartbeatSessionKey) !== undefined
+      ? { heartbeatSessionKey: parseOptionalString(options.heartbeatSessionKey)! }
+      : {}),
+    ...(normalizePairingPolicy(options.pairingPolicy)
+      ? { pairingPolicy: normalizePairingPolicy(options.pairingPolicy) as FeishuGatewayConfig['pairingPolicy'] }
+      : {}),
+    ...(Array.isArray(options.pairingAllowFrom) && options.pairingAllowFrom.length > 0 ? { pairingAllowFrom: options.pairingAllowFrom } : {}),
+    ...(pairingPendingTtlMs ? { pairingPendingTtlMs } : {}),
+    ...(pairingPendingMax ? { pairingPendingMax } : {}),
+  };
+}
+
+function parseLocalGatewayConfigFromOptions(options: GatewayCommonOptions): GatewayStartOverrides {
+  for (const [key, optionName] of FEISHU_ONLY_OPTIONS) {
+    const raw = options[key];
+    if (raw === undefined) {
+      continue;
+    }
+    if (Array.isArray(raw) ? raw.length > 0 : true) {
+      throw new Error(`Unknown option: --${optionName}`);
+    }
+  }
+
+  const provider = parseOptionalString(options.provider);
+  const profile = parseOptionalString(options.profile);
+
+  return {
+    ...(provider ? { provider } : {}),
+    ...(profile ? { profileId: profile } : {}),
+    ...(typeof options.withTools === 'boolean' ? { withTools: options.withTools } : {}),
+    ...(typeof options.memory === 'boolean' ? { memory: options.memory } : {}),
+    ...(Array.isArray(options.toolAllow) && options.toolAllow.length > 0 ? { toolAllow: options.toolAllow } : {}),
+  };
+}
+
+function resolveGatewayChannels(
+  rawChannels: string[] | undefined,
+): { channels: GatewayChannel[]; channelProvided: boolean } {
+  if (!rawChannels || rawChannels.length === 0) {
+    return {
+      channels: ['feishu'],
+      channelProvided: false,
+    };
+  }
+  return {
+    channels: normalizeGatewayChannels(rawChannels.map((rawChannel) => resolveGatewayChannel(rawChannel))),
+    channelProvided: true,
+  };
+}
+
+function extractGatewayServiceArgv(command: Command): string[] {
+  const rawArgs = ((command as { rawArgs?: string[] }).rawArgs ?? []);
+  const commandName = command.name();
+  const commandIndex = rawArgs.indexOf(commandName);
+  if (commandIndex < 0) {
+    return [];
+  }
+
+  const parent = command.parent;
+  if (!parent) {
+    return rawArgs.slice(commandIndex + 1);
+  }
+
+  const parentName = parent.name();
+  const parentIndex = rawArgs.indexOf(parentName);
+  if (parentIndex < 0 || parentIndex >= commandIndex) {
+    return rawArgs.slice(commandIndex + 1);
+  }
+
+  return [...rawArgs.slice(parentIndex + 1, commandIndex), ...rawArgs.slice(commandIndex + 1)];
+}
+
+function buildGatewayStartParsedCommand(
+  command: Command,
+  options: GatewayStartOptions,
+  action: GatewayParsedCommand['action'],
+): GatewayParsedCommand {
+  const { channels } = resolveGatewayChannels(options.channel);
+  const merged = options;
+  const channel = channels[0] ?? 'feishu';
+  const common = {
+    channel,
+    channels,
+    action,
+    statePath: normalizeText(merged.pidFile),
+    logPath: normalizeText(merged.logFile),
+    serviceChild: merged.serviceChild === true,
+    debug: action === 'start' ? merged.debug === true : false,
+    serviceArgv: extractGatewayServiceArgv(command),
+    ...(action === 'start' && merged.daemon === true ? { daemon: true } : {}),
+  };
+
+  if (action !== 'start') {
+    return {
+      ...common,
+      action,
+    };
+  }
+
+  const isSingleFeishu = channels.length === 1 && channels[0] === 'feishu';
+  const config = isSingleFeishu
+    ? parseFeishuGatewayConfigFromOptions(merged)
+    : parseLocalGatewayConfigFromOptions(merged);
+
+  return {
+    ...common,
+    ...config,
+    action,
+  };
+}
+
+function buildGatewayStatusStopParsedCommand(
+  command: Command,
+  options: GatewayStatusStopOptions,
+  action: 'status' | 'stop',
+): GatewayParsedCommand {
+  const { channels } = resolveGatewayChannels(options.channel);
+  const merged = options;
+  const channel = channels[0] ?? 'feishu';
+  return {
+    channel,
+    channels,
+    action,
+    statePath: normalizeText(merged.pidFile),
+    logPath: normalizeText(merged.logFile),
+    serviceChild: merged.serviceChild === true,
+    serviceArgv: extractGatewayServiceArgv(command),
+  };
+}
+
+function resolveGatewayConfigChannel(channelInput: string | undefined): { channel: string; channelProvided: boolean } {
+  if (typeof channelInput !== 'string') {
+    return { channel: 'default', channelProvided: false };
+  }
+  const channel = channelInput.trim().toLowerCase();
+  if (!channel) {
+    throw new Error('Invalid value for --channel');
+  }
+  return {
+    channel,
+    channelProvided: true,
+  };
+}
+
+function buildGatewayConfigParsedCommand(
+  command: 'set' | 'show' | 'clear' | 'migrate',
+  options: GatewayConfigOptions,
+): GatewayConfigParsedCommand {
+  const { channel, channelProvided } = resolveGatewayConfigChannel(options.channel);
+
+  if (command === 'set') {
+    const config = parseFeishuGatewayConfigFromOptions(options);
+    if (Object.keys(config).length === 0) {
+      throw new Error('No gateway config fields provided');
+    }
+    if (
+      (channel === 'default' || !channelProvided)
+      && (typeof config.appId === 'string' || typeof config.appSecret === 'string')
+    ) {
+      throw new Error('appId/appSecret must be scoped with --channel, e.g. --channel feishu');
+    }
+    if (channel !== 'default' && typeof config.provider === 'string') {
+      throw new Error('provider is a gateway-level field and cannot be set with --channel; set it at default scope');
+    }
+    return {
+      channel,
+      channelProvided,
+      action: command,
+      config,
+    };
+  }
+
   if (command === 'show' || command === 'clear') {
-    return [
-      command,
-      ...(typeof options.channel === 'string' ? [`--channel`, options.channel] : []),
-    ];
-  }
-  if (command === 'migrate') {
-    return [
-      command,
-      ...(typeof options.channel === 'string' ? [`--channel`, options.channel] : []),
-      ...(options.dryRun ? ['--dry-run'] : []),
-    ];
+    return {
+      channel,
+      channelProvided,
+      action: command,
+      config: {},
+    };
   }
 
-  const argv = [command, ...parseGatewayStringOptions(options)];
-  return argv;
-}
+  if (!options.dryRun) {
+    throw new Error('gateway config migrate currently only supports --dry-run');
+  }
 
-function appendBoolean(argv: string[], key: string, value: boolean | undefined): void {
-  if (value === undefined) {
-    return;
-  }
-  argv.push(value ? `--${key}` : `--no-${key}`);
-}
-
-function appendString(argv: string[], key: string, value: string | undefined): void {
-  if (typeof value !== 'string' || value.length === 0) {
-    return;
-  }
-  argv.push(`--${key}`, value);
-}
-
-function appendNumber(argv: string[], key: string, value: string | number | undefined): void {
-  if (typeof value === 'string' && value.trim().length > 0) {
-    argv.push(`--${key}`, value.trim());
-    return;
-  }
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return;
-  }
-  argv.push(`--${key}`, `${value}`);
-}
-
-function appendStringList(argv: string[], key: string, values: string[] | undefined): void {
-  if (!Array.isArray(values) || values.length === 0) {
-    return;
-  }
-  argv.push(`--${key}`, values.join(','));
-}
-
-function appendMultiString(argv: string[], key: string, value: string | string[] | undefined): void {
-  if (typeof value === 'string') {
-    if (value.trim().length > 0) {
-      argv.push(`--${key}`, value);
-    }
-    return;
-  }
-  if (!Array.isArray(value)) {
-    return;
-  }
-  for (const item of value) {
-    if (typeof item === 'string' && item.trim().length > 0) {
-      argv.push(`--${key}`, item);
-    }
-  }
+  return {
+    channel,
+    channelProvided,
+    action: command,
+    dryRun: true,
+    config: {},
+  };
 }
 
 function buildGatewayStartOptions(command: Command): void {
@@ -259,12 +425,12 @@ function buildGatewayConfigOptions(command: Command): void {
     .addOption(new Option('--request-timeout-ms <ms>', 'Persist request timeout ms.'));
 }
 
-function runGatewayStart(argv: string[]): Promise<number> {
-  return runGatewayCommand(parseGatewayArgs(argv));
-}
-
-function runGatewayConfig(command: 'set' | 'show' | 'clear' | 'migrate', options: GatewayConfigOptions): Promise<number> {
-  return runGatewayCommand(parseGatewayConfigArgs(buildGatewayConfigSetArgv(command, options)));
+function buildGatewayStatusStopOptions(command: Command): void {
+  command
+    .addOption(new Option('--channel <channel...>', 'Select gateway runtime channel.'))
+    .addOption(new Option('--pid-file <path>', 'Gateway service state file path.'))
+    .addOption(new Option('--log-file <path>', 'Gateway service log file path.'))
+    .addOption(new Option('--service-child', 'Run gateway process as child service.'));
 }
 
 export function buildGatewayCommand(program: Command): Command {
@@ -292,12 +458,13 @@ export function buildGatewayCommand(program: Command): Command {
       '  gateway config migrate requires --dry-run',
     ].join('\n'));
 
-  buildGatewayStartOptions(gateway);
-  gateway.action(async (options: GatewayStartOptions, command: Command) => {
-    setExitCode(command, await runGatewayStart(toArgv(options)));
+  gateway.action((_options: never, command: Command) => {
+    command.outputHelp();
+    setExitCode(command, 0);
   });
 
   const start = gateway.command('start').description('Start gateway service.');
+  buildGatewayStartOptions(start);
   start
     .addHelpText(
       'after',
@@ -308,10 +475,11 @@ export function buildGatewayCommand(program: Command): Command {
       ].join('\n'),
     )
     .action(async (options: GatewayStartOptions, command: Command) => {
-      setExitCode(command, await runGatewayStart(['start', ...toArgv(options)]));
+      setExitCode(command, await runGatewayStart(buildGatewayStartParsedCommand(command, options, 'start')));
     });
 
   const status = gateway.command('status').description('Show gateway service status.');
+  buildGatewayStatusStopOptions(status);
   status
     .addHelpText(
       'after',
@@ -321,14 +489,15 @@ export function buildGatewayCommand(program: Command): Command {
         '  lainclaw gateway status --pid-file ./service.json',
       ].join('\n'),
     )
-    .addOption(new Option('--channel <channel...>', 'Select gateway runtime channel.'))
-    .addOption(new Option('--pid-file <path>', 'Gateway service state file path.'))
-    .addOption(new Option('--log-file <path>', 'Gateway service log file path.'))
     .action(async (options: GatewayStatusStopOptions, command: Command) => {
-      setExitCode(command, await runGatewayStart(['status', ...parseGatewayStatusStopArgv(options)]));
+      setExitCode(command, await runGatewayStatusOrStop(
+        buildGatewayStatusStopParsedCommand(command, options, 'status'),
+        'status',
+      ));
     });
 
   const stop = gateway.command('stop').description('Stop gateway service.');
+  buildGatewayStatusStopOptions(stop);
   stop
     .addHelpText(
       'after',
@@ -338,11 +507,11 @@ export function buildGatewayCommand(program: Command): Command {
         '  lainclaw gateway stop --log-file ./service.log',
       ].join('\n'),
     )
-    .addOption(new Option('--channel <channel...>', 'Select gateway runtime channel.'))
-    .addOption(new Option('--pid-file <path>', 'Gateway service state file path.'))
-    .addOption(new Option('--log-file <path>', 'Gateway service log file path.'))
     .action(async (options: GatewayStatusStopOptions, command: Command) => {
-      setExitCode(command, await runGatewayStart(['stop', ...parseGatewayStatusStopArgv(options)]));
+      setExitCode(command, await runGatewayStatusOrStop(
+        buildGatewayStatusStopParsedCommand(command, options, 'stop'),
+        'stop',
+      ));
     });
 
   const config = gateway.command('config').description('Manage gateway config.');
@@ -350,20 +519,23 @@ export function buildGatewayCommand(program: Command): Command {
   buildGatewayConfigOptions(set);
   set.addHelpText('after', ['Examples:', '  lainclaw gateway config set --app-id <appId> --app-secret <appSecret>'].join('\n'));
   set.action(async (options: GatewayConfigOptions, command: Command) => {
-    setExitCode(command, await runGatewayConfig('set', options));
+    const parsedOptions = { ...(command.opts<GatewayConfigOptions>()), ...options };
+    setExitCode(command, await runGatewayConfigCommand(buildGatewayConfigParsedCommand('set', parsedOptions)));
   });
 
   const show = config.command('show').description('Show gateway config.');
   show.addOption(new Option('--channel <channel>', 'Select gateway config channel.'));
   show.action(async (options: GatewayConfigOptions, command: Command) => {
-    setExitCode(command, await runGatewayConfig('show', options));
+    const parsedOptions = { ...(command.opts<GatewayConfigOptions>()), ...options };
+    setExitCode(command, await runGatewayConfigCommand(buildGatewayConfigParsedCommand('show', parsedOptions)));
   });
 
   const clear = config.command('clear').description('Clear gateway config.');
   clear.addOption(new Option('--channel <channel>', 'Select gateway config channel.'));
   clear.addHelpText('after', ['Examples:', '  lainclaw gateway config clear --channel feishu'].join('\n'));
   clear.action(async (options: GatewayConfigOptions, command: Command) => {
-    setExitCode(command, await runGatewayConfig('clear', options));
+    const parsedOptions = { ...(command.opts<GatewayConfigOptions>()), ...options };
+    setExitCode(command, await runGatewayConfigCommand(buildGatewayConfigParsedCommand('clear', parsedOptions)));
   });
 
   const migrate = config.command('migrate').description('Migrate legacy config.');
@@ -372,7 +544,8 @@ export function buildGatewayCommand(program: Command): Command {
     .addOption(new Option('--dry-run', 'Show migration draft only.'));
   migrate.addHelpText('after', ['Examples:', '  lainclaw gateway config migrate --channel feishu --dry-run'].join('\n'));
   migrate.action(async (options: GatewayConfigOptions, command: Command) => {
-    setExitCode(command, await runGatewayConfig('migrate', { ...options, dryRun: options.dryRun || false }));
+    const parsedOptions = { ...(command.opts<GatewayConfigOptions>()), ...options };
+    setExitCode(command, await runGatewayConfigCommand(buildGatewayConfigParsedCommand('migrate', parsedOptions)));
   });
 
   return gateway;

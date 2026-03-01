@@ -1,9 +1,6 @@
 import { Command, Option } from 'commander';
 import { runHeartbeatCommand, type HeartbeatCommandInput } from '../heartbeat.js';
-
-function setExitCode(command: Command, code: number): void {
-  (command as { exitCode?: number }).exitCode = code;
-}
+import { setExitCode } from '../../shared/exitCode.js';
 
 function parseBooleanFlag(raw?: string): boolean {
   if (raw === undefined) {

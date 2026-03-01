@@ -5,13 +5,10 @@ import { buildHeartbeatCommand } from './commands/heartbeat/register.js';
 import { buildPairingCommand } from './commands/pairing/register.js';
 import { buildToolsCommand } from './commands/tools/register.js';
 import { buildAgentCommand } from './commands/agent/register.js';
+import { setExitCode } from './shared/exitCode.js';
 import { VERSION } from './version.js';
 
 const GLOBAL_NOTES = 'Notes: `provider` 决定运行适配器；未配置或配置错误会直接报错。provider 与 profile 用于查找对应运行配置。';
-
-function setExitCode(command: Command, code: number): void {
-  (command as { exitCode?: number }).exitCode = code;
-}
 
 export function buildProgram(): Command {
   const program = new Command('lainclaw');

@@ -3,10 +3,7 @@ import {
   runPairingCommand,
   type PairingCommandInput,
 } from '../pairing.js';
-
-function setExitCode(command: Command, code: number): void {
-  (command as { exitCode?: number }).exitCode = code;
-}
+import { setExitCode } from '../../shared/exitCode.js';
 
 function toPairingChannel(raw: string | undefined): string {
   return (raw ?? '').trim() || 'feishu';

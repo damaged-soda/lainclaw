@@ -1,9 +1,6 @@
 import { Command } from 'commander';
 import { runAuthCommand, type AuthCommandInput } from '../auth.js';
-
-function setExitCode(command: Command, code: number): void {
-  (command as { exitCode?: number }).exitCode = code;
-}
+import { setExitCode } from '../../shared/exitCode.js';
 
 function normalizeProfile(profile: string | undefined): string | undefined {
   return profile?.trim();
