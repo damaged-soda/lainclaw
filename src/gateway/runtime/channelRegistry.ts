@@ -1,23 +1,4 @@
-export type GatewayChannel = 'feishu' | 'local';
-
-import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
-import type { LocalGatewayOverrides } from '../../channels/local/server.js';
-
-export type GatewayStartOverrides = Partial<FeishuGatewayConfig> & Partial<LocalGatewayOverrides>;
-
-type GatewayServiceChannel = GatewayChannel | 'gateway';
-
-export interface GatewayServiceRunContext {
-  channel: GatewayServiceChannel;
-  action?: 'start' | 'status' | 'stop';
-  daemon?: boolean;
-  statePath?: string;
-  logPath?: string;
-  serviceChild?: boolean;
-  serviceArgv: string[];
-  channels?: GatewayChannel[];
-  debug?: boolean;
-}
+import type { GatewayChannel } from './contracts.js';
 
 const GATEWAY_CHANNELS: GatewayChannel[] = ['feishu', 'local'];
 

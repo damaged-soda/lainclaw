@@ -1,4 +1,5 @@
 import { parseGatewayArgs } from '../../parsers/gateway.js';
+import { parseGatewayConfigArgs } from '../../parsers/gatewayConfig.js';
 import { printUsage } from '../../usage.js';
 import { runCommand } from '../../shared/result.js';
 import {
@@ -18,7 +19,8 @@ export async function runGatewayCommand(args: string[]): Promise<number> {
 
     if (subcommand === 'config') {
       try {
-        return await runGatewayConfigCommand(args.slice(1));
+        const parsed = parseGatewayConfigArgs(args.slice(1));
+        return await runGatewayConfigCommand(parsed);
       } catch (error) {
         console.error(
           'ERROR:',

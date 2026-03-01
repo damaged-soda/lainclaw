@@ -1,5 +1,3 @@
-import { parseGatewayArgs } from '../../cli/parsers/gateway.js';
-import { parseGatewayConfigArgs } from '../../cli/parsers/gatewayConfig.js';
 import {
   buildFeishuGatewayConfigMigrationDraft,
   clearFeishuGatewayConfig,
@@ -20,14 +18,21 @@ import {
   writeGatewayServiceState,
 } from '../../gateway/service.js';
 import { makeFeishuFailureHint, maskConfigValue } from '../../channels/feishu/diagnostics.js';
-import { type GatewayChannel, type GatewayServiceRunContext, type GatewayStartOverrides, normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
+import {
+  type GatewayParsedCommand,
+  type GatewayConfigParsedCommand,
+  type GatewayServiceRunContext,
+  type GatewayStartOverrides,
+  type GatewayFeishuStartOverrides,
+  type GatewayLocalStartOverrides,
+  type GatewayChannel,
+} from './contracts.js';
+import { normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
 import {
   resolveFeishuGatewayRuntimeConfig,
   runFeishuGatewayWithHeartbeat,
 } from './channels/feishu.js';
 import { runLocalGatewayService } from './channels/local.js';
-
-export type GatewayParsedCommand = ReturnType<typeof parseGatewayArgs>;
 
 export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<number> {
   const {
@@ -68,7 +73,7 @@ export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<num
   const runtimeChannel = resolveGatewayChannel(channel);
   if (runtimeChannel === 'feishu') {
     await runFeishuGatewayWithHeartbeat(
-      gatewayOptions as GatewayStartOverrides,
+      gatewayOptions as GatewayFeishuStartOverrides,
       makeFeishuFailureHint,
       {
         channel,
@@ -84,7 +89,7 @@ export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<num
     return 0;
   }
 
-  await runLocalGatewayService(gatewayOptions as GatewayStartOverrides, {
+  await runLocalGatewayService(gatewayOptions as GatewayLocalStartOverrides, {
     channel,
     action,
     debug,
@@ -113,9 +118,7 @@ export async function runGatewayStatusOrStop(
   return 0;
 }
 
-export async function runGatewayConfigCommand(args: string[]): Promise<number> {
-  const parsed = parseGatewayConfigArgs(args);
-
+export async function runGatewayConfigCommand(parsed: GatewayConfigParsedCommand): Promise<number> {
   if (parsed.action === 'set') {
     if (Object.keys(parsed.config).length === 0) {
       throw new Error('No gateway config fields provided');
@@ -219,7 +222,11 @@ export async function runGatewayServiceForChannels(
 
     for (const channel of normalizedChannels) {
       if (channel === 'feishu') {
-        await resolveFeishuGatewayRuntimeConfig(overrides, channel);
+        await resolveFeishuGatewayRuntimeConfig(
+          normalizeGatewayRuntimeOverrides(overrides, channel),
+          channel,
+        );
+        continue;
       }
     }
 
@@ -249,18 +256,35 @@ export async function runGatewayServiceForChannels(
 
   const startedChannels = normalizedChannels.map((channel) => {
     if (channel === 'feishu') {
-      return runFeishuGatewayWithHeartbeat(overrides, makeFeishuFailureHint, {
+      return runFeishuGatewayWithHeartbeat(
+        normalizeGatewayRuntimeOverrides(overrides, channel),
+        makeFeishuFailureHint,
+        {
+          ...serviceContext,
+          channel,
+        },
+      );
+    }
+    return runLocalGatewayService(
+      normalizeGatewayRuntimeOverrides(overrides, channel),
+      {
         ...serviceContext,
         channel,
-      });
-    }
-    return runLocalGatewayService(overrides, {
-      ...serviceContext,
-      channel,
-    });
+      },
+    );
   });
 
   await Promise.all(startedChannels);
+}
+
+function normalizeGatewayRuntimeOverrides(
+  overrides: GatewayStartOverrides,
+  channel: GatewayChannel,
+): GatewayFeishuStartOverrides | GatewayLocalStartOverrides {
+  if (channel === 'feishu') {
+    return overrides as GatewayFeishuStartOverrides;
+  }
+  return overrides as GatewayLocalStartOverrides;
 }
 
 export { runFeishuGatewayWithHeartbeat, runLocalGatewayService };

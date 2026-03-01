@@ -1,13 +1,8 @@
 import { parseFeishuServerArgs } from './gateway.js';
+import type { GatewayConfigParsedCommand } from '../../gateway/runtime/contracts.js';
 import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
 
-export function parseGatewayConfigArgs(argv: string[]): {
-  channel: string;
-  channelProvided: boolean;
-  action: 'set' | 'show' | 'clear' | 'migrate';
-  dryRun?: boolean;
-  config: Partial<FeishuGatewayConfig>;
-} {
+export function parseGatewayConfigArgs(argv: string[]): GatewayConfigParsedCommand {
   const subcommand = argv[0];
   if (!subcommand) {
     throw new Error('Missing gateway config subcommand');

@@ -9,12 +9,14 @@ import {
 import {
   normalizeGatewayChannels,
   resolveGatewayChannel,
-  type GatewayChannel,
 } from '../../gateway/runtime/channelRegistry.js';
 import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
 import type { LocalGatewayOverrides } from '../../channels/local/server.js';
-
-type GatewayStartOverrides = Partial<FeishuGatewayConfig> & Partial<LocalGatewayOverrides>;
+import type {
+  GatewayParsedCommand,
+  GatewayStartOverrides,
+  GatewayChannel,
+} from '../../gateway/runtime/contracts.js';
 
 function normalizePairingPolicy(raw: string | undefined): FeishuGatewayConfig['pairingPolicy'] {
   const normalized = raw?.trim().toLowerCase();
@@ -281,33 +283,7 @@ function parseGatewayStartArgsByChannel(channel: GatewayChannel, startArgs: stri
   return parseLocalGatewayArgs(startArgs);
 }
 
-export function parseGatewayArgs(argv: string[]): {
-  channels: GatewayChannel[];
-  channel: GatewayChannel;
-  action: 'start' | 'status' | 'stop';
-  appId?: string;
-  appSecret?: string;
-  requestTimeoutMs?: number;
-  provider?: string;
-  profileId?: string;
-  withTools?: boolean;
-  memory?: boolean;
-  toolAllow?: string[];
-  heartbeatEnabled?: boolean;
-  heartbeatIntervalMs?: number;
-  heartbeatTargetOpenId?: string;
-  heartbeatSessionKey?: string;
-  pairingPolicy?: FeishuGatewayConfig['pairingPolicy'];
-  pairingPendingTtlMs?: number;
-  pairingPendingMax?: number;
-  pairingAllowFrom?: string[];
-  daemon?: boolean;
-  statePath?: string;
-  logPath?: string;
-  serviceChild?: boolean;
-  debug?: boolean;
-  serviceArgv: string[];
-} {
+export function parseGatewayArgs(argv: string[]): GatewayParsedCommand {
   let channel: GatewayChannel = 'feishu';
   const channels: GatewayChannel[] = [];
   let hasChannel = false;

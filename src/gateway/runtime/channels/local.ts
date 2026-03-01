@@ -6,7 +6,7 @@ import {
   type GatewayServiceState,
   writeGatewayServiceState,
 } from '../../../gateway/service.js';
-import { type GatewayServiceRunContext } from '../channelRegistry.js';
+import { type GatewayServiceRunContext } from '../contracts.js';
 
 export async function runLocalGatewayService(
   overrides: Partial<LocalGatewayOverrides>,

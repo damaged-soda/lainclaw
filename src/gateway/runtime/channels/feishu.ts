@@ -14,10 +14,7 @@ import {
   resolveFeishuGatewayConfig,
   type FeishuGatewayConfig,
 } from '../../../channels/feishu/config.js';
-import {
-  type GatewayChannel,
-  type GatewayServiceRunContext,
-} from '../channelRegistry.js';
+import { type GatewayChannel, type GatewayServiceRunContext } from '../contracts.js';
 
 export async function runFeishuGatewayWithHeartbeat(
   overrides: Partial<FeishuGatewayConfig>,
