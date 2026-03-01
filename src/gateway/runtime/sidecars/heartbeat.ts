@@ -13,7 +13,7 @@ interface HeartbeatSidecarInput {
   toolAllow?: string[];
   memory?: boolean;
   sessionKey?: string;
-  heartbeatTargetOpenId?: string;
+  targetReplyTo?: string;
   intervalMs: number;
   onFailureHint?: HeartbeatFailureHint;
 }
@@ -71,10 +71,10 @@ export function startHeartbeatSidecar(
       );
     },
     send: async ({ rule, triggerMessage }) => {
-      if (!input.heartbeatTargetOpenId) {
-        throw new Error('heartbeat is enabled but heartbeatTargetOpenId is not configured');
+      if (!input.targetReplyTo) {
+        throw new Error('heartbeat is enabled but targetReplyTo is not configured');
       }
-      await input.integration.sendText(input.heartbeatTargetOpenId, buildHeartbeatMessage(rule.ruleText, triggerMessage));
+      await input.integration.sendText(input.targetReplyTo, buildHeartbeatMessage(rule.ruleText, triggerMessage));
     },
   });
 

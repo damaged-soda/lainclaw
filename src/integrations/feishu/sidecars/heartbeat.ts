@@ -25,7 +25,7 @@ export function startFeishuHeartbeatSidecar(
     withTools: config.withTools,
     ...(Array.isArray(config.toolAllow) ? { toolAllow: config.toolAllow } : {}),
     memory: config.memory,
-    heartbeatTargetOpenId: config.heartbeatTargetOpenId,
+    targetReplyTo: config.heartbeatTargetOpenId,
     sessionKey: config.heartbeatSessionKey,
     intervalMs: config.heartbeatIntervalMs,
     onFailureHint: input.onFailureHint,
