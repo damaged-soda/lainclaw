@@ -1,6 +1,6 @@
 import { buildPairingQueueFullReply, buildPairingReply } from '../../../pairing/pairing-messages.js';
 import { readChannelAllowFromStore, upsertChannelPairingRequest } from '../../../pairing/pairing-store.js';
-import { type InboundMessage, type IntegrationId } from '../../../integrations/contracts.js';
+import { type InboundMessage, type ChannelId } from '../../../channels/contracts.js';
 
 const ACCESS_DENIED_MESSAGE = '当前策略不允许当前用户发起会话，请联系管理员配置后重试。';
 
@@ -45,7 +45,7 @@ function buildPairingRequestText(
   requestId: string,
   actorId: string,
   code: string,
-  integration: IntegrationId,
+  integration: ChannelId,
 ): string {
   return buildPairingReply({
     channel: integration,

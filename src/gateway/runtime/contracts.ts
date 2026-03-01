@@ -1,6 +1,6 @@
-import type { IntegrationId } from '../../integrations/contracts.js';
+import type { ChannelId } from '../../channels/contracts.js';
 
-export type GatewayChannel = IntegrationId;
+export type GatewayChannel = ChannelId;
 
 export interface GatewayStartOverrides {
   [key: string]: unknown;

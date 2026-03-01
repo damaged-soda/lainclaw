@@ -1,11 +1,11 @@
 import { startHeartbeatLoop } from '../../../heartbeat/runner.js';
-import type { IntegrationOutboundTextCapability } from '../../../integrations/contracts.js';
+import type { ChannelOutboundTextCapability } from '../../../channels/contracts.js';
 import type { HeartbeatLoopHandle, HeartbeatRunSummary } from '../../../heartbeat/runner.js';
 
 type HeartbeatFailureHint = (rawMessage: string) => string;
 
 interface HeartbeatSidecarInput {
-  outbound?: IntegrationOutboundTextCapability;
+  outbound?: ChannelOutboundTextCapability;
   enabled: boolean;
   provider?: string;
   profileId?: string;

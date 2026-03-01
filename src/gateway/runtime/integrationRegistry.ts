@@ -1,10 +1,10 @@
-import { feishuIntegration } from '../../integrations/feishu/index.js';
-import { localIntegration } from '../../integrations/local/index.js';
-import type { Integration, IntegrationId } from '../../integrations/contracts.js';
+import { feishuIntegration } from '../../channels/feishu/index.js';
+import { localIntegration } from '../../channels/local/index.js';
+import type { Channel, ChannelId } from '../../channels/contracts.js';
 
-export const integrationRegistry: Record<IntegrationId, Integration> = {
+export const integrationRegistry: Record<ChannelId, Channel> = {
   feishu: feishuIntegration,
   local: localIntegration,
 };
 
-export const integrationIds = Object.keys(integrationRegistry) as IntegrationId[];
+export const integrationIds = Object.keys(integrationRegistry) as ChannelId[];

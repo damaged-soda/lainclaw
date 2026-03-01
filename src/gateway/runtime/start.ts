@@ -4,14 +4,14 @@ import {
   loadCachedFeishuGatewayConfigWithSources,
   persistFeishuGatewayConfig,
   resolveFeishuGatewayConfigPath,
-} from '../../integrations/feishu/config.js';
+} from '../../channels/feishu/config.js';
 import {
   getGatewayServiceSnapshot,
   resolveGatewayServicePaths,
   stopGatewayService,
   resolveGatewayServiceStatus,
 } from '../../gateway/service.js';
-import { maskConfigValue } from '../../integrations/feishu/diagnostics.js';
+import { maskConfigValue } from '../../channels/feishu/diagnostics.js';
 import {
   type GatewayParsedCommand,
   type GatewayConfigParsedCommand,
@@ -22,7 +22,7 @@ import {
 import { normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
 import { runGatewayServiceRunner } from './serviceRunner.js';
 import { integrationRegistry } from './integrationRegistry.js';
-import type { IntegrationRunContext, Integration } from '../../integrations/contracts.js';
+import type { ChannelRunContext, Channel } from '../../channels/contracts.js';
 
 export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<number> {
   const {
@@ -187,7 +187,7 @@ export async function runGatewayServiceForChannels(
     for (const channel of normalizedChannels) {
       const runtime = integrationRegistry[channel];
       if (runtime.preflight) {
-        await runtime.preflight(overrides, { integration: channel } as IntegrationRunContext);
+        await runtime.preflight(overrides, { integration: channel } as ChannelRunContext);
       }
     }
 
@@ -227,12 +227,12 @@ export async function printGatewayServiceStatus(
 }
 
 async function runIntegrationRuntime(
-  runtime: Integration,
+  runtime: Channel,
   channel: GatewayChannel,
   overrides: GatewayStartOverrides,
   serviceContext: GatewayServiceRunContext,
 ): Promise<void> {
-  const context: IntegrationRunContext = { integration: channel };
+  const context: ChannelRunContext = { integration: channel };
   const shouldPreflightInProcess = !serviceContext.daemon || serviceContext.serviceChild === true;
 
   const runInProcess = async (): Promise<void> => {

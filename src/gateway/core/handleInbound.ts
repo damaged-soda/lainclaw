@@ -3,7 +3,7 @@ import {
   type InboundMessage,
   type MessageInboundMessage,
   type OutboundMessage,
-} from '../../integrations/contracts.js';
+} from '../../channels/contracts.js';
 import { evaluateAccessPolicy } from './policy/accessPolicy.js';
 import { runAgent } from '../index.js';
 
