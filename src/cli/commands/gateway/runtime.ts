@@ -5,12 +5,6 @@ import {
   runGatewayConfigCommand,
   runGatewayStart,
   runGatewayStatusOrStop,
-  runFeishuGatewayWithHeartbeat,
-  runLocalGatewayService,
-  runGatewayServiceForChannels,
-  runGatewayServiceLifecycleAction,
-  printGatewayServiceStatus,
-  type GatewayParsedCommand,
 } from '../../../gateway/runtime/start.js';
 
 export async function runGatewayCommand(args: string[]): Promise<number> {
@@ -36,7 +30,7 @@ export async function runGatewayCommand(args: string[]): Promise<number> {
     }
 
     try {
-      const parsed: GatewayParsedCommand = parseGatewayArgs(args);
+      const parsed = parseGatewayArgs(args);
       if (parsed.action === 'status') {
         return runGatewayStatusOrStop(parsed, 'status');
       }
@@ -55,7 +49,7 @@ export async function runGatewayCommand(args: string[]): Promise<number> {
   });
 }
 
-function printGatewayCommandUsage(): void {
+export function printGatewayCommandUsage(): void {
   console.error(
     'Usage:',
     '  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--debug] [--daemon] [--pid-file <path>] [--log-file <path>]',
@@ -67,16 +61,3 @@ function printGatewayCommandUsage(): void {
     '  lainclaw gateway config migrate [--channel <channel>] --dry-run',
   );
 }
-
-export {
-  runGatewayConfigCommand,
-  runGatewayServiceForChannels,
-  runGatewayServiceLifecycleAction,
-  runFeishuGatewayWithHeartbeat,
-  runLocalGatewayService,
-  printGatewayServiceStatus,
-  runGatewayStart,
-  runGatewayStatusOrStop,
-};
-
-export type { GatewayParsedCommand } from '../../../gateway/runtime/start.js';
