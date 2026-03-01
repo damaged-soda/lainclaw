@@ -6,10 +6,11 @@ import { RequestContext } from "../shared/types.js";
 import type { AdapterRunInput } from "./registry.js";
 import type { AdapterResult } from "./stubAdapter.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
-import { buildRuntimeToolNameMap, chooseFirstToolError, createToolAdapter, resolveTools } from "../tools/runtimeTools.js";
+import { buildRuntimeToolNameMap, createToolAdapter, resolveTools } from "../tools/runtimeTools.js";
 import { isToolAllowed } from "../tools/registry.js";
 import { executeTool } from "../tools/executor.js";
 import { parseToolCallsFromResponse } from "./codex/toolCallParser.js";
+import { buildToolErrorLog, createToolExecutionState } from "./codex/toolExecutionState.js";
 import { toText } from "./codex/messageText.js";
 
 // 该系统提示词是 MVP 阶段的临时兜底：用于让 provider responses 在最小路径下可直接返回结果。
@@ -37,24 +38,6 @@ function isAbortError(error: unknown): error is Error {
 
 function getAdapterStage(route: string, profileId: string, hasFailure: boolean): string {
   return `${route}.${profileId}${hasFailure ? ".failed" : ""}`;
-}
-
-function buildToolErrorLog(toolCall: ToolCall, message: string): ToolExecutionLog {
-  return {
-    call: { ...toolCall, source: "agent-runtime" },
-    result: {
-      ok: false,
-      error: {
-        code: "execution_error",
-        tool: toolCall.name,
-        message,
-      },
-      meta: {
-        tool: toolCall.name,
-        durationMs: 0,
-      },
-    },
-  };
 }
 
 function resolveBooleanFlag(raw: string | undefined): boolean {
@@ -92,48 +75,6 @@ function normalizeMessages(context: RequestContext): Message[] {
   }
 
   return context.messages;
-}
-
-interface ToolExecutionState {
-  toolCalls: ToolCall[];
-  toolResults: ToolExecutionLog[];
-  readonly toolError: ToolError | undefined;
-  record(log: ToolExecutionLog): void;
-}
-
-function createToolExecutionState(): ToolExecutionState {
-  const toolCalls: ToolCall[] = [];
-  const toolResults: ToolExecutionLog[] = [];
-  const toolResultIndexById = new Map<string, number>();
-  const toolLogById = new Map<string, ToolExecutionLog>();
-  let toolError: ToolError | undefined;
-
-  return {
-    toolCalls,
-    toolResults,
-    get toolError() {
-      return toolError;
-    },
-    record(log: ToolExecutionLog): void {
-      const previousLog = toolLogById.get(log.call.id);
-      const mergedLog = previousLog ? { ...previousLog, ...log, call: log.call } : log;
-      const existingIndex = toolResultIndexById.get(log.call.id);
-
-      if (existingIndex === undefined) {
-        toolResultIndexById.set(log.call.id, toolResults.length);
-        toolCalls.push(mergedLog.call);
-        toolResults.push(mergedLog);
-      } else {
-        toolResults[existingIndex] = mergedLog;
-      }
-
-      toolLogById.set(log.call.id, mergedLog);
-
-      if (log.result.error) {
-        toolError = chooseFirstToolError(toolError, log.result.error);
-      }
-    },
-  };
 }
 
 export async function runCodexAdapter(input: AdapterRunInput): Promise<AdapterResult> {
