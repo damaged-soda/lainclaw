@@ -1,11 +1,11 @@
 import { startHeartbeatSidecar } from '../../../gateway/runtime/sidecars/heartbeat.js';
 import type { FeishuGatewayConfig } from '../config.js';
 import type { HeartbeatLoopHandle } from '../../../heartbeat/runner.js';
-import type { Integration } from '../../../integrations/contracts.js';
+import type { IntegrationOutboundTextCapability } from '../../../integrations/contracts.js';
 
 interface StartFeishuHeartbeatSidecarInput {
   config: FeishuGatewayConfig;
-  integration: Pick<Integration, 'sendText'>;
+  outbound?: IntegrationOutboundTextCapability;
   onFailureHint?: (rawMessage: string) => string;
 }
 
@@ -18,7 +18,7 @@ export function startFeishuHeartbeatSidecar(
   }
 
   return startHeartbeatSidecar({
-    integration: input.integration,
+    outbound: input.outbound,
     enabled: config.heartbeatEnabled,
     provider: config.provider,
     ...(typeof config.profileId === 'string' && config.profileId.trim() ? { profileId: config.profileId.trim() } : {}),

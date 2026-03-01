@@ -1,11 +1,11 @@
 import { startHeartbeatLoop } from '../../../heartbeat/runner.js';
-import type { Integration } from '../../../integrations/contracts.js';
+import type { IntegrationOutboundTextCapability } from '../../../integrations/contracts.js';
 import type { HeartbeatLoopHandle, HeartbeatRunSummary } from '../../../heartbeat/runner.js';
 
 type HeartbeatFailureHint = (rawMessage: string) => string;
 
 interface HeartbeatSidecarInput {
-  integration: Pick<Integration, 'sendText'>;
+  outbound?: IntegrationOutboundTextCapability;
   enabled: boolean;
   provider?: string;
   profileId?: string;
@@ -38,6 +38,10 @@ export function startHeartbeatSidecar(
   input: HeartbeatSidecarInput,
 ): HeartbeatLoopHandle | undefined {
   if (!input.enabled) {
+    return undefined;
+  }
+  if (!input.outbound?.sendText) {
+    console.warn('[heartbeat] outbound sendText capability is not available; heartbeat sidecar will not start');
     return undefined;
   }
 
@@ -74,7 +78,7 @@ export function startHeartbeatSidecar(
       if (!input.targetReplyTo) {
         throw new Error('heartbeat is enabled but targetReplyTo is not configured');
       }
-      await input.integration.sendText(input.targetReplyTo, buildHeartbeatMessage(rule.ruleText, triggerMessage));
+      await input.outbound.sendText(input.targetReplyTo, buildHeartbeatMessage(rule.ruleText, triggerMessage));
     },
   });
 

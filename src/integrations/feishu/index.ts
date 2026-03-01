@@ -122,7 +122,7 @@ export const feishuIntegration: Integration = {
     return startFeishuHeartbeatSidecar({
       config,
       onFailureHint: makeFeishuFailureHint,
-      integration: {
+      outbound: {
         sendText: (replyTo, text) => feishuIntegration.sendText(replyTo, text, { runtimeConfig: config }),
       },
     });

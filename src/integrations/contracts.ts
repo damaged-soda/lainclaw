@@ -47,6 +47,6 @@ export interface Integration {
   id: IntegrationId;
   preflight: (overrides?: unknown, context?: IntegrationRunContext) => Promise<unknown>;
   run: (onInbound: InboundHandler, overrides?: unknown, context?: IntegrationRunContext) => Promise<void>;
-  sendText: IntegrationOutboundTextCapability["sendText"];
+  sendText?: IntegrationOutboundTextCapability["sendText"];
   startSidecars?: (overrides?: unknown, context?: IntegrationRunContext, preflightResult?: unknown) => Promise<SidecarHandle | void>;
 }
