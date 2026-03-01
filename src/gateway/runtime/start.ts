@@ -1,6 +1,5 @@
 import { parseGatewayArgs } from '../../cli/parsers/gateway.js';
 import { parseGatewayConfigArgs } from '../../cli/parsers/gatewayConfig.js';
-import { type LocalGatewayOverrides } from '../../channels/local/server.js';
 import {
   buildFeishuGatewayConfigMigrationDraft,
   clearFeishuGatewayConfig,
@@ -24,9 +23,9 @@ import { makeFeishuFailureHint, maskConfigValue } from '../../channels/feishu/di
 import { type GatewayChannel, type GatewayServiceRunContext, type GatewayStartOverrides, normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
 import {
   resolveFeishuGatewayRuntimeConfig,
-  runFeishuGatewayWithHeartbeat as runFeishuGatewayWithHeartbeatRunner,
+  runFeishuGatewayWithHeartbeat,
 } from './channels/feishu.js';
-import { runLocalGatewayService as runLocalGatewayServiceRunner } from './channels/local.js';
+import { runLocalGatewayService } from './channels/local.js';
 
 export type GatewayParsedCommand = ReturnType<typeof parseGatewayArgs>;
 
@@ -198,17 +197,6 @@ export async function runGatewayServiceLifecycleAction(
   console.log(`gateway service stopped (pid=${snapshot.state.pid})`);
 }
 
-export async function runFeishuGatewayWithHeartbeat(
-  overrides: Partial<FeishuGatewayConfig>,
-  onFailureHint: (rawMessage: string) => string,
-  serviceContext: GatewayServiceRunContext = {
-    channel: 'feishu',
-    serviceArgv: [],
-  },
-): Promise<void> {
-  return runFeishuGatewayWithHeartbeatRunner(overrides, onFailureHint, serviceContext);
-}
-
 export async function runGatewayServiceForChannels(
   overrides: GatewayStartOverrides,
   serviceContext: GatewayServiceRunContext,
@@ -275,15 +263,7 @@ export async function runGatewayServiceForChannels(
   await Promise.all(startedChannels);
 }
 
-export async function runLocalGatewayService(
-  overrides: Partial<LocalGatewayOverrides>,
-  serviceContext: GatewayServiceRunContext = {
-    channel: 'local',
-    serviceArgv: [],
-  },
-): Promise<void> {
-  return runLocalGatewayServiceRunner(overrides, serviceContext);
-}
+export { runFeishuGatewayWithHeartbeat, runLocalGatewayService };
 
 export function printGatewayServiceStatus(
   paths: GatewayServicePaths,

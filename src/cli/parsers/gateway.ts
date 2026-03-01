@@ -6,16 +6,15 @@ import {
   parseModelCommandArgs,
   type ParsedModelCommandArgs,
 } from '../shared/args.js';
+import {
+  normalizeGatewayChannels,
+  resolveGatewayChannel,
+  type GatewayChannel,
+} from '../../gateway/runtime/channelRegistry.js';
 import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
 import type { LocalGatewayOverrides } from '../../channels/local/server.js';
 
-type GatewayChannel = 'feishu' | 'local';
 type GatewayStartOverrides = Partial<FeishuGatewayConfig> & Partial<LocalGatewayOverrides>;
-
-interface GatewayChannelPlugin {
-  name: GatewayChannel;
-  parseStartArgs: (argv: string[]) => GatewayStartOverrides;
-}
 
 function normalizePairingPolicy(raw: string | undefined): FeishuGatewayConfig['pairingPolicy'] {
   const normalized = raw?.trim().toLowerCase();
@@ -275,34 +274,11 @@ export function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
   };
 }
 
-const GATEWAY_CHANNEL_PLUGINS: Record<GatewayChannel, GatewayChannelPlugin> = {
-  feishu: {
-    name: 'feishu',
-    parseStartArgs: parseFeishuServerArgs,
-  },
-  local: {
-    name: 'local',
-    parseStartArgs: parseLocalGatewayArgs,
-  },
-};
-
-function resolveGatewayChannelPlugin(rawChannel: string): GatewayChannelPlugin {
-  const channel = rawChannel.trim().toLowerCase();
-  const plugin = GATEWAY_CHANNEL_PLUGINS[channel as GatewayChannel];
-  if (!plugin) {
-    throw new Error(`Unsupported channel: ${rawChannel}`);
+function parseGatewayStartArgsByChannel(channel: GatewayChannel, startArgs: string[]): GatewayStartOverrides {
+  if (channel === 'feishu') {
+    return parseFeishuServerArgs(startArgs);
   }
-  return plugin;
-}
-
-function normalizeGatewayChannels(rawChannels: GatewayChannel[]): GatewayChannel[] {
-  const output: GatewayChannel[] = [];
-  for (const channel of rawChannels) {
-    if (!output.includes(channel)) {
-      output.push(channel);
-    }
-  }
-  return output;
+  return parseLocalGatewayArgs(startArgs);
 }
 
 export function parseGatewayArgs(argv: string[]): {
@@ -413,7 +389,7 @@ export function parseGatewayArgs(argv: string[]): {
 
     if (arg === '--channel') {
       throwIfMissingValue('channel', i + 1, argv);
-      channel = resolveGatewayChannelPlugin(argv[i + 1]).name;
+      channel = resolveGatewayChannel(argv[i + 1]);
       channels.push(channel);
       hasChannel = true;
       serviceArgv.push(arg, argv[i + 1]);
@@ -421,7 +397,7 @@ export function parseGatewayArgs(argv: string[]): {
       continue;
     }
     if (arg.startsWith('--channel=')) {
-      channel = resolveGatewayChannelPlugin(arg.slice('--channel='.length)).name;
+      channel = resolveGatewayChannel(arg.slice('--channel='.length));
       channels.push(channel);
       hasChannel = true;
       serviceArgv.push(arg);
@@ -458,8 +434,7 @@ export function parseGatewayArgs(argv: string[]): {
 
     const normalizedChannel = normalizedChannels[0];
     if (normalizedChannels.length === 1) {
-      const plugin = resolveGatewayChannelPlugin(normalizedChannel);
-      const startConfig = plugin.parseStartArgs(startArgs);
+      const startConfig = parseGatewayStartArgsByChannel(normalizedChannel, startArgs);
       return {
         channel: normalizedChannel,
         channels: normalizedChannels,
