@@ -7,7 +7,7 @@ CLI（node dist/index.js）
   └─ src/index.ts
       └─ src/cli/cli.ts（参数路由）
           ├─ src/gateway/index.ts（gateway 主入口）
-          │   ├─ src/core/index.ts（CoreCoordinator 统一执行入口）
+          │   ├─ src/app/coreCoordinator.ts（CoreCoordinator 统一执行入口）
           │   ├─ src/core/contracts.ts（核心接口与事件/错误码）
           │   ├─ src/core/adapters（会话/工具/运行时端口）
           │   │   ├─ session.ts
@@ -18,12 +18,11 @@ CLI（node dist/index.js）
           │   ├─ src/gateway/serviceState.ts（服务状态）
           │   ├─ src/gateway/serviceProcess.ts（子进程）
       ├─ src/runtime/
-          │   ├─ index.ts（统一转发层，仅复用 coreCoordinator）
           │   ├─ adapter.ts（runtime port 实现，组装 requestContext）
           │   ├─ context.ts（上下文与请求基元）
           │   └─ entrypoint.ts（provider adapter 的底层执行入口）
-          ├─ src/adapters/codexAdapter.ts（provider adapter，当前实现为 openai-codex）
-          ├─ src/adapters/stubAdapter.ts（非 codex 回退）
+          ├─ src/providers/codexAdapter.ts（provider adapter，当前实现为 openai-codex）
+          ├─ src/providers/stubAdapter.ts（非 codex 回退）
           ├─ src/tools/registry.ts / executor.ts / runtimeTools.ts（工具执行）
           ├─ src/sessions/sessionService.ts（会话/记忆/transcript 服务）
           ├─ src/sessions/sessionStore.ts（会话与记忆）
@@ -68,9 +67,9 @@ CLI（node dist/index.js）
 
 - `gateway/index.ts`、`cli/commands/agent.ts`、`integrations/*`、`heartbeat` 入口统一复用 `agent/invoke.ts` 的 `runAgent`。
 - `运行时代码不再作为业务模块交接点`，`runtime/adapter.ts` 与 `runtime/entrypoint.ts` 仅负责 protocol context 与 provider 适配执行。
-- `src/adapters/codexAdapter.ts`
+- `src/providers/codexAdapter.ts`
   - 对接模型 SDK（`@mariozechner/pi-ai`），处理工具 schema 映射与 tool-call 解析。
-- `src/adapters/stubAdapter.ts`
+- `src/providers/stubAdapter.ts`
   - 作为非模型的兜底行为。
 - `src/sessions/sessionStore.ts`
   - 管理 session 目录、索引文件与记忆文件。

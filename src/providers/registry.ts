@@ -47,11 +47,3 @@ export function resolveProvider(providerRaw: string): ResolvedProvider {
 export function getSupportedProviders(): string[] {
   return Object.keys(PROVIDER_BY_PROVIDER).sort();
 }
-
-export type AdapterRunInput = ProviderRunInput;
-export type RuntimeAdapter = RuntimeProvider;
-export type ResolvedAdapter = ResolvedProvider;
-export const resolveAdapter = resolveProvider;
-export function getSupportedAdapters(): string[] {
-  return getSupportedProviders();
-}

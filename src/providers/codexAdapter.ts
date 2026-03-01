@@ -11,9 +11,9 @@ import { isToolAllowed } from "../tools/registry.js";
 import { executeTool } from "../tools/executor.js";
 import { createToolCallId } from "../shared/ids.js";
 import { resolveBooleanFlag } from "../shared/envFlags.js";
-import { parseToolCallsFromResponse } from "../adapters/codex/toolCallParser.js";
-import { buildToolErrorLog, createToolExecutionState } from "../adapters/codex/toolExecutionState.js";
-import { toText } from "../adapters/codex/messageText.js";
+import { parseToolCallsFromResponse } from "../providers/codex/toolCallParser.js";
+import { buildToolErrorLog, createToolExecutionState } from "../providers/codex/toolExecutionState.js";
+import { toText } from "../providers/codex/messageText.js";
 
 // 该系统提示词是 MVP 阶段的临时兜底：用于让 provider responses 在最小路径下可直接返回结果。
 // 这是可替换配置，不是对外契约；后续接手时可按体验目标调整文案、样式或完全替换。
