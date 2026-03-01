@@ -1,9 +1,12 @@
-import { parseArgv, type ArgOptionDefinition } from '../shared/argParser.js';
-import { parsePositiveIntValue } from '../shared/args.js';
-import { normalizeGatewayChannels, resolveGatewayChannel } from '../../gateway/runtime/channelRegistry.js';
-import type { GatewayParsedCommand, GatewayStartOverrides } from '../../gateway/runtime/contracts.js';
-import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
-import type { LocalGatewayOverrides } from '../../channels/local/server.js';
+import { parseArgv, type ArgOptionDefinition } from '../../../cli/shared/argParser.js';
+import { parsePositiveIntValue } from '../../../cli/shared/args.js';
+import { normalizeGatewayChannels, resolveGatewayChannel } from '../channelRegistry.js';
+import type {
+  GatewayParsedCommand,
+  GatewayStartOverrides,
+} from '../contracts.js';
+import type { FeishuGatewayConfig } from '../../../channels/feishu/config.js';
+import type { LocalGatewayOverrides } from '../../../channels/local/server.js';
 
 type ParsedGatewayAction = 'start' | 'status' | 'stop';
 
@@ -84,7 +87,10 @@ const GATEWAY_RUNTIME_OPTIONS: ArgOptionDefinition[] = [
 
 const GATEWAY_COMMON_CONFIG_OPTIONS: ArgOptionDefinition[] = [
   { name: 'app-id', type: 'string' },
-  { name: 'app-secret', type: 'string' },
+  {
+    name: 'app-secret',
+    type: 'string',
+  },
   {
     name: 'request-timeout-ms',
     type: 'integer',
@@ -213,17 +219,16 @@ function parseLocalGatewayConfigFromOptions(parsedOptions: ParsedOptionMap): Gat
 function parseGatewayChannels(parsedOptions: ParsedOptionMap): { channels: Array<'feishu' | 'local'>; hasChannel: boolean } {
   const rawChannels = parsedOptions.channel;
   if (typeof rawChannels === 'string') {
-    const channel = resolveGatewayChannel(rawChannels);
     return {
-      channels: normalizeGatewayChannels([channel]),
+      channels: normalizeGatewayChannels([rawChannels as 'feishu' | 'local']),
       hasChannel: true,
     };
   }
 
   if (Array.isArray(rawChannels)) {
     const channels = rawChannels
-      .filter((value): value is string => typeof value === 'string')
-      .map((value) => resolveGatewayChannel(value));
+      .filter((value): value is 'feishu' | 'local' => value === 'feishu' || value === 'local')
+      .map((value) => resolveGatewayChannel(value as string));
     return {
       channels: normalizeGatewayChannels(channels),
       hasChannel: channels.length > 0,
@@ -233,62 +238,6 @@ function parseGatewayChannels(parsedOptions: ParsedOptionMap): { channels: Array
   return {
     channels: ['feishu'],
     hasChannel: false,
-  };
-}
-
-export function parseFeishuServerArgs(argv: string[]): {
-  appId?: string;
-  appSecret?: string;
-  requestTimeoutMs?: number;
-  provider?: string;
-  profileId?: string;
-  withTools?: boolean;
-  memory?: boolean;
-  toolAllow?: string[];
-  heartbeatEnabled?: boolean;
-  heartbeatIntervalMs?: number;
-  heartbeatTargetOpenId?: string;
-  heartbeatSessionKey?: string;
-  pairingPolicy?: FeishuGatewayConfig['pairingPolicy'];
-  pairingPendingTtlMs?: number;
-  pairingPendingMax?: number;
-  pairingAllowFrom?: string[];
-} {
-  const parsed = parseArgv(
-    argv,
-    [
-      ...GATEWAY_MODEL_OPTIONS,
-      ...GATEWAY_RUNTIME_OPTIONS,
-      ...GATEWAY_COMMON_CONFIG_OPTIONS,
-    ],
-    { strictUnknown: true },
-  );
-
-  if (parsed.unknownOptions.length > 0) {
-    throw new Error(`Unknown option: ${parsed.unknownOptions[0]}`);
-  }
-  if (parsed.positional.length > 0) {
-    throw new Error(`Unknown argument for gateway start: ${parsed.positional[0]}`);
-  }
-
-  return parseFeishuGatewayConfigFromOptions(parsed.options);
-}
-
-export function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
-  const parsed = parseArgv(argv, GATEWAY_LOCAL_OPTIONS, { strictUnknown: true });
-  if (parsed.unknownOptions.length > 0) {
-    throw new Error(`Unknown option: ${parsed.unknownOptions[0]}`);
-  }
-  if (parsed.positional.length > 0) {
-    throw new Error(`Unknown argument for gateway start: ${parsed.positional[0]}`);
-  }
-
-  return {
-    ...(resolveOptionalString(parsed.options.provider) ? { provider: resolveOptionalString(parsed.options.provider)! } : {}),
-    ...(resolveOptionalString(parsed.options.profile) ? { profileId: resolveOptionalString(parsed.options.profile)! } : {}),
-    ...(typeof resolveOptionalBoolean(parsed.options['with-tools']) === 'boolean' ? { withTools: parsed.options['with-tools'] as boolean } : {}),
-    ...(typeof resolveOptionalBoolean(parsed.options.memory) === 'boolean' ? { memory: parsed.options.memory as boolean } : {}),
-    ...(resolveOptionalStringList(parsed.options['tool-allow']) ? { toolAllow: resolveOptionalStringList(parsed.options['tool-allow'])! } : {}),
   };
 }
 
@@ -317,7 +266,6 @@ export function parseGatewayArgs(argv: string[]): GatewayParsedCommand {
 
   const { channels } = parseGatewayChannels(parsed.options);
   const channel = channels[0] ?? 'feishu';
-
   const base: GatewayParsedCommand = {
     action,
     channel,
@@ -328,6 +276,7 @@ export function parseGatewayArgs(argv: string[]): GatewayParsedCommand {
     serviceChild: parsed.options['service-child'] === true,
     debug: action === 'start' ? parsed.options.debug === true : false,
     serviceArgv: rawArgv,
+    ...(rawArgv.length > 0 ? { } : {}),
   };
 
   if (action !== 'start') {

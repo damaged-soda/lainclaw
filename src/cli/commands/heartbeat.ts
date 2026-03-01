@@ -1,22 +1,27 @@
-import { parseHeartbeatAddArgs, parseHeartbeatInitArgs, parseHeartbeatRunArgs } from '../parsers/heartbeat.js';
 import { addHeartbeatRule, initHeartbeatFile, listHeartbeatRules, removeHeartbeatRule, setHeartbeatRuleEnabled } from '../../heartbeat/store.js';
 import { runHeartbeatOnce } from '../../heartbeat/runner.js';
 import { runCommand } from '../shared/result.js';
 
-export async function runHeartbeatCommand(args: string[]): Promise<number> {
-  return runCommand(async () => {
-    const subcommand = args[0];
-    const rest = args.slice(1);
+export type HeartbeatCommandInput =
+  | { kind: 'missing' }
+  | { kind: 'init'; force?: boolean; templatePath?: string }
+  | { kind: 'add'; ruleText: string; provider?: string; profileId?: string; withTools?: boolean; toolAllow?: string[] }
+  | { kind: 'list' }
+  | { kind: 'remove'; ruleId: string }
+  | { kind: 'enable'; ruleId: string }
+  | { kind: 'disable'; ruleId: string }
+  | { kind: 'run'; provider?: string; profileId?: string; withTools?: boolean; toolAllow?: string[]; memory?: boolean };
 
-    if (!subcommand) {
+export async function runHeartbeatCommand(parsed: HeartbeatCommandInput): Promise<number> {
+  return runCommand(async () => {
+    if (parsed.kind === 'missing') {
       console.error("Usage: lainclaw heartbeat <init|add|list|remove|enable|disable|run>");
       return 1;
     }
 
-    if (subcommand === "init") {
-      const parsed = parseHeartbeatInitArgs(rest);
+    if (parsed.kind === 'init') {
       const initResult = await initHeartbeatFile({
-        overwrite: parsed.force,
+        overwrite: parsed.force === true,
         ...(parsed.templatePath ? { templatePath: parsed.templatePath } : {}),
       });
       if (initResult.status === "skipped") {
@@ -33,8 +38,7 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
       return 0;
     }
 
-    if (subcommand === "add") {
-      const parsed = parseHeartbeatAddArgs(rest);
+    if (parsed.kind === 'add') {
       const rule = await addHeartbeatRule({
         ruleText: parsed.ruleText,
         ...(parsed.provider ? { provider: parsed.provider } : {}),
@@ -47,14 +51,14 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
       return 0;
     }
 
-    if (subcommand === "list") {
+    if (parsed.kind === 'list') {
       const rules = await listHeartbeatRules();
       console.log(JSON.stringify(rules, null, 2));
       return 0;
     }
 
-    if (subcommand === "remove") {
-      const ruleId = rest[0];
+    if (parsed.kind === 'remove') {
+      const ruleId = parsed.ruleId;
       if (!ruleId) {
         console.error("Usage: lainclaw heartbeat remove <ruleId>");
         return 1;
@@ -68,13 +72,13 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
       return 0;
     }
 
-    if (subcommand === "enable" || subcommand === "disable") {
-      const ruleId = rest[0];
+    if (parsed.kind === 'enable' || parsed.kind === 'disable') {
+      const enabled = parsed.kind === 'enable';
+      const ruleId = parsed.kind === 'enable' || parsed.kind === 'disable' ? parsed.ruleId : undefined;
       if (!ruleId) {
-        console.error(`Usage: lainclaw heartbeat ${subcommand} <ruleId>`);
+        console.error(`Usage: lainclaw heartbeat ${parsed.kind} <ruleId>`);
         return 1;
       }
-      const enabled = subcommand === "enable";
       const updated = await setHeartbeatRuleEnabled(ruleId, enabled);
       if (!updated) {
         console.error(`Heartbeat rule not found: ${ruleId}`);
@@ -84,8 +88,7 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
       return 0;
     }
 
-    if (subcommand === "run") {
-      const parsed = parseHeartbeatRunArgs(rest);
+    if (parsed.kind === 'run') {
       const summary = await runHeartbeatOnce({
         ...(parsed.provider ? { provider: parsed.provider } : {}),
         ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
@@ -97,7 +100,6 @@ export async function runHeartbeatCommand(args: string[]): Promise<number> {
       return summary.errors > 0 ? 1 : 0;
     }
 
-    console.error(`Unknown heartbeat subcommand: ${subcommand}`);
     console.error('Usage: lainclaw heartbeat <init|add|list|remove|enable|disable|run>');
     return 1;
   });

@@ -3,8 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { parseAgentArgs } from "../cli/parsers/agent.js";
-import { parseHeartbeatAddArgs, parseHeartbeatRunArgs } from "../cli/parsers/heartbeat.js";
+import { runCli } from "../cli/cli.js";
 import { parseModelCommandArgs } from "../cli/shared/args.js";
 import { resolveFeishuGatewayConfig } from "../channels/feishu/config.js";
 import {
@@ -213,12 +212,16 @@ test("model command parser rejects removed tool max steps flag", () => {
 });
 
 test("agent args parser rejects removed tool max steps flag", () => {
-  assert.throws(() => parseAgentArgs(["--tool-max-steps", "5", "hello"]), /Unknown option: --tool-max-steps/);
+  return runCli(["agent", "--tool-max-steps", "5", "hello"]).then((code) => {
+    assert.equal(code, 1);
+  });
 });
 
-test("heartbeat parser rejects removed tool max steps flag", () => {
-  assert.throws(() => parseHeartbeatRunArgs(["--tool-max-steps=5"]), /Unknown option: --tool-max-steps=5/);
-  assert.throws(() => parseHeartbeatAddArgs(["--tool-max-steps", "5", "summary"]), /Unknown option/);
+test("heartbeat parser rejects removed tool max steps flag", async () => {
+  await Promise.all([
+    runCli(["heartbeat", "run", "--tool-max-steps=5"]).then((code) => assert.equal(code, 1)),
+    runCli(["heartbeat", "add", "--tool-max-steps", "5", "summary"]).then((code) => assert.equal(code, 1)),
+  ]);
 });
 
 test("feishu config ignores legacy tool max steps env vars", async () => {

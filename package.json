@@ -17,8 +17,9 @@
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.59.0",
+    "@mariozechner/pi-agent-core": "latest",
     "@mariozechner/pi-ai": "^0.55.0",
-    "@mariozechner/pi-agent-core": "latest"
+    "commander": "^14.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

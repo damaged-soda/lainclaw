@@ -1,35 +1,35 @@
-import { parseAgentArgs } from '../parsers/agent.js';
 import { ValidationError } from '../../shared/types.js';
 import { runAgent } from '../../gateway/index.js';
 import { runCommand } from '../shared/result.js';
 
-export async function runAgentCommand(args: string[]): Promise<number> {
+export interface AgentCommandInput {
+  input: string;
+  provider?: string;
+  profile?: string;
+  session?: string;
+  newSession?: boolean;
+  memory?: boolean;
+  withTools?: boolean;
+  toolAllow?: string[];
+}
+
+export async function runAgentCommand(input: AgentCommandInput): Promise<number> {
   return runCommand(async () => {
-    const {
-      input,
-      provider,
-      profile,
-      sessionKey,
-      newSession,
-      memory,
-      withTools,
-      toolAllow,
-    } = parseAgentArgs(args);
-    if (!input.trim()) {
+    if (!input.input.trim()) {
       throw new ValidationError("agent command requires non-empty input", "AGENT_INPUT_REQUIRED");
     }
 
     const response = await runAgent({
-      input,
+      input: input.input,
       channelId: "cli",
-      sessionKey,
+      sessionKey: input.session,
       runtime: {
-        provider,
-        profileId: profile,
-        newSession,
-        memory,
-        withTools,
-        toolAllow,
+        provider: input.provider,
+        profileId: input.profile,
+        newSession: input.newSession,
+        memory: input.memory,
+        withTools: input.withTools,
+        toolAllow: input.toolAllow,
       },
     });
 

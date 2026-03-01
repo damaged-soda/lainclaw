@@ -1,13 +1,18 @@
-import { parseToolsArgs, type ParsedToolsCommand } from '../parsers/tools.js';
 import { runCommand } from '../shared/result.js';
 import { executeTool } from '../../tools/executor.js';
 import { getTool, listTools } from '../../tools/registry.js';
 import type { ToolCall, ToolContext } from '../../tools/types.js';
 
-export async function runToolsCommand(args: string[]): Promise<number> {
-  return runCommand(async () => {
-    const parsed: ParsedToolsCommand = parseToolsArgs(args);
+export type ToolsCommandInput =
+  | { kind: 'missing' }
+  | { kind: 'unknown'; subcommand: string }
+  | { kind: 'invalid'; message: string }
+  | { kind: 'list' }
+  | { kind: 'info'; name: string }
+  | { kind: 'invoke'; name: string; rawArgs?: string };
 
+export async function runToolsCommand(parsed: ToolsCommandInput): Promise<number> {
+  return runCommand(async () => {
     if (parsed.kind === 'missing') {
       console.error('Usage: lainclaw tools <list|info|invoke>');
       return 1;

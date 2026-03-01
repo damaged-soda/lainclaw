@@ -1,51 +1,51 @@
+import { Command } from 'commander';
+import { buildProgram } from './program.js';
 import { VERSION } from './version.js';
-import {
-  printCommandUsage,
-  printUsage,
-} from './usage.js';
-import { resolveCommandRoute, runUnknownCommand } from './registry.js';
-import type { CommandContext } from './types.js';
+
+function installExitOverride(command: Command): void {
+  command.exitOverride();
+  for (const child of command.commands) {
+    installExitOverride(child);
+  }
+}
+
+function isCommandNotFound(error: unknown): error is Command & { code?: string; message: string } {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  return 'code' in error && String((error as Record<string, unknown>).code).startsWith('commander.');
+}
 
 export async function runCli(argv: string[]): Promise<number> {
+  const program = buildProgram();
+  installExitOverride(program);
+
   try {
-    return await dispatchCommand(argv);
+    await program.parseAsync(argv, { from: 'user' });
+    return (program as { exitCode?: number }).exitCode ?? 0;
   } catch (error) {
+    if (isCommandNotFound(error)) {
+      const message = String(error.message ?? '');
+      if (error.code === 'commander.help' || error.code === 'commander.helpDisplayed') {
+        return 0;
+      }
+      if (error.code === 'commander.version') {
+        console.log(`lainclaw v${VERSION}`);
+        return 0;
+      }
+      if (error.code === 'commander.unknownCommand') {
+        const match = message.match(/'([^']+)'/);
+        if (match?.[1]) {
+          console.error(`Unknown command: ${match[1]}`);
+        } else {
+          console.error(message);
+        }
+        return 1;
+      }
+      return Number((error as { exitCode?: number }).exitCode ?? 1);
+    }
+
     console.error('ERROR:', String(error instanceof Error ? error.message : error));
     return 1;
   }
 }
-
-export async function dispatchCommand(argv: string[]): Promise<number> {
-  const command = argv[0];
-  const args = argv.slice(1);
-
-  if (!command || command === 'help' || command === '-h' || command === '--help') {
-    console.log(printUsage());
-    return 0;
-  }
-
-  if (command === '-v' || command === '--version') {
-    console.log(`lainclaw v${VERSION}`);
-    return 0;
-  }
-
-  const route = resolveCommandRoute(command);
-  if (!route) {
-    return runUnknownCommand(command);
-  }
-
-  if (args.some((entry) => entry === '-h' || entry === '--help')) {
-    console.log(printCommandUsage(command));
-    return 0;
-  }
-
-  const context: CommandContext = {
-    command,
-    args,
-    argv,
-  };
-
-  return route.handler(context);
-}
-
-export { printUsage } from './usage.js';

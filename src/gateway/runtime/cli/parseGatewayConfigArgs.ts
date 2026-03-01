@@ -1,6 +1,6 @@
-import { parseArgv, type ArgOptionDefinition } from '../shared/argParser.js';
-import type { GatewayConfigParsedCommand } from '../../gateway/runtime/contracts.js';
-import { parseFeishuGatewayConfigFromOptions } from './gateway.js';
+import { parseArgv, type ArgOptionDefinition } from '../../../cli/shared/argParser.js';
+import type { GatewayConfigParsedCommand } from '../contracts.js';
+import { parseFeishuGatewayConfigFromOptions } from './parseGatewayArgs.js';
 
 const GATEWAY_CONFIG_CHANNEL_OPTION: ArgOptionDefinition = {
   name: 'channel',

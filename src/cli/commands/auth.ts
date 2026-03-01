@@ -1,4 +1,3 @@
-import { parseAuthArgs } from '../parsers/auth.js';
 import {
   clearProfiles,
   formatProfileExpiry,
@@ -10,10 +9,16 @@ import {
 } from '../../auth/authManager.js';
 import { runCommand } from '../shared/result.js';
 
-export async function runAuthCommand(args: string[]): Promise<number> {
-  return runCommand(async () => {
-    const parsed = parseAuthArgs(args);
+export type AuthCommandInput =
+  | { kind: 'login'; provider?: string }
+  | { kind: 'status' }
+  | { kind: 'use'; profile?: string }
+  | { kind: 'logout'; all: boolean; profile?: string }
+  | { kind: 'missing' }
+  | { kind: 'unknown'; subcommand: string };
 
+export async function runAuthCommand(parsed: AuthCommandInput): Promise<number> {
+  return runCommand(async () => {
     if (parsed.kind === 'missing') {
       console.error('Missing auth subcommand.');
       return 1;
