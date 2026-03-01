@@ -17,13 +17,13 @@
    - 运行时职责边界变更同步到 `architecture.md`，必要时同步 `overview.md` 的能力描述。
    - Provider/运行适配层变更需同步 `README.md` 示例、`local-quickstart.md` 和 `overview.md` 的配置说明。
    - 依赖边界与一体化入口改造同步到 `docs/wip/<topic>/implementation_plan.md`，并补充 `implementation` 完成记录。
-3. 核心路径遵循 `docs/architecture.md` 与 `src/bootstrap/coreCoordinator.ts` 一致：入口统一走 `coreCoordinator`，避免跨模块直接调用。
+3. 核心路径遵循 `docs/architecture.md` 与 `src/app/coreCoordinator.ts` 一致：入口统一走 `coreCoordinator`，避免跨模块直接调用。
 4. `docs/wip/<topic>/` 用于一次提案的增量链路（`intent.md`/`spec_delta.md`/`tasks.md`）。
 5. 非 WIP 文档更新优先采用小步增量，避免与功能发布不同步。
 
 ## 维护建议
 
-- 变更行为时，先在 `docs/wip/.../spec_delta.md` 明确需求，再更新 `docs/overview.md` 或 `docs/architecture.md`。
+- 变更行为时，先在 `docs/wip/<topic>/spec_delta.md` 明确需求，再更新 `docs/overview.md` 或 `docs/architecture.md`。
 - 若涉及新模块、持久化路径或运维流程，优先更新 `architecture.md`。
 - 为保持一致性，任何后续“命令参考”建议放在独立文档并在此 README 纳入索引。
 

@@ -8,7 +8,7 @@
 
 - 安装依赖并编译产物：
 ```bash
-cd src/lainclaw
+cd /path/to/lainclaw  # 替换为你的仓库路径
 npm install
 npm run build
 ```

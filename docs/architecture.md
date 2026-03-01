@@ -6,10 +6,11 @@
 CLI（node dist/index.js）
   └─ src/index.ts
       └─ src/cli/cli.ts（参数路由）
+          └─ src/cli/program.ts（命令树组装）
           ├─ src/gateway/index.ts（gateway 主入口）
           │   ├─ src/app/coreCoordinator.ts（CoreCoordinator 统一执行入口）
           │   ├─ src/core/contracts.ts（核心接口与事件/错误码）
-          │   ├─ src/core/adapters（会话/工具/运行时端口）
+          │   ├─ src/core/adapters/index.ts（会话/工具/运行时端口）
           │   │   ├─ session.ts
           │   │   ├─ tools.ts
           │   │   └─ runtime.ts
@@ -37,7 +38,7 @@ CLI（node dist/index.js）
 
 - `src/cli/cli.ts`
   - 负责 CLI 参数解析、子命令分发与标准入口（`--help` / `--version`）输出。
-  - 通过 `src/cli/registry.ts` 维护 `CommandRoute` 注册表，由 `runCommand` 风格执行层统一处理错误与返回码。
+  - 通过 `src/cli/program.ts` 维护命令注册，并由 `src/cli/shared/result.ts` 的 `runCommand` 风格执行层统一处理错误与返回码。
   - 提供 `agent/gateway/pairing/tools/heartbeat/auth` 的命令入口，但不变更命令语义与外部行为。
 - `src/core/index.ts`
   - 统一执行业务执行入口，承接 `agent/gateway/channel/heartbeat` 的请求并编排上下文、会话、工具与运行时调用；核心层侧重协议协调与事件收口。
@@ -107,10 +108,10 @@ CLI（node dist/index.js）
 
 - `src/cli/cli.ts`
   - 负责前置参数分支与未知命令处理（`agent/gateway/...`）；
-- `src/cli/registry.ts`
-  - 定义命令路由（`commandRoutes`）与运行时查找；
-- `src/cli/parsers/*`
-  - 负责参数校验与标准化；
+- `src/cli/program.ts`
+  - 定义并挂载命令树（`agent/gateway/pairing/tools/heartbeat/auth`）；
+- `src/cli/shared/options.ts`
+  - 负责参数标准化与共享选项；
 - `src/cli/commands/*`
   - 负责命令执行、日志与输出；
 - `src/cli/shared/result.ts`
