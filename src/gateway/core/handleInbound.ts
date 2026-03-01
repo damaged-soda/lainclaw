@@ -1,17 +1,15 @@
-import { runAgent } from "../index.js";
-import type {
-  FeishuInboundMessage,
-  InboundMessage,
-  OutboundAction,
-  ReplyTextOutboundAction,
-} from "../../transports/contracts.js";
-import type { FeishuGatewayConfig } from "../../channels/feishu/config.js";
-import { evaluateFeishuAccessPolicy } from "./policy/accessPolicy.js";
-
-// Core 入口：只编排入站消息语义、准入策略、模型调用与统一错误兜底。
-// 真实输出动作仍由 transports 执行。
+import {
+  type IgnoredInboundMessage,
+  type InboundMessage,
+  type MessageInboundMessage,
+  type OutboundMessage,
+} from '../../integrations/contracts.js';
+import { evaluateAccessPolicy } from './policy/accessPolicy.js';
+import { runAgent } from '../index.js';
 
 const DEFAULT_AGENT_TIMEOUT_MS = 10000;
+
+type AgentMessage = MessageInboundMessage | IgnoredInboundMessage;
 
 interface AgentRuntimeContext {
   provider?: string;
@@ -21,79 +19,76 @@ interface AgentRuntimeContext {
   memory?: boolean;
 }
 
-interface FeishuHandleOptions {
-  channel: "feishu";
+interface HandleInboundOptions {
   runtime: AgentRuntimeContext;
-  config: FeishuGatewayConfig;
+  policyConfig?: unknown;
   timeoutMs?: number;
   onFailureHint?: (rawMessage: string) => string;
 }
-
-interface LocalHandleOptions {
-  channel: "local";
-  runtime: AgentRuntimeContext;
-  timeoutMs?: number;
-  onFailureHint?: (rawMessage: string) => string;
-}
-
-export type HandleInboundOptions = FeishuHandleOptions | LocalHandleOptions;
 
 export async function handleInbound(
   inbound: InboundMessage,
   options: HandleInboundOptions,
-): Promise<readonly OutboundAction[]> {
-  if (inbound.kind !== "message") {
-    return [];
+): Promise<OutboundMessage | void> {
+  const message = inbound as AgentMessage;
+  if (message.kind !== 'message') {
+    return;
   }
 
-  const input = inbound.input.trim();
+  const input = message.text.trim();
   if (!input) {
-    return [];
+    return;
   }
 
-  const sessionKey = resolveSessionKey(inbound);
+  const sessionKey = resolveSessionKey(message);
+  const decision = await evaluateAccessPolicy({
+    inbound: message,
+    config: options.policyConfig,
+  });
 
-  if (options.channel === "feishu") {
-    if (inbound.channel !== "feishu") {
-      throw new Error("feishu handler received non-feishu message");
+  if (!decision.allowed) {
+    if (!decision.replyText) {
+      return;
     }
-    const decision = await evaluateFeishuAccessPolicy({
-      inbound: inbound as FeishuInboundMessage,
-      config: options.config,
-    });
-    if (!decision.allowed) {
-      if (!decision.replyText) {
-        return [];
-      }
-      return [buildReplyTextAction(inbound, decision.replyText)];
-    }
+    return {
+      requestId: message.requestId,
+      replyTo: message.replyTo,
+      text: decision.replyText,
+      meta: {
+        ...(message.meta || {}),
+        inboundIntegration: inbound.integration,
+      },
+    };
   }
 
   try {
     const responseText = await runAgentWithTimeout({
       input,
-      channelId: inbound.channel,
+      integrationId: message.integration,
       sessionKey,
       runtime: options.runtime,
       timeoutMs: options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
     });
 
-    return [buildReplyTextAction(inbound, responseText)];
+    return {
+      requestId: message.requestId,
+      replyTo: message.replyTo,
+      text: responseText,
+    };
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : String(error);
     const hint = options.onFailureHint ? options.onFailureHint(rawMessage) : rawMessage;
-    return [
-      buildReplyTextAction(
-        inbound,
-        `[Lainclaw] ${hint}（requestId: ${inbound.requestId}）`,
-      ),
-    ];
+    return {
+      requestId: message.requestId,
+      replyTo: message.replyTo,
+      text: `[Lainclaw] ${hint}（requestId: ${message.requestId}）`,
+    };
   }
 }
 
 interface AgentRequest {
   input: string;
-  channelId: "feishu" | "local";
+  integrationId: string;
   sessionKey: string;
   runtime: AgentRuntimeContext;
   timeoutMs: number;
@@ -106,7 +101,7 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
 
   const invoke = runAgent({
     input: params.input,
-    channelId: params.channelId,
+    channelId: params.integrationId,
     sessionKey: params.sessionKey,
     runtime: {
       provider: params.runtime.provider,
@@ -117,7 +112,7 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
     },
   });
 
-  const timeout = new Promise<string>((_, reject) => {
+  const timeout = new Promise<never>((_, reject) => {
     setTimeout(() => {
       reject(new Error(`agent timeout after ${timeoutMs}ms`));
     }, timeoutMs);
@@ -127,24 +122,8 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
   return (result as { text: string }).text;
 }
 
-function resolveSessionKey(inbound: InboundMessage): string {
-  const actorId = inbound.actorId.trim() || inbound.requestId;
-  const conversationId = inbound.conversationId.trim() || inbound.requestId;
-  if (inbound.channel === "local") {
-    return `${actorId}:${conversationId}`;
-  }
-  return `${inbound.channel}:${actorId}:${conversationId}`;
-}
-
-function buildReplyTextAction(
-  inbound: InboundMessage,
-  text: string,
-): ReplyTextOutboundAction {
-  return {
-    kind: "reply.text",
-    channel: inbound.channel,
-    requestId: inbound.requestId,
-    replyTo: inbound.replyTo,
-    text,
-  };
+function resolveSessionKey(message: MessageInboundMessage): string {
+  const actorId = message.actorId.trim() || message.requestId;
+  const conversationId = message.conversationId.trim() || message.requestId;
+  return `${actorId}:${conversationId}`;
 }

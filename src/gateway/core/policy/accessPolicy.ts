@@ -1,110 +1,120 @@
-import { type FeishuGatewayConfig } from "../../../channels/feishu/config.js";
-import { buildPairingQueueFullReply, buildPairingReply } from "../../../pairing/pairing-messages.js";
-import { readChannelAllowFromStore, upsertChannelPairingRequest } from "../../../pairing/pairing-store.js";
-import { resolvePairingIdLabel } from "../../../pairing/pairing-labels.js";
-import type { FeishuInboundMessage } from "../../../transports/contracts.js";
+import { buildPairingQueueFullReply, buildPairingReply } from '../../../pairing/pairing-messages.js';
+import { readChannelAllowFromStore, upsertChannelPairingRequest } from '../../../pairing/pairing-store.js';
+import { type InboundMessage, type IntegrationId } from '../../../integrations/contracts.js';
 
-const FEISHU_DENY_MESSAGE = "当前策略不允许当前用户发起会话，请联系管理员配置后重试。";
+const ACCESS_DENIED_MESSAGE = '当前策略不允许当前用户发起会话，请联系管理员配置后重试。';
 
-interface FeishuPolicyInput {
-  inbound: FeishuInboundMessage;
-  config: FeishuGatewayConfig;
+interface AccessPolicyInput {
+  inbound: InboundMessage;
+  config: unknown;
 }
 
-export interface FeishuPolicyDecision {
+export interface AccessPolicyDecision {
   allowed: boolean;
   replyText?: string;
 }
 
-function isMatchingPairingPolicy(value: string | undefined): value is FeishuGatewayConfig["pairingPolicy"] {
-  return value === "open" || value === "allowlist" || value === "pairing" || value === "disabled";
+interface FeishuLikePolicyConfig {
+  pairingPolicy?: string;
+  pairingPendingTtlMs?: number;
+  pairingPendingMax?: number;
+  pairingAllowFrom?: string[];
 }
 
-function normalizeAllowFrom(values: unknown): string[] {
-  if (!Array.isArray(values)) {
-    return [];
-  }
-  return values
-    .map((entry) => String(entry).trim())
-    .map((entry) => entry.toLowerCase())
-    .filter((entry) => entry.length > 0);
+function isIntegrationConfig(raw: unknown): raw is FeishuLikePolicyConfig {
+  return !!raw && typeof raw === 'object';
 }
 
-function isWildcardAllowFrom(allowFrom: string[]): boolean {
-  return allowFrom.includes("*");
-}
-
-function resolvePairingPolicy(policy: string | undefined, configPolicy: FeishuGatewayConfig["pairingPolicy"]): string {
-  if (isMatchingPairingPolicy(policy)) {
+function normalizePolicy(rawPolicy: string | undefined): string {
+  const policy = (rawPolicy || 'open').trim().toLowerCase();
+  if (['open', 'allowlist', 'pairing', 'disabled'].includes(policy)) {
     return policy;
   }
-  if (isMatchingPairingPolicy(configPolicy)) {
-    return configPolicy;
-  }
-  return "open";
+  return 'open';
 }
 
 function buildDeniedReplyText(): string {
-  return FEISHU_DENY_MESSAGE;
+  return ACCESS_DENIED_MESSAGE;
 }
 
 function buildPairingQueueFullText(): string {
   return buildPairingQueueFullReply();
 }
 
-function buildPairingRequestAction(
-  _requestId: string,
-  _openId: string,
+function buildPairingRequestText(
+  requestId: string,
+  actorId: string,
   code: string,
+  integration: IntegrationId,
 ): string {
   return buildPairingReply({
-    channel: "feishu",
-    idLine: `${resolvePairingIdLabel()}: ${_openId}`,
+    channel: integration,
+    idLine: `${integration}: ${actorId}`,
     code,
-  });
+  }) || `请在当前会话发送配对码: ${code}（requestId: ${requestId}）`;
 }
 
-export async function evaluateFeishuAccessPolicy(params: FeishuPolicyInput): Promise<FeishuPolicyDecision> {
-  const normalizedOpenId = (params.inbound.actorId || "").trim().toLowerCase();
-  const policy = resolvePairingPolicy(undefined, params.config.pairingPolicy);
+function toList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((entry) => String(entry ?? '').trim().toLowerCase())
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
 
-  if (!normalizedOpenId) {
+function parsePositiveInt(raw: unknown): number | undefined {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return Math.floor(raw);
+  }
+  return undefined;
+}
+
+export async function evaluateAccessPolicy(input: AccessPolicyInput): Promise<AccessPolicyDecision> {
+  const actorId = (input.inbound.actorId || '').trim().toLowerCase();
+  if (!actorId) {
     return {
       allowed: false,
       replyText: buildDeniedReplyText(),
     };
   }
 
-  if (policy === "open") {
-    return {
-      allowed: true,
-    };
+  const integration = input.inbound.integration;
+  if (!isIntegrationConfig(input.config)) {
+    return { allowed: true };
   }
 
-  if (policy === "disabled") {
+  const policy = normalizePolicy(input.config.pairingPolicy);
+  if (policy === 'open') {
+    return { allowed: true };
+  }
+
+  if (policy === 'disabled') {
     return {
       allowed: false,
       replyText: buildDeniedReplyText(),
     };
   }
 
-  const configAllowFrom = normalizeAllowFrom(params.config.pairingAllowFrom);
-  const fileAllowFrom = await readChannelAllowFromStore("feishu");
-  const allowFrom = Array.from(new Set([...configAllowFrom, ...fileAllowFrom.map((entry) => String(entry).toLowerCase())]));
+  const allowFrom = toList(input.config.pairingAllowFrom);
+  const allowFromFromStore = await readChannelAllowFromStore(integration).catch(() => []);
+  const finalAllowFrom = Array.from(
+    new Set([
+      ...allowFrom,
+      ...allowFromFromStore.map((entry) => String(entry).trim().toLowerCase()).filter(Boolean),
+    ]),
+  );
 
-  if (isWildcardAllowFrom(allowFrom) && allowFrom.length > 0) {
-    return {
-      allowed: true,
-    };
+  if (finalAllowFrom.includes('*') && finalAllowFrom.length > 0) {
+    return { allowed: true };
   }
 
-  if (allowFrom.includes(normalizedOpenId)) {
-    return {
-      allowed: true,
-    };
+  if (finalAllowFrom.includes(actorId)) {
+    return { allowed: true };
   }
 
-  if (policy === "allowlist") {
+  if (policy === 'allowlist') {
     return {
       allowed: false,
       replyText: buildDeniedReplyText(),
@@ -112,11 +122,11 @@ export async function evaluateFeishuAccessPolicy(params: FeishuPolicyInput): Pro
   }
 
   const reply = await upsertChannelPairingRequest({
-    channel: "feishu",
-    id: normalizedOpenId,
+    channel: integration,
+    id: actorId,
     limits: {
-      ttlMs: params.config.pairingPendingTtlMs,
-      maxPending: params.config.pairingPendingMax,
+      ttlMs: parsePositiveInt(input.config.pairingPendingTtlMs),
+      maxPending: parsePositiveInt(input.config.pairingPendingMax),
     },
   });
 
@@ -135,6 +145,6 @@ export async function evaluateFeishuAccessPolicy(params: FeishuPolicyInput): Pro
 
   return {
     allowed: false,
-    replyText: buildPairingRequestAction(params.inbound.requestId, params.inbound.actorId, reply.code),
+    replyText: buildPairingRequestText(input.inbound.requestId, input.inbound.actorId, reply.code, integration),
   };
 }

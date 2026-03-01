@@ -1,13 +1,11 @@
-import { gatewayRuntimes } from './runtimes.js';
+import { integrationIds } from './integrationRegistry.js';
+import type { GatewayChannel } from './contracts.js';
 
-export type GatewayRuntimeChannel = keyof typeof gatewayRuntimes;
-export type GatewayChannel = GatewayRuntimeChannel;
-
-const GATEWAY_CHANNELS: GatewayChannel[] = Object.keys(gatewayRuntimes) as GatewayChannel[];
+export const GatewayRuntimeChannels: GatewayChannel[] = [...integrationIds];
 
 export function resolveGatewayChannel(rawChannel: string): GatewayChannel {
   const channel = rawChannel.trim().toLowerCase();
-  if (GATEWAY_CHANNELS.includes(channel as GatewayChannel)) {
+  if ((GatewayRuntimeChannels as string[]).includes(channel)) {
     return channel as GatewayChannel;
   }
   throw new Error(`Unsupported channel: ${rawChannel}`);

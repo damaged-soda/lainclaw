@@ -1,17 +1,34 @@
-import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
-import type { LocalGatewayOverrides } from '../../channels/local/server.js';
-import type { GatewayRuntimeChannel } from './channelRegistry.js';
+import type { IntegrationId } from '../../integrations/contracts.js';
 
-export type GatewayChannel = GatewayRuntimeChannel;
+export type GatewayChannel = IntegrationId;
 
-export type GatewayFeishuStartOverrides = Partial<FeishuGatewayConfig>;
-export type GatewayLocalStartOverrides = Partial<LocalGatewayOverrides>;
-export type GatewayStartOverrides = GatewayFeishuStartOverrides | GatewayLocalStartOverrides;
+export interface GatewayStartOverrides {
+  [key: string]: unknown;
+}
 
-type GatewayServiceChannel = GatewayChannel | 'gateway';
+export interface GatewayConfigParsedCommand {
+  channel: string;
+  channelProvided: boolean;
+  action: 'set' | 'show' | 'clear' | 'migrate';
+  dryRun?: boolean;
+  config: Record<string, unknown>;
+}
+
+export interface GatewayParsedCommand {
+  channel: GatewayChannel;
+  channels: GatewayChannel[];
+  action: 'start' | 'status' | 'stop';
+  debug?: boolean;
+  daemon?: boolean;
+  statePath?: string;
+  logPath?: string;
+  serviceChild?: boolean;
+  serviceArgv: string[];
+  config?: GatewayStartOverrides;
+}
 
 export interface GatewayServiceRunContext {
-  channel: GatewayServiceChannel;
+  channel: GatewayChannel | 'gateway';
   action?: 'start' | 'status' | 'stop';
   daemon?: boolean;
   statePath?: string;
@@ -20,26 +37,4 @@ export interface GatewayServiceRunContext {
   serviceArgv: string[];
   channels?: GatewayChannel[];
   debug?: boolean;
-}
-
-interface GatewayParsedCommandBase {
-  channel: GatewayChannel;
-  channels: GatewayChannel[];
-  action: 'start' | 'status' | 'stop';
-  daemon?: boolean;
-  statePath?: string;
-  logPath?: string;
-  serviceChild?: boolean;
-  debug?: boolean;
-  serviceArgv: string[];
-}
-
-export type GatewayParsedCommand = GatewayParsedCommandBase & GatewayStartOverrides;
-
-export interface GatewayConfigParsedCommand {
-  channel: string;
-  channelProvided: boolean;
-  action: 'set' | 'show' | 'clear' | 'migrate';
-  dryRun?: boolean;
-  config: Partial<FeishuGatewayConfig>;
 }

@@ -2,12 +2,11 @@ import * as Lark from '@larksuiteoapi/node-sdk';
 
 import {
   type InboundHandler,
-  type InboundMessage,
-  type OutboundAction,
-  type ReplyTextOutboundAction,
+  type MessageInboundMessage,
+  type IgnoredInboundMessage,
 } from '../contracts.js';
-import { sendFeishuTextMessage } from '../../channels/feishu/outbound.js';
-import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
+import { sendFeishuTextMessage } from './outbound.js';
+import type { FeishuGatewayConfig } from './config.js';
 
 interface FeishuWsMessage {
   message?: {
@@ -29,6 +28,12 @@ interface FeishuWsMessage {
 interface FeishuTransportOptions {
   config: FeishuGatewayConfig;
   onInbound: InboundHandler;
+}
+
+interface FeishuOutboundMessage {
+  requestId: string;
+  replyTo: string;
+  text: string;
 }
 
 const FEISHU_DM_CHAT_TYPES = new Set(['p2p', 'private', 'direct']);
@@ -123,7 +128,7 @@ function parseEventId(data: unknown): string | undefined {
   return firstNonEmpty(event.message?.message_id);
 }
 
-function parseFeishuInbound(data: unknown, requestId: string): InboundMessage {
+function parseFeishuInbound(data: unknown, requestId: string): MessageInboundMessage | IgnoredInboundMessage {
   const event = data as Partial<FeishuWsMessage>;
   const message = event.message;
 
@@ -133,86 +138,76 @@ function parseFeishuInbound(data: unknown, requestId: string): InboundMessage {
   const actorId = resolveActorId(event.sender);
   const conversationId = resolveConversationId(actorId);
   const replyTo = actorId;
-  const content = parseTextContent(message?.content);
+  const text = parseTextContent(message?.content);
 
   if (!chatType) {
     return {
       kind: 'ignored',
-      channel: 'feishu',
+      integration: 'feishu',
       requestId,
       reason: 'missing-chat-type',
       actorId,
       conversationId,
       replyTo,
-      input: content,
+      text,
     };
   }
 
   if (!FEISHU_DM_CHAT_TYPES.has(chatType)) {
     return {
       kind: 'ignored',
-      channel: 'feishu',
+      integration: 'feishu',
       requestId,
       reason: 'non-direct-chat',
       actorId,
       conversationId,
       replyTo,
-      input: content,
+      text,
     };
   }
 
   if (messageType && messageType !== FEISHU_TEXT_MESSAGE_TYPE) {
     return {
       kind: 'ignored',
-      channel: 'feishu',
+      integration: 'feishu',
       requestId,
       reason: 'non-text-message',
       actorId,
       conversationId,
       replyTo,
-      input: content,
+      text,
     };
   }
 
-  if (actorId === "unknown" || !content) {
+  if (actorId === 'unknown' || !text) {
     return {
       kind: 'ignored',
-      channel: 'feishu',
+      integration: 'feishu',
       requestId,
       reason: 'missing-open-id-or-content',
       actorId,
       conversationId,
       replyTo,
-      input: content,
+      text,
     };
   }
 
   return {
     kind: 'message',
-    channel: 'feishu',
+    integration: 'feishu',
     requestId,
-    input: content,
+    text,
     actorId,
     conversationId,
     replyTo,
   };
 }
 
-async function executeOutboundAction(config: FeishuGatewayConfig, action: ReplyTextOutboundAction): Promise<void> {
+async function executeOutboundMessage(config: FeishuGatewayConfig, outbound: FeishuOutboundMessage): Promise<void> {
   await sendFeishuTextMessage(config, {
-    openId: action.replyTo,
-    text: action.text,
+    openId: outbound.replyTo,
+    text: outbound.text,
   });
-}
-
-async function executeOutboundActions(config: FeishuGatewayConfig, actions: readonly OutboundAction[]): Promise<void> {
-  const filtered = actions.filter((action): action is ReplyTextOutboundAction =>
-    action.channel === 'feishu' && action.kind === 'reply.text'
-  );
-
-  for (const action of filtered) {
-    await executeOutboundAction(config, action);
-  }
 }
 
 export async function runFeishuTransport(options: FeishuTransportOptions): Promise<void> {
@@ -238,8 +233,11 @@ export async function runFeishuTransport(options: FeishuTransportOptions): Promi
       }
 
       try {
-        const actions = await onInbound(inbound);
-        await executeOutboundActions(config, actions);
+        const outbound = await onInbound(inbound);
+        if (!outbound) {
+          return;
+        }
+        await executeOutboundMessage(config, outbound);
       } catch (error) {
         console.error(`[feishu] ${requestId} inbound handler failed: ${String(error instanceof Error ? error.message : error)}`);
       }

@@ -18,7 +18,7 @@ import {
   runGatewayStart,
   runGatewayStatusOrStop,
 } from '../../gateway/runtime/start.js';
-import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
+import type { FeishuGatewayConfig } from '../../integrations/feishu/config.js';
 
 type GatewayCommonOptions = {
   channel?: string[];

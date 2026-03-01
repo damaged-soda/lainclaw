@@ -4,9 +4,9 @@ import path from 'node:path';
 
 import {
   type InboundHandler,
-  type InboundMessage,
-  type OutboundAction,
-  type ReplyTextOutboundAction,
+  type MessageInboundMessage,
+  type IgnoredInboundMessage,
+  type OutboundMessage,
 } from '../contracts.js';
 
 const LOCAL_INBOX_FILE = 'local-gateway-inbox.jsonl';
@@ -19,10 +19,12 @@ function resolveLocalGatewayDirectory(home = os.homedir()): string {
 }
 
 interface LocalMessage {
+  text?: string;
   input?: string;
   actorId?: string;
   conversationId?: string;
   accountId?: string;
+  sessionHint?: string;
   sessionKey?: string;
   requestId?: string;
 }
@@ -62,26 +64,28 @@ function parseMessageLine(line: string): LocalMessage | undefined {
       if (!parsed || typeof parsed !== 'object') {
         return undefined;
       }
-      const rawInput =
-        typeof parsed.input === 'string'
-          ? parsed.input
-          : typeof parsed.text === 'string'
-            ? parsed.text
+      const rawText =
+        typeof parsed.text === 'string'
+          ? parsed.text
+          : typeof parsed.input === 'string'
+            ? parsed.input
             : undefined;
-      const input = normalizeInput(rawInput);
-      if (!input) {
+      const text = normalizeInput(rawText);
+      if (!text) {
         return undefined;
       }
       return {
-        input,
+        text,
         actorId: typeof parsed.actorId === 'string' ? parsed.actorId : undefined,
         accountId: typeof parsed.accountId === 'string' ? parsed.accountId : undefined,
         conversationId:
           typeof parsed.conversationId === 'string'
             ? parsed.conversationId
-            : typeof parsed.sessionKey === 'string'
-              ? parsed.sessionKey
-              : undefined,
+            : typeof parsed.sessionHint === 'string'
+              ? parsed.sessionHint
+              : typeof parsed.sessionKey === 'string'
+                ? parsed.sessionKey
+                : undefined,
         requestId: typeof parsed.requestId === 'string' ? parsed.requestId : undefined,
       };
     } catch {
@@ -89,13 +93,13 @@ function parseMessageLine(line: string): LocalMessage | undefined {
     }
   }
 
-  const input = normalizeInput(normalized);
-  if (!input) {
+  const text = normalizeInput(normalized);
+  if (!text) {
     return undefined;
   }
 
   return {
-    input,
+    text,
   };
 }
 
@@ -110,7 +114,7 @@ function normalizeActorId(raw: string | undefined): string {
 function normalizeConversationId(raw: string | undefined): string {
   const trimmed = raw?.trim();
   if (!trimmed) {
-    return 'main';
+    return 'local:main';
   }
   return trimmed;
 }
@@ -187,27 +191,21 @@ function buildErrorRecord(record: {
   });
 }
 
-async function executeOutboundActions(
-  actions: readonly OutboundAction[],
+async function executeOutboundMessage(
+  outbound: OutboundMessage,
   outboxPath: string,
   sessionKey: string,
   input: string,
 ): Promise<void> {
-  for (const action of actions) {
-    if (action.channel !== 'local' || action.kind !== 'reply.text') {
-      continue;
-    }
-    const payload: ReplyTextOutboundAction = action;
-    await appendLine(
-      outboxPath,
-      buildRunboxRecord({
-        requestId: payload.requestId,
-        sessionKey,
-        input,
-        output: payload.text,
-      }),
-    );
-  }
+  await appendLine(
+    outboxPath,
+    buildRunboxRecord({
+      requestId: outbound.requestId,
+      sessionKey,
+      input,
+      output: outbound.text,
+    }),
+  );
 }
 
 export async function runLocalTransport(inboundHandler: InboundHandler): Promise<void> {
@@ -252,20 +250,20 @@ export async function runLocalTransport(inboundHandler: InboundHandler): Promise
           continue;
         }
 
-        const input = normalizeInput(payload.input);
-        if (!input) {
+        const text = normalizeInput(payload.text);
+        if (!text) {
           continue;
         }
 
         const actorId = normalizeActorId(payload.actorId || payload.accountId);
-        const conversationId = normalizeConversationId(payload.conversationId || payload.sessionKey);
+        const conversationId = normalizeConversationId(payload.conversationId);
         const requestId = payload.requestId || `seq-${requestSeq++}`;
-        const replyTo = actorId;
-        const inbound: InboundMessage = {
+        const replyTo = conversationId || requestId;
+        const inbound: MessageInboundMessage = {
           kind: 'message',
-          channel: 'local',
+          integration: 'local',
           requestId,
-          input,
+          text,
           actorId,
           conversationId,
           replyTo,
@@ -276,9 +274,12 @@ export async function runLocalTransport(inboundHandler: InboundHandler): Promise
           conversationId,
         });
 
-        let actions: readonly OutboundAction[];
         try {
-          actions = await inboundHandler(inbound);
+          const outbound = await inboundHandler(inbound);
+          if (!outbound) {
+            continue;
+          }
+          await executeOutboundMessage(outbound, outboxPath, sessionKey, text);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           console.error(`[local] ${requestId} failed: ${message}`);
@@ -287,14 +288,12 @@ export async function runLocalTransport(inboundHandler: InboundHandler): Promise
             buildErrorRecord({
               requestId,
               sessionKey,
-              input,
+              input: text,
               error: message,
             }),
           );
           continue;
         }
-
-        await executeOutboundActions(actions, outboxPath, sessionKey, input);
       }
     }
 

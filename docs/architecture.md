@@ -27,8 +27,8 @@ CLI（node dist/index.js）
           ├─ src/tools/registry.ts / executor.ts / runtimeTools.ts（工具执行）
           ├─ src/sessions/sessionService.ts（会话/记忆/transcript 服务）
           ├─ src/sessions/sessionStore.ts（会话与记忆）
-          ├─ src/channels/feishu/server.ts（飞书网关）
-          ├─ src/channels/local/server.ts（本地网关）
+          ├─ src/integrations/feishu/index.ts（飞书网关）
+          ├─ src/integrations/local/index.ts（本地网关）
           └─ src/heartbeat/*.ts（定时任务与运行日志）
 ```
 
@@ -66,7 +66,7 @@ CLI（node dist/index.js）
 
 ## 运行入口收口说明（新增）
 
-- `gateway/index.ts`、`cli/commands/agent.ts`、`channels/*`、`heartbeat` 入口统一复用 `agent/invoke.ts` 的 `runAgent`。
+- `gateway/index.ts`、`cli/commands/agent.ts`、`integrations/*`、`heartbeat` 入口统一复用 `agent/invoke.ts` 的 `runAgent`。
 - `运行时代码不再作为业务模块交接点`，`runtime/adapter.ts` 与 `runtime/entrypoint.ts` 仅负责 protocol context 与 provider 适配执行。
 - `src/adapters/codexAdapter.ts`
   - 对接模型 SDK（`@mariozechner/pi-ai`），处理工具 schema 映射与 tool-call 解析。
@@ -76,7 +76,7 @@ CLI（node dist/index.js）
   - 管理 session 目录、索引文件与记忆文件。
 - `src/tools/*`
   - `registry` 管理工具元数据与白名单；`executor` 统一校验与执行，`runtimeTools.ts` 与核心协调器协作处理 tool summary/名称映射。
-- `src/channels/feishu/*` / `src/channels/local/*`
+- `src/integrations/feishu/*` / `src/integrations/local/*`
   - 分别处理飞书 WS 入/出站与 local channel 文件队列。
 - `src/pairing/*`
   - 飞书配对策略与挂起码流程。
@@ -121,11 +121,12 @@ CLI（node dist/index.js）
 
 ## local 网关文件队列执行语义
 
-- local 网关使用 `src/channels/local/server.ts` 轮询 `inbox`，按追加行读取并逐行处理。
+- local 网关使用 `src/integrations/local/transport.ts` 轮询 `inbox`，按追加行读取并逐行处理。
 - 每条可解析消息会映射到 `runAgent`：
-  - 优先使用 payload 的 `sessionKey`；
-  - 其次使用 `accountId` 映射到 `local:<accountId>`；
-  - 再退化到 `LAINCLAW_LOCAL_SESSION_KEY`，否则为 `local:main`。
+  - 发送方优先使用 `accountId`/`actorId` 映射到 `actorId`；
+  - 会话键优先使用 `conversationId`/`sessionHint`；
+  - 均缺失时退化到 `local:main`；
+  - 回写 `outbox` 使用 `conversationId` 或 `requestId`。
 - 接口格式兼容两种输入：
   - 纯文本行（自动当作 `input`）。
   - JSON 行（支持 `input`、`sessionKey`、`accountId`、`requestId`）。

@@ -1,10 +1,10 @@
-import { formatHeartbeatErrorHint } from '../../../channels/feishu/diagnostics.js';
-import { sendFeishuTextMessage } from '../../../channels/feishu/outbound.js';
+import { formatHeartbeatErrorHint } from '../diagnostics.js';
+import { sendFeishuTextMessage } from '../outbound.js';
 import { startHeartbeatLoop } from '../../../heartbeat/runner.js';
-import type { FeishuGatewayConfig } from '../../../channels/feishu/config.js';
+import type { FeishuGatewayConfig } from '../config.js';
 import type { HeartbeatLoopHandle, HeartbeatRunSummary } from '../../../heartbeat/runner.js';
 
-// Sidecar：与 transport 解耦，由 runtime 在前台组合启动。
+// Sidecar：与 transport 解耦，由 integration 在 run 期间启动。
 
 type HeartbeatFailureHint = (rawMessage: string) => string;
 
