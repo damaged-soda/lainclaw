@@ -1,6 +1,76 @@
-import { parseFeishuServerArgs } from './gateway.js';
+import { parseArgv, type ArgOptionDefinition } from '../shared/argParser.js';
 import type { GatewayConfigParsedCommand } from '../../gateway/runtime/contracts.js';
-import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
+import { parseFeishuGatewayConfigFromOptions } from './gateway.js';
+
+const GATEWAY_CONFIG_CHANNEL_OPTION: ArgOptionDefinition = {
+  name: 'channel',
+  type: 'string',
+  parse: (raw) => {
+    const value = raw.trim().toLowerCase();
+    if (!value) {
+      throw new Error('Invalid value for --channel');
+    }
+    return value;
+  },
+};
+
+const GATEWAY_CONFIG_SHARED_OPTIONS: ArgOptionDefinition[] = [
+  GATEWAY_CONFIG_CHANNEL_OPTION,
+];
+
+const GATEWAY_CONFIG_SET_OPTIONS: ArgOptionDefinition[] = [
+  ...GATEWAY_CONFIG_SHARED_OPTIONS,
+  { name: 'provider', type: 'string' },
+  { name: 'profile', type: 'string' },
+  { name: 'app-id', type: 'string' },
+  { name: 'app-secret', type: 'string' },
+  { name: 'with-tools', type: 'boolean', allowNegated: true, allowEquals: true },
+  { name: 'tool-allow', type: 'string-list' },
+  { name: 'memory', type: 'boolean', allowNegated: true, allowEquals: true },
+  { name: 'heartbeat-enabled', type: 'boolean', allowNegated: true, allowEquals: true },
+  { name: 'heartbeat-interval-ms', type: 'integer' },
+  { name: 'heartbeat-target-open-id', type: 'string' },
+  { name: 'heartbeat-session-key', type: 'string' },
+  { name: 'pairing-policy', type: 'string' },
+  { name: 'pairing-allow-from', type: 'string-list' },
+  { name: 'pairing-pending-ttl-ms', type: 'integer' },
+  { name: 'pairing-pending-max', type: 'integer' },
+  { name: 'request-timeout-ms', type: 'integer' },
+];
+
+const GATEWAY_CONFIG_SHOW_CLEAR_OPTIONS: ArgOptionDefinition[] = [...GATEWAY_CONFIG_SHARED_OPTIONS];
+
+const GATEWAY_CONFIG_MIGRATE_OPTIONS: ArgOptionDefinition[] = [
+  GATEWAY_CONFIG_CHANNEL_OPTION,
+  { name: 'dry-run', type: 'boolean', allowEquals: true },
+];
+
+function resolveConfigChannel(parsed: { channel?: unknown }): { channel: string; channelProvided: boolean } {
+  const raw = parsed.channel;
+  if (typeof raw === 'string') {
+    const channel = raw.trim().toLowerCase();
+    if (!channel) {
+      throw new Error('Invalid value for --channel');
+    }
+    return {
+      channel,
+      channelProvided: true,
+    };
+  }
+
+  return {
+    channel: 'default',
+    channelProvided: false,
+  };
+}
+
+function parseGatewayConfigUnknownOptions(unknown: string[], prefix: string): never {
+  throw new Error(`Unknown option for gateway config ${prefix}: ${unknown[0]}`);
+}
+
+function parseGatewayConfigPositional(positional: string[], prefix: string): never {
+  throw new Error(`Unexpected argument for gateway config ${prefix}: ${positional[0]}`);
+}
 
 export function parseGatewayConfigArgs(argv: string[]): GatewayConfigParsedCommand {
   const subcommand = argv[0];
@@ -8,118 +78,75 @@ export function parseGatewayConfigArgs(argv: string[]): GatewayConfigParsedComma
     throw new Error('Missing gateway config subcommand');
   }
 
-  let channel = 'default';
-  let channelProvided = false;
-  const configArgv: string[] = [];
-
   if (subcommand === 'set') {
-    for (let i = 1; i < argv.length; i += 1) {
-      const arg = argv[i];
-      if (arg === '--channel') {
-        if (i + 1 >= argv.length) {
-          throw new Error('Invalid value for --channel');
-        }
-        channel = argv[i + 1].trim().toLowerCase();
-        channelProvided = true;
-        i += 1;
-        continue;
-      }
-      if (arg.startsWith('--channel=')) {
-        channel = arg.slice('--channel='.length).trim().toLowerCase();
-        if (!channel) {
-          throw new Error('Invalid value for --channel');
-        }
-        channelProvided = true;
-        continue;
-      }
-      if (arg.startsWith('--')) {
-        configArgv.push(arg);
-        continue;
-      }
-      configArgv.push(arg);
+    const parsed = parseArgv(argv.slice(1), GATEWAY_CONFIG_SET_OPTIONS, { strictUnknown: true });
+    if (parsed.unknownOptions.length > 0) {
+      parseGatewayConfigUnknownOptions(parsed.unknownOptions, 'set');
+    }
+    if (parsed.positional.length > 0) {
+      parseGatewayConfigPositional(parsed.positional, 'set');
     }
 
-    const config = parseFeishuServerArgs(configArgv);
+    const config = parseFeishuGatewayConfigFromOptions(parsed.options);
     if (Object.keys(config).length === 0) {
       throw new Error('No gateway config fields provided');
     }
-    if (
-      (channel === 'default' || !channelProvided)
-      && (typeof config.appId === 'string' || typeof config.appSecret === 'string')
-    ) {
+
+    const { channel, channelProvided } = resolveConfigChannel(parsed.options);
+    if ((channel === 'default' || !channelProvided)
+      && (typeof config.appId === 'string' || typeof config.appSecret === 'string')) {
       throw new Error('appId/appSecret must be scoped with --channel, e.g. --channel feishu');
     }
     if (channel !== 'default' && typeof config.provider === 'string') {
       throw new Error('provider is a gateway-level field and cannot be set with --channel; set it at default scope');
     }
-    return { channel, channelProvided, action: 'set', config };
+
+    return {
+      channel,
+      channelProvided,
+      action: 'set',
+      config,
+    };
   }
 
   if (subcommand === 'show' || subcommand === 'clear') {
-    for (let i = 1; i < argv.length; i += 1) {
-      const arg = argv[i];
-      if (arg === '--channel') {
-        if (i + 1 >= argv.length) {
-          throw new Error('Invalid value for --channel');
-        }
-        channel = argv[i + 1].trim().toLowerCase();
-        channelProvided = true;
-        i += 1;
-        continue;
-      }
-      if (arg.startsWith('--channel=')) {
-        channel = arg.slice('--channel='.length).trim().toLowerCase();
-        if (!channel) {
-          throw new Error('Invalid value for --channel');
-        }
-        channelProvided = true;
-        continue;
-      }
-      if (arg.startsWith('--')) {
-        throw new Error(`Unknown option for gateway config ${subcommand}: ${arg}`);
-      }
-      throw new Error(`Unexpected argument for gateway config ${subcommand}: ${arg}`);
+    const parsed = parseArgv(argv.slice(1), GATEWAY_CONFIG_SHOW_CLEAR_OPTIONS, { strictUnknown: true });
+    if (parsed.unknownOptions.length > 0) {
+      parseGatewayConfigUnknownOptions(parsed.unknownOptions, subcommand);
     }
-    return { channel, channelProvided, action: subcommand, config: {} };
+    if (parsed.positional.length > 0) {
+      parseGatewayConfigPositional(parsed.positional, subcommand);
+    }
+
+    const { channel, channelProvided } = resolveConfigChannel(parsed.options);
+    return {
+      channel,
+      channelProvided,
+      action: subcommand,
+      config: {},
+    };
   }
 
   if (subcommand === 'migrate') {
-    let dryRun = false;
-    for (let i = 1; i < argv.length; i += 1) {
-      const arg = argv[i];
-      if (arg === '--channel') {
-        if (i + 1 >= argv.length) {
-          throw new Error('Invalid value for --channel');
-        }
-        channel = argv[i + 1].trim().toLowerCase();
-        if (!channel) {
-          throw new Error('Invalid value for --channel');
-        }
-        channelProvided = true;
-        i += 1;
-        continue;
-      }
-      if (arg.startsWith('--channel=')) {
-        channel = arg.slice('--channel='.length).trim().toLowerCase();
-        if (!channel) {
-          throw new Error('Invalid value for --channel');
-        }
-        channelProvided = true;
-        continue;
-      }
-      if (arg === '--dry-run') {
-        dryRun = true;
-        continue;
-      }
-      if (arg.startsWith('--')) {
-        throw new Error(`Unknown option for gateway config ${subcommand}: ${arg}`);
-      }
-      throw new Error(`Unexpected argument for gateway config ${subcommand}: ${arg}`);
+    const parsed = parseArgv(argv.slice(1), GATEWAY_CONFIG_MIGRATE_OPTIONS, { strictUnknown: true });
+    if (parsed.unknownOptions.length > 0) {
+      parseGatewayConfigUnknownOptions(parsed.unknownOptions, 'migrate');
     }
-    if (!dryRun) {
+    if (parsed.positional.length > 0) {
+      parseGatewayConfigPositional(parsed.positional, 'migrate');
+    }
+    if (parsed.options['dry-run'] !== true) {
       throw new Error('gateway config migrate currently only supports --dry-run');
     }
-    return { channel, channelProvided, action: 'migrate', dryRun, config: {} };
+
+    const { channel, channelProvided } = resolveConfigChannel(parsed.options);
+    return {
+      channel,
+      channelProvided,
+      action: 'migrate',
+      dryRun: true,
+      config: {},
+    };
   }
 
   throw new Error(`Unknown gateway config subcommand: ${subcommand}`);

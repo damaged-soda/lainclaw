@@ -1,7 +1,23 @@
+import { parseArgv, type ArgOptionDefinition } from '../shared/argParser.js';
 import { parseModelCommandArgs, type ParsedModelCommandArgs } from '../shared/args.js';
 
-function parseHeartbeatModelArgs(argv: string[], allowMemory = false): ParsedModelCommandArgs {
-  return parseModelCommandArgs(argv, { allowMemory, strictUnknown: true });
+const HEARTBEAT_INIT_OPTIONS: ArgOptionDefinition[] = [
+  { name: 'force', type: 'boolean', allowEquals: true },
+  { name: 'template', type: 'string' },
+];
+
+function parseHeartbeatInitOptions(argv: string[]): { force: boolean; templatePath?: string } {
+  const parsed = parseArgv(argv, HEARTBEAT_INIT_OPTIONS, { strictUnknown: true });
+  if (parsed.unknownOptions.length > 0) {
+    throw new Error(`Unknown option: ${parsed.unknownOptions[0]}`);
+  }
+  if (parsed.positional.length > 0) {
+    throw new Error(`Unknown argument: ${parsed.positional[0]}`);
+  }
+  return {
+    force: parsed.options.force === true,
+    ...(typeof parsed.options.template === 'string' ? { templatePath: parsed.options.template } : {}),
+  };
 }
 
 export function parseHeartbeatAddArgs(argv: string[]): {
@@ -11,15 +27,16 @@ export function parseHeartbeatAddArgs(argv: string[]): {
   withTools?: boolean;
   toolAllow?: string[];
 } {
-  const parsed = parseHeartbeatModelArgs(argv, false);
-  const unknownOption = parsed.positional.find((entry) => entry.startsWith('--'));
-  if (unknownOption) {
-    throw new Error(`Unknown option: ${unknownOption}`);
-  }
+  const parsed: ParsedModelCommandArgs = parseModelCommandArgs(argv, {
+    allowMemory: false,
+    strictUnknown: true,
+  });
+
   const ruleText = parsed.positional.join(' ').trim();
   if (!ruleText) {
     throw new Error('Missing rule text.');
   }
+
   return {
     ruleText,
     ...(parsed.provider ? { provider: parsed.provider } : {}),
@@ -36,7 +53,10 @@ export function parseHeartbeatRunArgs(argv: string[]): {
   toolAllow?: string[];
   memory?: boolean;
 } {
-  const parsed = parseHeartbeatModelArgs(argv, true);
+  const parsed = parseModelCommandArgs(argv, {
+    allowMemory: true,
+    strictUnknown: true,
+  });
   if (parsed.positional.length > 0) {
     throw new Error(`Unknown argument for heartbeat run: ${parsed.positional[0]}`);
   }
@@ -50,30 +70,5 @@ export function parseHeartbeatRunArgs(argv: string[]): {
 }
 
 export function parseHeartbeatInitArgs(argv: string[]): { force: boolean; templatePath?: string } {
-  let force = false;
-  let templatePath: string | undefined;
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === '--force') {
-      force = true;
-      continue;
-    }
-    if (arg === '--template') {
-      if (i + 1 >= argv.length) {
-        throw new Error('Missing value for --template');
-      }
-      templatePath = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--template=')) {
-      templatePath = arg.slice('--template='.length);
-      continue;
-    }
-    if (arg.startsWith('--')) {
-      throw new Error(`Unknown option: ${arg}`);
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
-  return { force, ...(templatePath ? { templatePath } : {}) };
+  return parseHeartbeatInitOptions(argv);
 }

@@ -1,43 +1,35 @@
 import { runAgentCommand } from './commands/agent.js';
 import { runAuthCommand } from './commands/auth.js';
 import { runHeartbeatCommand } from './commands/heartbeat.js';
-import { runPairingCommand } from '../pairing/cli.js';
+import { runPairingCommand } from './commands/pairing.js';
 import { runToolsCommand } from './commands/tools.js';
 import { runGatewayCommand } from './commands/gateway/runtime.js';
+import { COMMAND_DEFINITIONS } from './spec/commands.js';
 import type { CommandContext, CommandRoute } from './types.js';
 
-export const commandRoutes: CommandRoute[] = [
-  {
-    command: 'agent',
-    description: 'Run agent command',
-    handler: (context: CommandContext) => runAgentCommand(context.args),
-  },
-  {
-    command: 'auth',
-    description: 'Run auth command',
-    handler: (context: CommandContext) => runAuthCommand(context.args),
-  },
-  {
-    command: 'tools',
-    description: 'Run tools command',
-    handler: (context: CommandContext) => runToolsCommand(context.args),
-  },
-  {
-    command: 'pairing',
-    description: 'Run pairing command',
-    handler: (context: CommandContext) => runPairingCommand(context.args),
-  },
-  {
-    command: 'heartbeat',
-    description: 'Run heartbeat command',
-    handler: (context: CommandContext) => runHeartbeatCommand(context.args),
-  },
-  {
-    command: 'gateway',
-    description: 'Run gateway command',
-    handler: (context: CommandContext) => runGatewayCommand(context.args),
-  },
-];
+const commandHandlers: Record<string, (context: CommandContext) => Promise<number>> = {
+  agent: (context) => runAgentCommand(context.args),
+  auth: (context) => runAuthCommand(context.args),
+  tools: (context) => runToolsCommand(context.args),
+  pairing: (context) => runPairingCommand(context.args),
+  heartbeat: (context) => runHeartbeatCommand(context.args),
+  gateway: (context) => runGatewayCommand(context.args),
+};
+
+export const commandRoutes: CommandRoute[] = COMMAND_DEFINITIONS.flatMap((spec) => {
+  const handler = commandHandlers[spec.command];
+  if (!handler) {
+    return [];
+  }
+
+  return [
+    {
+      command: spec.command,
+      description: spec.description,
+      handler,
+    },
+  ];
+});
 
 const commandRouteLookup: Map<string, CommandRoute> = new Map(
   commandRoutes.map((route) => [route.command, route]),

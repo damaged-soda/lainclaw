@@ -1,11 +1,13 @@
+import { parseArgv, type ArgOptionDefinition } from './argParser.js';
+
 export function throwIfMissingValue(label: string, index: number, args: string[]): void {
   const next = args[index];
-  if (!next || next.startsWith("--")) {
+  if (!next || next.startsWith('--')) {
     throw new Error(`Missing value for ${label}`);
   }
 }
 
-export function parseMemoryFlag(raw: string, index: number): boolean {
+export function parseMemoryFlag(raw: string): boolean {
   if (raw === '--memory') {
     return true;
   }
@@ -13,22 +15,16 @@ export function parseMemoryFlag(raw: string, index: number): boolean {
     return false;
   }
   if (raw.startsWith('--memory=')) {
-    const value = raw.slice('--memory='.length).toLowerCase();
-    if (value === 'on' || value === 'true' || value === '1') {
-      return true;
-    }
-    if (value === 'off' || value === 'false' || value === '0') {
-      return false;
-    }
-    throw new Error(`Invalid value for --memory at arg ${index + 1}: ${value}`);
+    return parseBoolean(raw.slice('--memory='.length), '--memory');
   }
-  return false;
+  throw new Error(`Invalid value for --memory: ${raw}`);
 }
 
-export function parseBooleanFlag(raw: string, index: number, name: 'with-tools' | 'heartbeat-enabled' = 'with-tools'): boolean {
+export function parseBooleanFlag(raw: string, name: 'with-tools' | 'heartbeat-enabled' = 'with-tools'): boolean {
   const normalizedName = name;
   const enabled = `--${normalizedName}`;
   const disabled = `--no-${normalizedName}`;
+
   if (raw === enabled) {
     return true;
   }
@@ -36,16 +32,20 @@ export function parseBooleanFlag(raw: string, index: number, name: 'with-tools' 
     return false;
   }
   if (raw.startsWith(`${enabled}=`)) {
-    const value = raw.slice(`${enabled}=`.length).toLowerCase();
-    if (value === 'on' || value === 'true' || value === '1') {
-      return true;
-    }
-    if (value === 'off' || value === 'false' || value === '0') {
-      return false;
-    }
-    throw new Error(`Invalid value for ${enabled} at arg ${index + 1}: ${value}`);
+    return parseBoolean(raw.slice(`${enabled}=`.length), `--${normalizedName}`);
   }
   throw new Error(`Invalid boolean flag: ${raw}`);
+}
+
+function parseBoolean(raw: string, name: string): boolean {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'on') {
+    return true;
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'off') {
+    return false;
+  }
+  throw new Error(`Invalid value for ${name} at arg 1: ${raw}`);
 }
 
 export function parsePositiveIntValue(raw: string, index: number, label: string): number {
@@ -81,89 +81,47 @@ export interface ParseModelCommandOptions {
   strictUnknown?: boolean;
 }
 
+const BASE_MODEL_OPTIONS: ArgOptionDefinition[] = [
+  { name: 'provider', type: 'string' },
+  { name: 'profile', type: 'string' },
+  {
+    name: 'with-tools',
+    type: 'boolean',
+    allowNegated: true,
+    allowEquals: true,
+  },
+  { name: 'tool-allow', type: 'string-list' },
+];
+
 export function parseModelCommandArgs(
   argv: string[],
   { allowMemory = false, strictUnknown = true }: ParseModelCommandOptions = {},
 ): ParsedModelCommandArgs {
-  let provider: string | undefined;
-  let profileId: string | undefined;
-  let withTools: boolean | undefined;
-  let toolAllow: string[] | undefined;
-  let memory: boolean | undefined;
-  const positional: string[] = [];
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-
-    if (arg === '--provider') {
-      throwIfMissingValue('provider', i + 1, argv);
-      provider = argv[i + 1];
-      i += 1;
-      continue;
+  const memoryOption: ArgOptionDefinition = allowMemory
+    ? {
+      name: 'memory',
+      type: 'boolean',
+      allowNegated: true,
+      allowEquals: true,
     }
+    : null;
 
-    if (arg.startsWith('--provider=')) {
-      provider = arg.slice('--provider='.length);
-      continue;
-    }
+  const specs: ArgOptionDefinition[] = [
+    ...BASE_MODEL_OPTIONS,
+    ...(memoryOption ? [memoryOption] : []),
+  ];
 
-    if (arg === '--profile') {
-      throwIfMissingValue('profile', i + 1, argv);
-      profileId = argv[i + 1];
-      i += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--profile=')) {
-      profileId = arg.slice('--profile='.length);
-      continue;
-    }
-
-    if (arg === '--with-tools' || arg === '--no-with-tools' || arg.startsWith('--with-tools=')) {
-      withTools = parseBooleanFlag(arg, i);
-      continue;
-    }
-
-    if ((arg === '--memory' || arg === '--no-memory' || arg.startsWith('--memory='))) {
-      if (allowMemory) {
-        memory = parseMemoryFlag(arg, i);
-      } else if (strictUnknown) {
-        throw new Error(`Unknown option: ${arg}`);
-      } else {
-        positional.push(arg);
-      }
-      continue;
-    }
-
-    if (arg === '--tool-allow') {
-      throwIfMissingValue('tool-allow', i + 1, argv);
-      toolAllow = parseCsvOption(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-
-    if (arg.startsWith('--tool-allow=')) {
-      toolAllow = parseCsvOption(arg.slice('--tool-allow='.length));
-      continue;
-    }
-
-    if (arg.startsWith('--')) {
-      if (strictUnknown) {
-        throw new Error(`Unknown option: ${arg}`);
-      }
-      positional.push(arg);
-      continue;
-    }
-
-    positional.push(arg);
+  const parsed = parseArgv(argv, specs, { strictUnknown });
+  if (strictUnknown && parsed.unknownOptions.length > 0) {
+    throw new Error(`Unknown option: ${parsed.unknownOptions[0]}`);
   }
 
   return {
-    ...(provider ? { provider } : {}),
-    ...(profileId ? { profileId } : {}),
-    ...(typeof withTools === 'boolean' ? { withTools } : {}),
-    ...(Array.isArray(toolAllow) ? { toolAllow } : {}),
-    ...(typeof memory === 'boolean' ? { memory } : {}),
-    positional,
+    ...(typeof parsed.options.provider === 'string' && parsed.options.provider.trim() !== '' ? { provider: parsed.options.provider } : {}),
+    ...(typeof parsed.options.profile === 'string' ? { profileId: parsed.options.profile } : {}),
+    ...(typeof parsed.options['with-tools'] === 'boolean' ? { withTools: parsed.options['with-tools'] } : {}),
+    ...(Array.isArray(parsed.options['tool-allow']) ? { toolAllow: parsed.options['tool-allow'] as string[] } : {}),
+    ...(typeof parsed.options.memory === 'boolean' ? { memory: parsed.options.memory } : {}),
+    positional: parsed.positional,
   };
 }

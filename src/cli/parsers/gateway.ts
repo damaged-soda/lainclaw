@@ -1,25 +1,114 @@
-import {
-  parseBooleanFlag,
-  parseCsvOption,
-  parsePositiveIntValue,
-  throwIfMissingValue,
-  parseModelCommandArgs,
-  type ParsedModelCommandArgs,
-} from '../shared/args.js';
-import {
-  normalizeGatewayChannels,
-  resolveGatewayChannel,
-} from '../../gateway/runtime/channelRegistry.js';
+import { parseArgv, type ArgOptionDefinition } from '../shared/argParser.js';
+import { parsePositiveIntValue } from '../shared/args.js';
+import { normalizeGatewayChannels, resolveGatewayChannel } from '../../gateway/runtime/channelRegistry.js';
+import type { GatewayParsedCommand, GatewayStartOverrides } from '../../gateway/runtime/contracts.js';
 import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
 import type { LocalGatewayOverrides } from '../../channels/local/server.js';
-import type {
-  GatewayParsedCommand,
-  GatewayStartOverrides,
-  GatewayChannel,
-} from '../../gateway/runtime/contracts.js';
 
-function normalizePairingPolicy(raw: string | undefined): FeishuGatewayConfig['pairingPolicy'] {
-  const normalized = raw?.trim().toLowerCase();
+type ParsedGatewayAction = 'start' | 'status' | 'stop';
+
+type ParsedOptionMap = Record<string, unknown>;
+
+const GATEWAY_ACTIONS = new Set<ParsedGatewayAction>(['start', 'status', 'stop']);
+const FEISHU_ONLY_OPTION_KEYS = new Set<string>([
+  'app-id',
+  'app-secret',
+  'heartbeat-enabled',
+  'heartbeat-interval-ms',
+  'heartbeat-target-open-id',
+  'heartbeat-session-key',
+  'pairing-policy',
+  'pairing-allow-from',
+  'pairing-pending-ttl-ms',
+  'pairing-pending-max',
+  'request-timeout-ms',
+]);
+
+const GATEWAY_COMMON_OPTIONS: ArgOptionDefinition[] = [
+  {
+    name: 'channel',
+    type: 'string',
+    multiple: true,
+    parse: (raw) => resolveGatewayChannel(raw),
+  },
+  { name: 'pid-file', type: 'string' },
+  { name: 'log-file', type: 'string' },
+  { name: 'service-child', type: 'boolean', allowEquals: true },
+];
+
+const GATEWAY_MODEL_OPTIONS: ArgOptionDefinition[] = [
+  { name: 'provider', type: 'string' },
+  { name: 'profile', type: 'string' },
+  {
+    name: 'with-tools',
+    type: 'boolean',
+    allowNegated: true,
+    allowEquals: true,
+  },
+  { name: 'tool-allow', type: 'string-list' },
+  {
+    name: 'memory',
+    type: 'boolean',
+    allowNegated: true,
+    allowEquals: true,
+  },
+];
+
+const GATEWAY_RUNTIME_OPTIONS: ArgOptionDefinition[] = [
+  {
+    name: 'heartbeat-enabled',
+    type: 'boolean',
+    allowNegated: true,
+    allowEquals: true,
+  },
+  {
+    name: 'heartbeat-interval-ms',
+    type: 'integer',
+    parse: (raw, index) => parsePositiveIntValue(raw, index + 1, '--heartbeat-interval-ms'),
+  },
+  { name: 'heartbeat-target-open-id', type: 'string' },
+  { name: 'heartbeat-session-key', type: 'string' },
+  { name: 'pairing-policy', type: 'string' },
+  { name: 'pairing-allow-from', type: 'string-list' },
+  {
+    name: 'pairing-pending-ttl-ms',
+    type: 'integer',
+    parse: (raw, index) => parsePositiveIntValue(raw, index + 1, '--pairing-pending-ttl-ms'),
+  },
+  {
+    name: 'pairing-pending-max',
+    type: 'integer',
+    parse: (raw, index) => parsePositiveIntValue(raw, index + 1, '--pairing-pending-max'),
+  },
+];
+
+const GATEWAY_COMMON_CONFIG_OPTIONS: ArgOptionDefinition[] = [
+  { name: 'app-id', type: 'string' },
+  { name: 'app-secret', type: 'string' },
+  {
+    name: 'request-timeout-ms',
+    type: 'integer',
+    parse: (raw, index) => parsePositiveIntValue(raw, index + 1, '--request-timeout-ms'),
+  },
+];
+
+const GATEWAY_START_OPTIONS: ArgOptionDefinition[] = [
+  ...GATEWAY_COMMON_OPTIONS,
+  ...GATEWAY_MODEL_OPTIONS,
+  ...GATEWAY_RUNTIME_OPTIONS,
+  ...GATEWAY_COMMON_CONFIG_OPTIONS,
+  { name: 'debug', type: 'boolean', allowEquals: true },
+  { name: 'daemon', type: 'boolean', allowEquals: true },
+];
+
+const GATEWAY_STATUS_OPTIONS: ArgOptionDefinition[] = [...GATEWAY_COMMON_OPTIONS];
+
+const GATEWAY_LOCAL_OPTIONS: ArgOptionDefinition[] = [
+  ...GATEWAY_MODEL_OPTIONS,
+];
+
+function normalizePairingPolicy(raw: unknown): FeishuGatewayConfig['pairingPolicy'] | undefined {
+  const normalized = (raw as string)?.trim().toLowerCase();
   if (
     normalized === 'open'
     || normalized === 'allowlist'
@@ -29,6 +118,122 @@ function normalizePairingPolicy(raw: string | undefined): FeishuGatewayConfig['p
     return normalized;
   }
   return undefined;
+}
+
+function resolveOptionalString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  return undefined;
+}
+
+function resolveOptionalStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const list = value.filter((entry) => typeof entry === 'string' && entry.trim().length > 0);
+  return list.length > 0 ? list : undefined;
+}
+
+function resolveOptionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  return undefined;
+}
+
+function resolveOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+  return undefined;
+}
+
+export function parseFeishuGatewayConfigFromOptions(
+  parsedOptions: ParsedOptionMap,
+): Partial<FeishuGatewayConfig> {
+  return {
+    ...(resolveOptionalString(parsedOptions.provider) ? { provider: resolveOptionalString(parsedOptions.provider)! } : {}),
+    ...(resolveOptionalString(parsedOptions.profile) ? { profileId: resolveOptionalString(parsedOptions.profile)! } : {}),
+    ...(typeof resolveOptionalBoolean(parsedOptions['with-tools']) === 'boolean' ? { withTools: parsedOptions['with-tools'] as boolean } : {}),
+    ...(typeof resolveOptionalBoolean(parsedOptions.memory) === 'boolean' ? { memory: parsedOptions.memory as boolean } : {}),
+    ...(resolveOptionalStringList(parsedOptions['tool-allow']) ? { toolAllow: resolveOptionalStringList(parsedOptions['tool-allow'])! } : {}),
+    ...(resolveOptionalString(parsedOptions['app-id']) ? { appId: resolveOptionalString(parsedOptions['app-id'])! } : {}),
+    ...(resolveOptionalString(parsedOptions['app-secret']) ? { appSecret: resolveOptionalString(parsedOptions['app-secret'])! } : {}),
+    ...(resolveOptionalNumber(parsedOptions['request-timeout-ms'])
+      ? { requestTimeoutMs: resolveOptionalNumber(parsedOptions['request-timeout-ms'])! }
+      : {}),
+    ...(typeof resolveOptionalBoolean(parsedOptions['heartbeat-enabled']) === 'boolean'
+      ? { heartbeatEnabled: resolveOptionalBoolean(parsedOptions['heartbeat-enabled'])! }
+      : {}),
+    ...(resolveOptionalNumber(parsedOptions['heartbeat-interval-ms'])
+      ? { heartbeatIntervalMs: resolveOptionalNumber(parsedOptions['heartbeat-interval-ms'])! }
+      : {}),
+    ...(resolveOptionalString(parsedOptions['heartbeat-target-open-id'])
+      ? { heartbeatTargetOpenId: resolveOptionalString(parsedOptions['heartbeat-target-open-id'])! }
+      : {}),
+    ...(resolveOptionalString(parsedOptions['heartbeat-session-key'])
+      ? { heartbeatSessionKey: resolveOptionalString(parsedOptions['heartbeat-session-key'])! }
+      : {}),
+    ...(typeof normalizePairingPolicy(parsedOptions['pairing-policy']) !== 'undefined'
+      ? { pairingPolicy: normalizePairingPolicy(parsedOptions['pairing-policy'])! }
+      : {}),
+    ...(resolveOptionalStringList(parsedOptions['pairing-allow-from'])
+      ? { pairingAllowFrom: resolveOptionalStringList(parsedOptions['pairing-allow-from'])! }
+      : {}),
+    ...(resolveOptionalNumber(parsedOptions['pairing-pending-ttl-ms'])
+      ? { pairingPendingTtlMs: resolveOptionalNumber(parsedOptions['pairing-pending-ttl-ms'])! }
+      : {}),
+    ...(resolveOptionalNumber(parsedOptions['pairing-pending-max'])
+      ? { pairingPendingMax: resolveOptionalNumber(parsedOptions['pairing-pending-max'])! }
+      : {}),
+  };
+}
+
+function parseLocalGatewayConfigFromOptions(parsedOptions: ParsedOptionMap): GatewayStartOverrides {
+  for (const unsupportedKey of FEISHU_ONLY_OPTION_KEYS) {
+    const raw = parsedOptions[unsupportedKey];
+    if (raw === undefined) {
+      continue;
+    }
+    if (Array.isArray(raw) ? raw.length > 0 : raw !== undefined) {
+      throw new Error(`Unknown option: --${unsupportedKey}`);
+    }
+  }
+
+  return {
+    ...(resolveOptionalString(parsedOptions.provider) ? { provider: resolveOptionalString(parsedOptions.provider)! } : {}),
+    ...(resolveOptionalString(parsedOptions.profile) ? { profileId: resolveOptionalString(parsedOptions.profile)! } : {}),
+    ...(typeof resolveOptionalBoolean(parsedOptions['with-tools']) === 'boolean' ? { withTools: parsedOptions['with-tools'] as boolean } : {}),
+    ...(typeof resolveOptionalBoolean(parsedOptions.memory) === 'boolean' ? { memory: parsedOptions.memory as boolean } : {}),
+    ...(resolveOptionalStringList(parsedOptions['tool-allow']) ? { toolAllow: resolveOptionalStringList(parsedOptions['tool-allow'])! } : {}),
+  } as GatewayStartOverrides;
+}
+
+function parseGatewayChannels(parsedOptions: ParsedOptionMap): { channels: Array<'feishu' | 'local'>; hasChannel: boolean } {
+  const rawChannels = parsedOptions.channel;
+  if (typeof rawChannels === 'string') {
+    const channel = resolveGatewayChannel(rawChannels);
+    return {
+      channels: normalizeGatewayChannels([channel]),
+      hasChannel: true,
+    };
+  }
+
+  if (Array.isArray(rawChannels)) {
+    const channels = rawChannels
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => resolveGatewayChannel(value));
+    return {
+      channels: normalizeGatewayChannels(channels),
+      hasChannel: channels.length > 0,
+    };
+  }
+
+  return {
+    channels: ['feishu'],
+    hasChannel: false,
+  };
 }
 
 export function parseFeishuServerArgs(argv: string[]): {
@@ -49,410 +254,94 @@ export function parseFeishuServerArgs(argv: string[]): {
   pairingPendingMax?: number;
   pairingAllowFrom?: string[];
 } {
-  let appId: string | undefined;
-  let appSecret: string | undefined;
-  let requestTimeoutMs: number | undefined;
-  let provider: string | undefined;
-  let profileId: string | undefined;
-  let withTools: boolean | undefined;
-  let memory: boolean | undefined;
-  let toolAllow: string[] | undefined;
-  let heartbeatEnabled: boolean | undefined;
-  let heartbeatIntervalMs: number | undefined;
-  let heartbeatTargetOpenId: string | undefined;
-  let heartbeatSessionKey: string | undefined;
-  let pairingPolicy: string | undefined;
-  let pairingPendingTtlMs: number | undefined;
-  let pairingPendingMax: number | undefined;
-  let pairingAllowFrom: string[] | undefined;
-  const modelArgv: string[] = [];
+  const parsed = parseArgv(
+    argv,
+    [
+      ...GATEWAY_MODEL_OPTIONS,
+      ...GATEWAY_RUNTIME_OPTIONS,
+      ...GATEWAY_COMMON_CONFIG_OPTIONS,
+    ],
+    { strictUnknown: true },
+  );
 
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-
-    if (arg === '--app-id') {
-      throwIfMissingValue('app-id', i + 1, argv);
-      appId = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--app-id=')) {
-      appId = arg.slice('--app-id='.length);
-      continue;
-    }
-    if (arg === '--app-secret') {
-      throwIfMissingValue('app-secret', i + 1, argv);
-      appSecret = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--app-secret=')) {
-      appSecret = arg.slice('--app-secret='.length);
-      continue;
-    }
-    if (arg === '--request-timeout-ms') {
-      throwIfMissingValue('request-timeout-ms', i + 1, argv);
-      requestTimeoutMs = parsePositiveIntValue(argv[i + 1], i + 1, '--request-timeout-ms');
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--request-timeout-ms=')) {
-      requestTimeoutMs = parsePositiveIntValue(arg.slice('--request-timeout-ms='.length), i + 1, '--request-timeout-ms');
-      continue;
-    }
-
-    if (arg === '--pairing-policy') {
-      throwIfMissingValue('pairing-policy', i + 1, argv);
-      pairingPolicy = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--pairing-policy=')) {
-      pairingPolicy = arg.slice('--pairing-policy='.length);
-      continue;
-    }
-
-    if (arg === '--pairing-pending-ttl-ms') {
-      throwIfMissingValue('pairing-pending-ttl-ms', i + 1, argv);
-      pairingPendingTtlMs = parsePositiveIntValue(argv[i + 1], i + 1, '--pairing-pending-ttl-ms');
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--pairing-pending-ttl-ms=')) {
-      pairingPendingTtlMs = parsePositiveIntValue(
-        arg.slice('--pairing-pending-ttl-ms='.length),
-        i + 1,
-        '--pairing-pending-ttl-ms',
-      );
-      continue;
-    }
-
-    if (arg === '--pairing-pending-max') {
-      throwIfMissingValue('pairing-pending-max', i + 1, argv);
-      pairingPendingMax = parsePositiveIntValue(argv[i + 1], i + 1, '--pairing-pending-max');
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--pairing-pending-max=')) {
-      pairingPendingMax = parsePositiveIntValue(
-        arg.slice('--pairing-pending-max='.length),
-        i + 1,
-        '--pairing-pending-max',
-      );
-      continue;
-    }
-
-    if (arg === '--pairing-allow-from') {
-      throwIfMissingValue('pairing-allow-from', i + 1, argv);
-      pairingAllowFrom = parseCsvOption(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--pairing-allow-from=')) {
-      pairingAllowFrom = parseCsvOption(arg.slice('--pairing-allow-from='.length));
-      continue;
-    }
-
-    if (arg === '--heartbeat-enabled' || arg === '--no-heartbeat-enabled' || arg.startsWith('--heartbeat-enabled=')) {
-      heartbeatEnabled = parseBooleanFlag(arg, i, 'heartbeat-enabled');
-      continue;
-    }
-
-    if (arg === '--heartbeat-interval-ms') {
-      throwIfMissingValue('heartbeat-interval-ms', i + 1, argv);
-      heartbeatIntervalMs = parsePositiveIntValue(argv[i + 1], i + 1, '--heartbeat-interval-ms');
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--heartbeat-interval-ms=')) {
-      heartbeatIntervalMs = parsePositiveIntValue(
-        arg.slice('--heartbeat-interval-ms='.length),
-        i + 1,
-        '--heartbeat-interval-ms',
-      );
-      continue;
-    }
-
-    if (arg === '--heartbeat-target-open-id') {
-      throwIfMissingValue('heartbeat-target-open-id', i + 1, argv);
-      heartbeatTargetOpenId = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--heartbeat-target-open-id=')) {
-      heartbeatTargetOpenId = arg.slice('--heartbeat-target-open-id='.length);
-      continue;
-    }
-
-    if (arg === '--heartbeat-session-key') {
-      throwIfMissingValue('heartbeat-session-key', i + 1, argv);
-      heartbeatSessionKey = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--heartbeat-session-key=')) {
-      heartbeatSessionKey = arg.slice('--heartbeat-session-key='.length);
-      continue;
-    }
-
-    if (arg.startsWith('--')) {
-      modelArgv.push(arg);
-      if (!arg.includes('=') && i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
-        modelArgv.push(argv[i + 1]);
-        i += 1;
-      }
-      continue;
-    }
-    modelArgv.push(arg);
+  if (parsed.unknownOptions.length > 0) {
+    throw new Error(`Unknown option: ${parsed.unknownOptions[0]}`);
+  }
+  if (parsed.positional.length > 0) {
+    throw new Error(`Unknown argument for gateway start: ${parsed.positional[0]}`);
   }
 
-  const parsedModel: ParsedModelCommandArgs = parseModelCommandArgs(modelArgv, {
-    allowMemory: true,
-    strictUnknown: true,
-  });
-
-  if (parsedModel.positional.length > 0) {
-    throw new Error(`Unknown argument for gateway start: ${parsedModel.positional[0]}`);
-  }
-
-  if (parsedModel.provider) {
-    provider = parsedModel.provider;
-  }
-  if (parsedModel.profileId) {
-    profileId = parsedModel.profileId;
-  }
-  if (typeof parsedModel.withTools === 'boolean') {
-    withTools = parsedModel.withTools;
-  }
-  if (Array.isArray(parsedModel.toolAllow)) {
-    toolAllow = parsedModel.toolAllow;
-  }
-  if (typeof parsedModel.memory === 'boolean') {
-    memory = parsedModel.memory;
-  }
-
-  const normalizedPairingPolicy = normalizePairingPolicy(pairingPolicy);
-
-  return {
-    ...(appId ? { appId } : {}),
-    ...(appSecret ? { appSecret } : {}),
-    ...(typeof requestTimeoutMs === 'number' && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
-      ? { requestTimeoutMs }
-      : {}),
-    ...(provider ? { provider } : {}),
-    ...(profileId ? { profileId } : {}),
-    ...(typeof withTools === 'boolean' ? { withTools } : {}),
-    ...(typeof memory === 'boolean' ? { memory } : {}),
-    ...(Array.isArray(toolAllow) ? { toolAllow } : {}),
-    ...(typeof heartbeatEnabled === 'boolean' ? { heartbeatEnabled } : {}),
-    ...(typeof heartbeatIntervalMs === 'number' && Number.isFinite(heartbeatIntervalMs) && heartbeatIntervalMs > 0
-      ? { heartbeatIntervalMs }
-      : {}),
-    ...(heartbeatTargetOpenId?.trim() ? { heartbeatTargetOpenId: heartbeatTargetOpenId.trim() } : {}),
-    ...(heartbeatSessionKey?.trim() ? { heartbeatSessionKey: heartbeatSessionKey.trim() } : {}),
-    ...(normalizedPairingPolicy ? { pairingPolicy: normalizedPairingPolicy } : {}),
-    ...(typeof pairingPendingTtlMs === 'number' && Number.isFinite(pairingPendingTtlMs) && pairingPendingTtlMs > 0
-      ? { pairingPendingTtlMs }
-      : {}),
-    ...(typeof pairingPendingMax === 'number' && Number.isFinite(pairingPendingMax) && pairingPendingMax > 0
-      ? { pairingPendingMax }
-      : {}),
-    ...(Array.isArray(pairingAllowFrom) ? { pairingAllowFrom } : {}),
-  };
+  return parseFeishuGatewayConfigFromOptions(parsed.options);
 }
 
 export function parseLocalGatewayArgs(argv: string[]): LocalGatewayOverrides {
-  const parsed = parseModelCommandArgs(argv, { allowMemory: true, strictUnknown: true });
+  const parsed = parseArgv(argv, GATEWAY_LOCAL_OPTIONS, { strictUnknown: true });
+  if (parsed.unknownOptions.length > 0) {
+    throw new Error(`Unknown option: ${parsed.unknownOptions[0]}`);
+  }
   if (parsed.positional.length > 0) {
     throw new Error(`Unknown argument for gateway start: ${parsed.positional[0]}`);
   }
 
   return {
-    ...(parsed.provider ? { provider: parsed.provider } : {}),
-    ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
-    ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
-    ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
-    ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
+    ...(resolveOptionalString(parsed.options.provider) ? { provider: resolveOptionalString(parsed.options.provider)! } : {}),
+    ...(resolveOptionalString(parsed.options.profile) ? { profileId: resolveOptionalString(parsed.options.profile)! } : {}),
+    ...(typeof resolveOptionalBoolean(parsed.options['with-tools']) === 'boolean' ? { withTools: parsed.options['with-tools'] as boolean } : {}),
+    ...(typeof resolveOptionalBoolean(parsed.options.memory) === 'boolean' ? { memory: parsed.options.memory as boolean } : {}),
+    ...(resolveOptionalStringList(parsed.options['tool-allow']) ? { toolAllow: resolveOptionalStringList(parsed.options['tool-allow'])! } : {}),
   };
 }
 
-function parseGatewayStartArgsByChannel(channel: GatewayChannel, startArgs: string[]): GatewayStartOverrides {
-  if (channel === 'feishu') {
-    return parseFeishuServerArgs(startArgs);
-  }
-  return parseLocalGatewayArgs(startArgs);
-}
-
 export function parseGatewayArgs(argv: string[]): GatewayParsedCommand {
-  let channel: GatewayChannel = 'feishu';
-  const channels: GatewayChannel[] = [];
-  let hasChannel = false;
-  let action: 'start' | 'status' | 'stop' = 'start';
-  let daemon = false;
-  let statePath: string | undefined;
-  let logPath: string | undefined;
-  let serviceChild = false;
-  let debug = false;
-  const startArgs: string[] = [];
-  const serviceArgv: string[] = [];
-  let actionParsed = false;
+  const [actionInput, ...restArgv] = argv;
+  let action: ParsedGatewayAction = 'start';
+  let rawArgv = argv;
 
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-
-    if (!actionParsed && !arg.startsWith('--')) {
-      if (arg === 'start' || arg === 'status' || arg === 'stop') {
-        action = arg;
-        actionParsed = true;
-        continue;
-      }
-      throw new Error(`Unknown gateway subcommand: ${arg}`);
+  if (actionInput && !actionInput.startsWith('--')) {
+    if (actionInput !== 'start' && actionInput !== 'status' && actionInput !== 'stop') {
+      throw new Error(`Unknown gateway subcommand: ${actionInput}`);
     }
-
-    if (arg === '--daemon') {
-      if (action !== 'start') {
-        throw new Error(`--daemon is only valid for: lainclaw gateway start ...`);
-      }
-      daemon = true;
-      continue;
-    }
-
-    if (arg === '--debug') {
-      if (action !== 'start') {
-        throw new Error(`--debug is only valid for: lainclaw gateway start ...`);
-      }
-      debug = true;
-      serviceArgv.push(arg);
-      continue;
-    }
-
-    if (arg === '--service-child') {
-      serviceChild = true;
-      continue;
-    }
-
-    if (arg === '--pid-file') {
-      throwIfMissingValue('pid-file', i + 1, argv);
-      statePath = argv[i + 1];
-      serviceArgv.push(arg, argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--pid-file=')) {
-      statePath = arg.slice('--pid-file='.length);
-      if (!statePath) {
-        throw new Error('Invalid value for --pid-file');
-      }
-      serviceArgv.push(arg);
-      continue;
-    }
-
-    if (arg === '--log-file') {
-      throwIfMissingValue('log-file', i + 1, argv);
-      logPath = argv[i + 1];
-      serviceArgv.push(arg, argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--log-file=')) {
-      logPath = arg.slice('--log-file='.length);
-      if (!logPath) {
-        throw new Error('Invalid value for --log-file');
-      }
-      serviceArgv.push(arg);
-      continue;
-    }
-
-    if (arg === '--channel') {
-      throwIfMissingValue('channel', i + 1, argv);
-      channel = resolveGatewayChannel(argv[i + 1]);
-      channels.push(channel);
-      hasChannel = true;
-      serviceArgv.push(arg, argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith('--channel=')) {
-      channel = resolveGatewayChannel(arg.slice('--channel='.length));
-      channels.push(channel);
-      hasChannel = true;
-      serviceArgv.push(arg);
-      continue;
-    }
-
-    if (arg.startsWith('--')) {
-      const isConfigOption = action === 'start';
-      if (!isConfigOption) {
-        throw new Error(`Unknown option for gateway ${action}: ${arg}`);
-      }
-      if (!arg.includes('=') && i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
-        startArgs.push(arg, argv[i + 1]);
-        serviceArgv.push(arg, argv[i + 1]);
-        i += 1;
-        continue;
-      }
-      startArgs.push(arg);
-      serviceArgv.push(arg);
-      continue;
-    }
-
-    throw new Error(`Unknown argument for gateway ${action}: ${arg}`);
+    action = actionInput;
+    rawArgv = restArgv;
   }
 
-  if (action === 'start') {
-    const normalizedChannels = normalizeGatewayChannels(channels);
-    if (!hasChannel && normalizedChannels.length === 0) {
-      normalizedChannels.push(channel);
-    }
-    if (normalizedChannels.length === 0) {
-      throw new Error('At least one gateway channel is required');
-    }
+  const optionsSpec = action === 'start' ? GATEWAY_START_OPTIONS : GATEWAY_STATUS_OPTIONS;
+  const parsed = parseArgv(rawArgv, optionsSpec, { strictUnknown: true });
 
-    const normalizedChannel = normalizedChannels[0];
-    if (normalizedChannels.length === 1) {
-      const startConfig = parseGatewayStartArgsByChannel(normalizedChannel, startArgs);
-      return {
-        channel: normalizedChannel,
-        channels: normalizedChannels,
-        action,
-        debug,
-        ...startConfig,
-        daemon,
-        statePath,
-        logPath,
-        serviceChild,
-        serviceArgv,
-      };
-    }
-
-    const startConfig = parseLocalGatewayArgs(startArgs);
-    return {
-      channel: normalizedChannel,
-      channels: normalizedChannels,
-      action,
-      debug,
-      ...startConfig,
-      daemon,
-      statePath,
-      logPath,
-      serviceChild,
-      serviceArgv,
-    };
+  if (parsed.unknownOptions.length > 0) {
+    throw new Error(`Unknown option for gateway ${action}: ${parsed.unknownOptions[0]}`);
+  }
+  if (parsed.positional.length > 0) {
+    throw new Error(`Unknown argument for gateway ${action}: ${parsed.positional[0]}`);
   }
 
-  const normalizedChannels = normalizeGatewayChannels(channels);
-  if (!hasChannel && normalizedChannels.length === 0) {
-    normalizedChannels.push(channel);
-  }
-  return {
-    channel: normalizedChannels[0],
-    channels: normalizedChannels,
+  const { channels } = parseGatewayChannels(parsed.options);
+  const channel = channels[0] ?? 'feishu';
+
+  const base: GatewayParsedCommand = {
     action,
-    daemon: false,
-    statePath,
-    logPath,
-    serviceChild,
-    serviceArgv,
-    debug,
+    channel,
+    channels,
+    daemon: parsed.options.daemon === true,
+    statePath: resolveOptionalString(parsed.options['pid-file']) || undefined,
+    logPath: resolveOptionalString(parsed.options['log-file']) || undefined,
+    serviceChild: parsed.options['service-child'] === true,
+    debug: action === 'start' ? parsed.options.debug === true : false,
+    serviceArgv: rawArgv,
+  };
+
+  if (action !== 'start') {
+    return base;
+  }
+
+  const isSingleFeishu = channels.length === 1 && channels[0] === 'feishu';
+  const config = isSingleFeishu
+    ? parseFeishuGatewayConfigFromOptions(parsed.options)
+    : parseLocalGatewayConfigFromOptions(parsed.options);
+
+  return {
+    ...base,
+    ...config,
+    action,
   };
 }

@@ -1,5 +1,8 @@
-import { printUsage } from './usage.js';
 import { VERSION } from './version.js';
+import {
+  printCommandUsage,
+  printUsage,
+} from './usage.js';
 import { resolveCommandRoute, runUnknownCommand } from './registry.js';
 import type { CommandContext } from './types.js';
 
@@ -7,13 +10,14 @@ export async function runCli(argv: string[]): Promise<number> {
   try {
     return await dispatchCommand(argv);
   } catch (error) {
-    console.error("ERROR:", String(error instanceof Error ? error.message : error));
+    console.error('ERROR:', String(error instanceof Error ? error.message : error));
     return 1;
   }
 }
 
 export async function dispatchCommand(argv: string[]): Promise<number> {
   const command = argv[0];
+  const args = argv.slice(1);
 
   if (!command || command === 'help' || command === '-h' || command === '--help') {
     console.log(printUsage());
@@ -30,9 +34,14 @@ export async function dispatchCommand(argv: string[]): Promise<number> {
     return runUnknownCommand(command);
   }
 
+  if (args.some((entry) => entry === '-h' || entry === '--help')) {
+    console.log(printCommandUsage(command));
+    return 0;
+  }
+
   const context: CommandContext = {
     command,
-    args: argv.slice(1),
+    args,
     argv,
   };
 

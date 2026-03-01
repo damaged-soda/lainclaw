@@ -1,44 +1,18 @@
-export function printUsage(): string {
-  return [
-    'Usage:',
-    '  lainclaw --help',
-    '  lainclaw --version',
-    '  lainclaw agent <input>',
-    '  lainclaw agent [--provider <provider>] [--profile <profile>] [--session <name>] [--new-session] [--memory|--no-memory|--memory=on|off] [--with-tools|--no-with-tools|--with-tools=true|false] [--tool-allow <tool1,tool2>] <input>',
-    '  lainclaw gateway start [--channel <feishu|local> ...] [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--app-id <id>] [--app-secret <secret>] [--request-timeout-ms <ms>] [--debug] [--daemon] [--pid-file <path>] [--log-file <path>]',
-  '  lainclaw gateway status [--channel <channel>] [--pid-file <path>] [--log-file <path>]',
-  '  lainclaw gateway stop [--channel <channel>] [--pid-file <path>] [--log-file <path>]',
-    '  lainclaw gateway config set [--channel <channel>] [--provider <provider>] [--profile <profile>] [--app-id <id>] [--app-secret <secret>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--memory|--no-memory] [--heartbeat-enabled|--no-heartbeat-enabled] [--heartbeat-interval-ms <ms>] [--heartbeat-target-open-id <openId>] [--heartbeat-session-key <key>] [--pairing-policy <open|allowlist|pairing|disabled>] [--pairing-allow-from <id1,id2>] [--pairing-pending-ttl-ms <ms>] [--pairing-pending-max <n>] [--request-timeout-ms <ms>]',
-    '  lainclaw gateway config show [--channel <channel>]',
-    '  lainclaw gateway config clear [--channel <channel>]',
-    '  lainclaw gateway config migrate [--channel <channel>] --dry-run',
-    '  lainclaw pairing list [--channel <channel>] [--json]',
-    '  lainclaw pairing approve [--channel <channel>] <code> [--account <accountId>]',
-    '  lainclaw pairing revoke [--channel <channel>] <openIdOrUserId> [--account <accountId>]',
-    '  lainclaw tools list',
-    '  lainclaw tools info <name>',
-    '  lainclaw tools invoke <name> --args <json>',
-    '  lainclaw heartbeat init [--template <path>] [--force]',
-    '  lainclaw heartbeat add "提醒我：每天中午检查邮件" [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>]',
-    '  lainclaw heartbeat list',
-    '  lainclaw heartbeat remove <ruleId>',
-    '  lainclaw heartbeat enable <ruleId>',
-    '  lainclaw heartbeat disable <ruleId>',
-    '  lainclaw heartbeat run [--provider <provider>] [--profile <profile>] [--with-tools|--no-with-tools] [--tool-allow <tool1,tool2>] [--memory|--no-memory]',
-    '  lainclaw auth login openai-codex',
-    '  lainclaw auth status',
-    '  lainclaw auth use <profile>',
-    '  lainclaw auth logout [--all|<profile>]',
-    '',
-    'Examples:',
-    '  lainclaw agent 这是一段测试文本',
-    '  lainclaw agent --session work --provider <provider> --profile default 这是一段测试文本',
-    '  lainclaw agent --session work --memory 这是一个长期记忆测试',
-    '  lainclaw agent --session work --memory=off 这是一条不写入记忆的消息',
-    '  lainclaw tools invoke fs.read_file --args "{\\"path\\":\\"README.md\\"}"',
-    '  lainclaw auth login openai-codex',
-    '  lainclaw auth status',
-    '',
-    'Notes: `provider` 决定运行适配器；未配置或配置错误会直接报错。provider 与 profile 用于查找对应运行配置。',
-  ].join('\n');
+import {
+  printCommandUsage,
+  printGlobalUsage,
+  printSubcommandUsage,
+} from './spec/help.js';
+
+export {
+  printCommandUsage,
+  printSubcommandUsage,
+  printGlobalUsage,
+};
+
+export function printUsage(command?: string): string {
+  if (command) {
+    return printCommandUsage(command);
+  }
+  return printGlobalUsage();
 }
