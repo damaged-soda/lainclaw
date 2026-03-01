@@ -1,24 +1,28 @@
 import path from "node:path";
-import { resolveAdapter, type AdapterRunInput, type ResolvedAdapter } from "../adapters/registry.js";
-import type { AdapterResult } from "../adapters/stubAdapter.js";
+import {
+  resolveProvider,
+  type ProviderRunInput,
+  type ResolvedProvider,
+} from "../providers/registry.js";
+import type { ProviderResult } from "../providers/stubAdapter.js";
 
 export interface RuntimeOptions {
-  requestContext: AdapterRunInput["requestContext"];
+  requestContext: ProviderRunInput["requestContext"];
   withTools: boolean;
   toolAllow: string[];
   cwd?: string;
-  toolSpecs?: AdapterRunInput["toolSpecs"];
+  toolSpecs?: ProviderRunInput["toolSpecs"];
 }
 
 export interface RuntimeResult {
-  adapter: AdapterResult;
+  adapter: ProviderResult;
 }
 
 export async function runRuntime(input: RuntimeOptions): Promise<RuntimeResult> {
   const requestContext = input.requestContext;
-  const resolved: ResolvedAdapter = resolveAdapter(requestContext.provider);
+  const resolved: ResolvedProvider = resolveProvider(requestContext.provider);
   const route = `adapter.${resolved.provider}`;
-  const adapterInput: AdapterRunInput = {
+  const providerInput: ProviderRunInput = {
     requestContext,
     route,
     withTools: input.withTools,
@@ -27,6 +31,6 @@ export async function runRuntime(input: RuntimeOptions): Promise<RuntimeResult> 
     ...(Array.isArray(input.toolSpecs) ? { toolSpecs: input.toolSpecs } : {}),
   };
 
-  const adapter = await resolved.run(adapterInput);
+  const adapter = await resolved.run(providerInput);
   return { adapter };
 }
