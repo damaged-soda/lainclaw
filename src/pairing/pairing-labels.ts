@@ -1,1 +1,4 @@
-export * from '../channels/feishu/pairing/pairing-labels.js';
+export function resolvePairingIdLabel(): string {
+  return "openId";
+}
+

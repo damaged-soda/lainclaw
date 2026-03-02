@@ -1,6 +1,6 @@
-import { startHeartbeatLoop } from '../../../heartbeat/runner.js';
-import type { ChannelOutboundTextCapability } from '../../../channels/contracts.js';
-import type { HeartbeatLoopHandle, HeartbeatRunSummary } from '../../../heartbeat/runner.js';
+import { startHeartbeatLoop } from '../../heartbeat/runner.js';
+import type { ChannelOutboundTextCapability } from '../../channels/contracts.js';
+import type { HeartbeatLoopHandle, HeartbeatRunSummary } from '../../heartbeat/runner.js';
 
 type HeartbeatFailureHint = (rawMessage: string) => string;
 

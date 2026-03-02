@@ -5,8 +5,8 @@ import {
   approveChannelPairingCode,
   listChannelPairingRequests,
   removeChannelAllowFromStoreEntry,
-} from '../../channels/feishu/pairing/pairing-store.js';
-import { resolvePairingIdLabel } from '../../channels/feishu/pairing/pairing-labels.js';
+} from '../../pairing/pairing-store.js';
+import { resolvePairingIdLabel } from '../../pairing/pairing-labels.js';
 import { setExitCode } from '../shared/exitCode.js';
 import { channelIds } from '../../gateway/commands/channelRegistry.js';
 
