@@ -4,32 +4,40 @@
 
 ```text
 CLI（node dist/index.js）
-  └─ src/index.ts
-      └─ src/cli/cli.ts（参数路由）
-          └─ src/cli/program.ts（命令树组装）
-          ├─ src/gateway/index.ts（gateway 主入口）
-          │   ├─ src/app/coreCoordinator.ts（CoreCoordinator 统一执行入口）
-          │   ├─ src/core/contracts.ts（核心接口与事件/错误码）
-          │   ├─ src/core/adapters/index.ts（会话/工具/运行时端口）
-          │   │   ├─ session.ts
-          │   │   ├─ tools.ts
-          │   │   └─ runtime.ts
-          │   ├─ src/gateway/service.ts（服务生命周期）
-          │   ├─ src/gateway/servicePaths.ts（服务路径）
-          │   ├─ src/gateway/serviceState.ts（服务状态）
-          │   ├─ src/gateway/serviceProcess.ts（子进程）
-      ├─ src/runtime/
-          │   ├─ adapter.ts（runtime port 实现，组装 requestContext）
-          │   ├─ context.ts（上下文与请求基元）
-          │   └─ entrypoint.ts（provider implementation 的底层执行入口）
-          ├─ src/providers/codexAdapter.ts（provider implementation，当前实现为 openai-codex）
-          ├─ src/providers/stubAdapter.ts（非 codex 回退）
-          ├─ src/tools/registry.ts / executor.ts / runtimeTools.ts（工具执行）
-          ├─ src/sessions/sessionService.ts（会话/记忆/transcript 服务）
-          ├─ src/sessions/sessionStore.ts（会话与记忆）
-              ├─ src/channels/feishu/index.ts（飞书网关）
-              ├─ src/channels/local/index.ts（本地网关）
-          └─ src/heartbeat/*.ts（定时任务与运行日志）
+  └─ src/
+      ├─ index.ts
+      ├─ cli/
+      │   ├─ cli.ts（参数路由）
+      │   └─ program.ts（命令树组装）
+      ├─ gateway/index.ts（gateway 主入口）
+      ├─ app/coreCoordinator.ts（CoreCoordinator 统一执行入口）
+      ├─ core/contracts.ts（核心接口与事件/错误码）
+      ├─ core/adapters/index.ts（会话/工具/运行时端口）
+      ├─ core/adapters/session.ts
+      ├─ core/adapters/tools.ts
+      ├─ core/adapters/runtime.ts
+      ├─ gateway/service.ts（服务生命周期）
+      ├─ gateway/servicePaths.ts（服务路径）
+      ├─ gateway/serviceState.ts（服务状态）
+      ├─ gateway/serviceProcess.ts（子进程）
+      ├─ runtime/
+      │   ├─ adapter.ts（runtime port 实现，组装 requestContext）
+      │   ├─ context.ts（上下文与请求基元）
+      │   └─ entrypoint.ts（provider implementation 的底层执行入口）
+      ├─ providers/
+      │   ├─ codexAdapter.ts（provider implementation，当前实现为 openai-codex）
+      │   └─ stubAdapter.ts（非 codex 回退）
+      ├─ tools/
+      │   ├─ registry.ts
+      │   ├─ executor.ts
+      │   └─ runtimeTools.ts（工具执行）
+      ├─ sessions/
+      │   ├─ sessionService.ts（会话/记忆/transcript 服务）
+      │   └─ sessionStore.ts（会话与记忆）
+      ├─ channels/
+      │   ├─ feishu/index.ts（飞书网关）
+      │   └─ local/index.ts（本地网关）
+      └─ heartbeat/*.ts（定时任务与运行日志）
 ```
 
 ## 核心职责
