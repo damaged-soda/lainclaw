@@ -19,9 +19,8 @@ import {
   type GatewayStartOverrides,
   type GatewayChannel,
 } from './contracts.js';
-import { normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
+import { channelsRegistry, normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
 import { runGatewayServiceRunner } from './serviceRunner.js';
-import { channelsRegistry } from './channelsRegistry.js';
 import type { ChannelRunContext, Channel } from '../../channels/contracts.js';
 
 export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<number> {

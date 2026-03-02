@@ -54,7 +54,6 @@ CLI（node dist/index.js）
       │   ├─ serviceProcess.ts（进程封装）
       │   ├─ commands/
       │   │   ├─ channelRegistry.ts
-      │   │   ├─ channelsRegistry.ts
       │   │   └─ start.ts
       │   └─ handlers/
       │       ├─ handleInbound.ts

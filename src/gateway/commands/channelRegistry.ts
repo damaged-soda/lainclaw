@@ -1,5 +1,14 @@
-import { channelIds } from './channelsRegistry.js';
+import { feishuChannel } from '../../channels/feishu/index.js';
+import { localChannel } from '../../channels/local/index.js';
+import type { Channel, ChannelId } from '../../channels/contracts.js';
 import type { GatewayChannel } from './contracts.js';
+
+export const channelsRegistry: Record<ChannelId, Channel> = {
+  feishu: feishuChannel,
+  local: localChannel,
+};
+
+export const channelIds = Object.keys(channelsRegistry) as ChannelId[];
 
 export const GatewayChannels: GatewayChannel[] = [...channelIds];
 

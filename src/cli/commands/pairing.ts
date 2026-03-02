@@ -8,7 +8,7 @@ import {
 } from '../../channels/feishu/pairing/pairing-store.js';
 import { resolvePairingIdLabel } from '../../channels/feishu/pairing/pairing-labels.js';
 import { setExitCode } from '../shared/exitCode.js';
-import { channelIds } from '../../gateway/commands/channelsRegistry.js';
+import { channelIds } from '../../gateway/commands/channelRegistry.js';
 
 const DEFAULT_ACCESS_CONTROL_CHANNEL = 'feishu';
 const SUPPORTED_ACCESS_CONTROL_CHANNELS = new Set<string>(channelIds);
