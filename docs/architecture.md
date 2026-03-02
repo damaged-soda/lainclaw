@@ -21,8 +21,8 @@ CLI（node dist/index.js）
       ├─ src/runtime/
           │   ├─ adapter.ts（runtime port 实现，组装 requestContext）
           │   ├─ context.ts（上下文与请求基元）
-          │   └─ entrypoint.ts（provider adapter 的底层执行入口）
-          ├─ src/providers/codexAdapter.ts（provider adapter，当前实现为 openai-codex）
+          │   └─ entrypoint.ts（provider implementation 的底层执行入口）
+          ├─ src/providers/codexAdapter.ts（provider implementation，当前实现为 openai-codex）
           ├─ src/providers/stubAdapter.ts（非 codex 回退）
           ├─ src/tools/registry.ts / executor.ts / runtimeTools.ts（工具执行）
           ├─ src/sessions/sessionService.ts（会话/记忆/transcript 服务）
@@ -55,14 +55,14 @@ CLI（node dist/index.js）
 - `src/tools/runtimeTools.ts`
   - 承载工具清单、工具名映射、工具名适配、错误归并与 tool summary 构建能力；`runAgent` 与 `codexAdapter` 直接消费该能力。
 - `src/runtime/adapter.ts` 与 `src/runtime/entrypoint.ts` 的数据流
-  - `adapter` 负责 `CoreRuntimeInput` 到 `RequestContext` 的转换并切入 provider adapter；
+  - `adapter` 负责 `CoreRuntimeInput` 到 `RequestContext` 的转换并切入 provider implementation；
   - `entrypoint` 提供 provider 底座执行与结果收口。
 - `runtime` 可观测统一字段
   - `core` 通过 `emitEvent` 统一输出 trace/event/log 结构。
 - `src/sessions/sessionService.ts`
   - 会话生命周期、会话历史与长期记忆读写、tool summary 写入、路由记录和 compact 写入的服务编排中心。
 - `src/runtime/entrypoint.ts`
-  - 基于 provider adapter 的单次执行底座，按 `provider` 选择具体运行适配器。
+  - 基于 provider implementation 的单次执行底座，按 `provider` 选择具体运行适配器。
 
 ## 运行入口收口说明（新增）
 

@@ -17,7 +17,7 @@
 - `gateway`：通道边界，启动飞书 WS 或 local 服务；不承载运行时建模与恢复逻辑。
   - CLI 内部已重构为集中式命令分发与统一执行封装，当前版本以最小改动保留既有执行语义，优先完成核心边界重建。
   - `agent`（调用入口）：`src/agent/invoke.ts` 统一做参数归一化后交由 `core` 的统一协作协议处理；`runtime` 仅承担底层请求上下文与 provider 适配执行，不关心来源参数来源。
-  - 详见 `docs/wip/20260225-runtime-simplification/runtime-layering.md` 的分层边界与迁移约定。
+  - 详见 `docs/wip/20260225-runtime-simplification/runtime-layering.md` 的分层边界与迁移约定，与 `architecture.md` 的运行职责说明保持一致。
 - `sessions/sessionService`：会话、记忆与 transcript 持久化服务边界，统一封装 `src/sessions/sessionStore.ts` 文件落盘细节；`runtime` 只关注会话上下文拼装与执行编排，不直接持有文件路径和目录细节。
 - 会话持久化：会话索引与消息仍按 `~/.lainclaw` 目录记录（`sessions.json`、`<sessionId>.jsonl`、`memory/<sessionKey>.md`）。
 - 配置管理：网关参数和工具参数集中到配置文件。
