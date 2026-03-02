@@ -5,39 +5,95 @@
 ```text
 CLI（node dist/index.js）
   └─ src/
-      ├─ index.ts
-      ├─ cli/
-      │   ├─ cli.ts（参数路由）
-      │   └─ program.ts（命令树组装）
-      ├─ gateway/index.ts（gateway 主入口）
-      ├─ app/coreCoordinator.ts（CoreCoordinator 统一执行入口）
-      ├─ core/contracts.ts（核心接口与事件/错误码）
-      ├─ core/adapters/index.ts（会话/工具/运行时端口）
-      ├─ core/adapters/session.ts
-      ├─ core/adapters/tools.ts
-      ├─ core/adapters/runtime.ts
-      ├─ gateway/service.ts（服务生命周期）
-      ├─ gateway/servicePaths.ts（服务路径）
-      ├─ gateway/serviceState.ts（服务状态）
-      ├─ gateway/serviceProcess.ts（子进程）
-      ├─ runtime/
-      │   ├─ adapter.ts（runtime port 实现，组装 requestContext）
-      │   ├─ context.ts（上下文与请求基元）
-      │   └─ entrypoint.ts（provider implementation 的底层执行入口）
-      ├─ providers/
-      │   ├─ codexAdapter.ts（provider implementation，当前实现为 openai-codex）
-      │   └─ stubAdapter.ts（非 codex 回退）
-      ├─ tools/
-      │   ├─ registry.ts
-      │   ├─ executor.ts
-      │   └─ runtimeTools.ts（工具执行）
-      ├─ sessions/
-      │   ├─ sessionService.ts（会话/记忆/transcript 服务）
-      │   └─ sessionStore.ts（会话与记忆）
+      ├─ index.ts（应用入口）
+      ├─ agent/
+      │   └─ invoke.ts（agent 统一入站入口）
+      ├─ app/
+      │   └─ coreCoordinator.ts（协调主入口）
+      ├─ auth/
+      │   ├─ authManager.ts
+      │   ├─ configStore.ts
+      │   └─ types.ts
       ├─ channels/
-      │   ├─ feishu/index.ts（飞书网关）
-      │   └─ local/index.ts（本地网关）
-      └─ heartbeat/*.ts（定时任务与运行日志）
+      │   ├─ contracts.ts
+      │   ├─ feishu/
+      │   │   ├─ index.ts（飞书网关）
+      │   │   └─ transport.ts（WS/HTTP 适配）
+      │   └─ local/
+      │       ├─ index.ts（本地网关）
+      │       └─ transport.ts（文件队列轮询与回写）
+      ├─ cli/
+      │   ├─ cli.ts（参数分发）
+      │   ├─ program.ts（命令树）
+      │   ├─ shared/
+      │   │   ├─ options.ts
+      │   │   └─ result.ts
+      │   └─ commands/
+      │       ├─ agent.ts
+      │       ├─ auth.ts
+      │       ├─ gateway.ts
+      │       ├─ heartbeat.ts
+      │       ├─ pairing.ts
+      │       └─ tools.ts
+      ├─ core/
+      │   ├─ contracts.ts（核心接口/事件）
+      │   ├─ errors.ts（统一错误）
+      │   ├─ steps.ts（步骤编排）
+      │   ├─ adapters/
+      │   │   ├─ index.ts（适配器组合）
+      │   │   ├─ runtime.ts
+      │   │   ├─ session.ts
+      │   │   └─ tools.ts
+      │   └─ internal.ts
+      ├─ gateway/
+      │   ├─ index.ts（gateway 统一出口）
+      │   ├─ service.ts（生命周期）
+      │   ├─ servicePaths.ts（路径配置）
+      │   ├─ serviceState.ts（状态管理）
+      │   ├─ serviceController.ts（服务控制）
+      │   ├─ serviceProcess.ts（进程封装）
+      │   ├─ commands/
+      │   │   ├─ channelRegistry.ts
+      │   │   ├─ channelsRegistry.ts
+      │   │   └─ start.ts
+      │   └─ handlers/
+      │       ├─ handleInbound.ts
+      │       └─ policy/
+      ├─ heartbeat/
+      │   ├─ runner.ts（调度）
+      │   └─ store.ts（运行时状态）
+      ├─ pairing/
+      │   ├─ cli.ts
+      │   ├─ pairing-labels.ts
+      │   ├─ pairing-messages.ts
+      │   └─ pairing-store.ts
+      ├─ providers/
+      │   ├─ codexAdapter.ts（openai-codex 路径）
+      │   ├─ stubAdapter.ts（兜底适配器）
+      │   ├─ registry.ts（provider 注册）
+      │   └─ codex/
+      │       ├─ messageText.ts
+      │       ├─ toolCallParser.ts
+      │       └─ toolExecutionState.ts
+      ├─ runtime/
+      │   ├─ adapter.ts（请求上下文转换）
+      │   ├─ context.ts（上下文定义）
+      │   └─ entrypoint.ts（运行时边界）
+      ├─ sessions/
+      │   ├─ adapter.ts（会话适配）
+      │   ├─ sessionService.ts
+      │   └─ sessionStore.ts
+      ├─ shared/
+      │   ├─ envFlags.ts
+      │   ├─ ids.ts
+      │   ├─ types.ts
+      │   └─ workspaceContext.ts
+      └─ tools/
+          ├─ adapter.ts
+          ├─ executor.ts（工具执行）
+          ├─ registry.ts（工具注册）
+          ├─ runtimeTools.ts（内建工具聚合）
+          └─ types.ts
 ```
 
 ## 核心职责
@@ -52,7 +108,7 @@ CLI（node dist/index.js）
   - 统一执行业务执行入口，承接 `agent/gateway/channel/heartbeat` 的请求并编排上下文、会话、工具与运行时调用；核心层侧重协议协调与事件收口。
 - `src/core/contracts.ts`
   - 定义 `CoreCoordinator` 接口、`runAgent` 输入/输出、`trace/event/log` 事件与错误码。
-- `src/core/adapters/*`
+- `src/core/adapters/index.ts` / `src/core/adapters/session.ts` / `src/core/adapters/tools.ts` / `src/core/adapters/runtime.ts`
   - 将会话、工具、runtime 能力收敛为端口后通过依赖注入组装，避免业务层直接互相调用。
 - `src/gateway/index.ts`
   - 作为主入口边界，仅委托 `agent` 标准调用入口后进入 `core` 的统一运行协议。
@@ -82,15 +138,15 @@ CLI（node dist/index.js）
   - 作为非模型的兜底行为。
 - `src/sessions/sessionStore.ts`
   - 管理 session 目录、索引文件与记忆文件。
-- `src/tools/*`
+- `src/tools/adapter.ts` / `src/tools/executor.ts` / `src/tools/registry.ts` / `src/tools/runtimeTools.ts` / `src/tools/types.ts`
   - `registry` 管理工具元数据与白名单；`executor` 统一校验与执行，`runtimeTools.ts` 与核心协调器协作处理 tool summary/名称映射。
-- `src/channels/feishu/*` / `src/channels/local/*`
+- `src/channels/feishu/index.ts` / `src/channels/local/index.ts`（核心入口）及配套 `transport.ts`
   - 分别处理飞书 WS 入/出站与 local channel 文件队列。
-- `src/pairing/*`
+- `src/pairing/cli.ts` / `src/pairing/pairing-labels.ts` / `src/pairing/pairing-messages.ts` / `src/pairing/pairing-store.ts`
   - 飞书配对策略与挂起码流程。
-- `src/heartbeat/*`
+- `src/heartbeat/runner.ts` / `src/heartbeat/store.ts`
   - HEARTBEAT 规则管理、触发与运行日志。
-- `src/auth/*`
+- `src/auth/authManager.ts` / `src/auth/configStore.ts` / `src/auth/types.ts`
   - OAuth 登录、profile 选择、会话中 credential 读取与续期。
 - `src/gateway/service.ts`
   - 作为服务对外边界，统一导出 `GatewayService` 配置与生命周期 API。
@@ -100,7 +156,7 @@ CLI（node dist/index.js）
   - 管理 gateway service state 的读取/写入/清理。
 - `src/gateway/serviceProcess.ts`
   - 管理 gateway 子进程启动与 stop/kill 生命周期。
-- `src/shared/*`
+- `src/shared/envFlags.ts` / `src/shared/ids.ts` / `src/shared/types.ts` / `src/shared/workspaceContext.ts`
   - 公共上下文（工作区、提示词拼装、运行时共享元信息）。
 
 ## 会话与记忆数据流（简化）
@@ -120,7 +176,7 @@ CLI（node dist/index.js）
   - 定义并挂载命令树（`agent/gateway/pairing/tools/heartbeat/auth`）；
 - `src/cli/shared/options.ts`
   - 负责参数标准化与共享选项；
-- `src/cli/commands/*`
+- `src/cli/commands/agent.ts` / `src/cli/commands/auth.ts` / `src/cli/commands/gateway.ts` / `src/cli/commands/heartbeat.ts` / `src/cli/commands/pairing.ts` / `src/cli/commands/tools.ts`
   - 负责命令执行、日志与输出；
 - `src/cli/shared/result.ts`
   - 负责统一错误出口和返回码策略（成功 0，失败 1，除特殊路径外）。
