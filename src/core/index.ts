@@ -69,7 +69,6 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         memory: memoryEnabled,
         sessionKey,
         withTools,
-        toolAllow,
         newSession,
         cwd,
       } = options;
@@ -81,7 +80,6 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         profileId,
         sessionKey,
         withTools,
-        toolAllow,
         memoryEnabled,
         cwd: typeof cwd === "string" ? cwd : undefined,
         emitEvent,
@@ -103,7 +101,6 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
             provider: ctx.provider,
             profileId: ctx.profileId,
             withTools: ctx.withTools,
-            hasToolFilter: ctx.toolAllow.length > 0,
           },
         });
 

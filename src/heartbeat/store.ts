@@ -28,7 +28,6 @@ export interface HeartbeatRule {
   provider?: string;
   profileId?: string;
   withTools: boolean;
-  toolAllow?: string[];
   createdAt: string;
   updatedAt: string;
   lastRunAt?: string;
@@ -42,7 +41,6 @@ export interface NewHeartbeatRule {
   provider?: string;
   profileId?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   enabled?: boolean;
 }
 
@@ -94,16 +92,6 @@ function normalizeText(raw: unknown): string | undefined {
   }
   const text = raw.trim();
   return text.length > 0 ? text : undefined;
-}
-
-function normalizeStringArray(raw: unknown): string[] | undefined {
-  if (!Array.isArray(raw)) {
-    return undefined;
-  }
-  const values = raw
-    .map((value) => (typeof value === "string" ? value.trim() : ""))
-    .filter((value) => value.length > 0);
-  return values.length > 0 ? values : undefined;
 }
 
 function normalizeProvider(raw: unknown): string | undefined {
@@ -315,7 +303,6 @@ export function buildHeartbeatRule(input: NewHeartbeatRule): HeartbeatRule {
     throw new Error("Heartbeat rule text cannot be empty.");
   }
   const withTools = normalizeBoolean(input.withTools) ?? false;
-  const toolAllow = normalizeStringArray(input.toolAllow);
   const profileId = normalizeText(input.profileId);
   const provider = normalizeProvider(input.provider);
   const now = nowIso();
@@ -326,7 +313,6 @@ export function buildHeartbeatRule(input: NewHeartbeatRule): HeartbeatRule {
     ...(provider ? { provider } : {}),
     ...(profileId ? { profileId } : {}),
     withTools,
-    ...(toolAllow ? { toolAllow } : {}),
     createdAt: now,
     updatedAt: now,
   };

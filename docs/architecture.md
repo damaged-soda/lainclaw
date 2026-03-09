@@ -112,7 +112,7 @@ CLI（node dist/index.js）
 - `src/gateway/index.ts`
   - 作为主入口边界，仅委托 `agent` 标准调用入口后进入 `core` 的统一运行协议。
 - `src/agent/invoke.ts`
-  - 上层渠道/CLI/heartbeat 统一入站层：标准化入口参数（`sessionKey`、`toolAllow`、`memory`）后交由 `coreCoordinator.runAgent`。
+  - 上层渠道/CLI/heartbeat 统一入站层：标准化入口参数（`sessionKey`、`memory` 等）后交由 `coreCoordinator.runAgent`。
 - `src/runtime/context.ts`
   - 封装 request/session 上下文、时间戳与运行时元信息构建。
 - `src/tools/runtimeTools.ts`

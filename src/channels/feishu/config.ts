@@ -3,7 +3,6 @@ import path from "node:path";
 import { resolveAuthDirectory } from "../../auth/configStore.js";
 import type { PairingPolicy, PairingRequest } from "../../pairing/pairing-store.js";
 import { DEFAULT_PAIRING_PENDING_MAX, DEFAULT_PAIRING_PENDING_TTL_MS } from "../../pairing/pairing-store.js";
-import { getBuiltinToolNames } from "../../tools/registry.js";
 
 export interface FeishuGatewayConfig {
   /**
@@ -21,7 +20,6 @@ export interface FeishuGatewayConfig {
   heartbeatIntervalMs: number;
   heartbeatTargetOpenId?: string;
   heartbeatSessionKey?: string;
-  toolAllow?: string[];
   pairingPolicy?: PairingPolicy;
   pairingPendingTtlMs?: number;
   pairingPendingMax?: number;
@@ -40,7 +38,6 @@ export interface FeishuGatewayConfigSources {
   heartbeatIntervalMs?: "default" | "override";
   heartbeatTargetOpenId?: "default" | "override";
   heartbeatSessionKey?: "default" | "override";
-  toolAllow?: "default" | "override";
   pairingPolicy?: "default" | "override";
   pairingPendingTtlMs?: "default" | "override";
   pairingPendingMax?: "default" | "override";
@@ -73,7 +70,6 @@ export interface FeishuGatewayStorage {
     heartbeatIntervalMs?: number;
     heartbeatTargetOpenId?: string;
     heartbeatSessionKey?: string;
-    toolAllow?: string[];
     pairingPolicy?: PairingPolicy;
     pairingPendingTtlMs?: number;
     pairingPendingMax?: number;
@@ -88,7 +84,6 @@ const DEFAULT_HEARTBEAT_ENABLED = false;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 const DEFAULT_PAIRING_POLICY = "open" as PairingPolicy;
-const DEFAULT_TOOL_ALLOW = getBuiltinToolNames();
 const GATEWAY_CONFIG_FILE = "gateway.json";
 const LEGACY_FEISHU_GATEWAY_CONFIG_SUFFIX = "-gateway.json";
 const CURRENT_VERSION = 1 as const;
@@ -107,7 +102,6 @@ const FEISHU_GATEWAY_CONFIG_KEYS: Array<keyof FeishuGatewayConfig> = [
   "heartbeatIntervalMs",
   "heartbeatTargetOpenId",
   "heartbeatSessionKey",
-  "toolAllow",
   "pairingPolicy",
   "pairingPendingTtlMs",
   "pairingPendingMax",
@@ -167,7 +161,7 @@ function normalizeAllowFrom(raw: string[] | undefined): string[] {
 
 function normalizeAllowFromRaw(raw: unknown): string[] {
   if (typeof raw === "string") {
-    return parseToolAllowRaw(raw) ?? [];
+    return parseStringListRaw(raw) ?? [];
   }
   if (!Array.isArray(raw)) {
     return [];
@@ -175,7 +169,7 @@ function normalizeAllowFromRaw(raw: unknown): string[] {
   return normalizeAllowFrom(raw);
 }
 
-function parseToolAllowRaw(raw: string | undefined): string[] | undefined {
+function parseStringListRaw(raw: string | undefined): string[] | undefined {
   if (typeof raw !== "string") {
     return undefined;
   }
@@ -185,23 +179,23 @@ function parseToolAllowRaw(raw: string | undefined): string[] | undefined {
     .filter((entry) => entry.length > 0);
 }
 
-function normalizeToolAllow(raw: unknown): string[] | undefined {
+function normalizeStringList(raw: unknown): string[] | undefined {
   if (Array.isArray(raw)) {
     return raw
       .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
       .filter((entry) => entry.length > 0);
   }
   if (typeof raw === "string") {
-    return parseToolAllowRaw(raw);
+    return parseStringListRaw(raw);
   }
   return undefined;
 }
 
-function firstToolAllow(
+function firstStringList(
   ...values: Array<string[] | string | undefined>
 ): string[] | undefined {
   for (const value of values) {
-    const normalized = normalizeToolAllow(value);
+    const normalized = normalizeStringList(value);
     if (normalized !== undefined) {
       return normalized;
     }
@@ -287,7 +281,6 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
       : undefined;
   const heartbeatSessionKey =
     typeof source.heartbeatSessionKey === "string" ? resolveText(source.heartbeatSessionKey) : undefined;
-  const toolAllow = normalizeToolAllow(source.toolAllow as unknown);
   const pairingPolicy = isValidPairingPolicy(
     typeof source.pairingPolicy === "string" ? source.pairingPolicy : undefined,
   );
@@ -331,9 +324,6 @@ function normalizeStoredConfig(raw: unknown): Partial<FeishuGatewayConfig> {
   }
   if (heartbeatSessionKey) {
     normalized.heartbeatSessionKey = heartbeatSessionKey;
-  }
-  if (Array.isArray(toolAllow)) {
-    normalized.toolAllow = toolAllow;
   }
   if (pairingPolicy) {
     normalized.pairingPolicy = pairingPolicy;
@@ -743,9 +733,6 @@ function filterPersistable(updates: Partial<FeishuGatewayConfig>): Partial<Feish
     ...(typeof updates.profileId === "string" ? { profileId: updates.profileId } : {}),
     ...(typeof updates.withTools === "boolean" ? { withTools: updates.withTools } : {}),
     ...(typeof updates.memory === "boolean" ? { memory: updates.memory } : {}),
-    ...(Array.isArray(updates.toolAllow)
-      ? { toolAllow: updates.toolAllow.map((tool) => tool.trim()).filter((tool) => tool.length > 0) }
-      : {}),
     ...(typeof updates.heartbeatEnabled === "boolean" ? { heartbeatEnabled: updates.heartbeatEnabled } : {}),
     ...(typeof updates.heartbeatIntervalMs === "number" && Number.isFinite(updates.heartbeatIntervalMs)
       ? { heartbeatIntervalMs: updates.heartbeatIntervalMs }
@@ -899,9 +886,6 @@ export async function resolveFeishuGatewayConfig(
   const envProfileId = resolveText(process.env.LAINCLAW_FEISHU_PROFILE_ID || process.env.FEISHU_PROFILE_ID);
   const envWithTools = resolveBoolean(process.env.LAINCLAW_FEISHU_WITH_TOOLS || process.env.FEISHU_WITH_TOOLS);
   const envMemory = resolveBoolean(process.env.LAINCLAW_FEISHU_MEMORY || process.env.FEISHU_MEMORY);
-  const envToolAllow = parseToolAllowRaw(
-    process.env.LAINCLAW_FEISHU_TOOL_ALLOW || process.env.FEISHU_TOOL_ALLOW,
-  );
   const envHeartbeatEnabled = resolveText(
     process.env.LAINCLAW_FEISHU_HEARTBEAT_ENABLED || process.env.FEISHU_HEARTBEAT_ENABLED,
   );
@@ -923,7 +907,7 @@ export async function resolveFeishuGatewayConfig(
   const envPairingPendingMax = resolveText(
     process.env.LAINCLAW_FEISHU_PAIRING_PENDING_MAX || process.env.FEISHU_PAIRING_PENDING_MAX,
   );
-  const envPairingAllowFrom = parseToolAllowRaw(
+  const envPairingAllowFrom = parseStringListRaw(
     process.env.LAINCLAW_FEISHU_PAIRING_ALLOW_FROM || process.env.FEISHU_PAIRING_ALLOW_FROM,
   );
 
@@ -979,7 +963,6 @@ export async function resolveFeishuGatewayConfig(
       cached.heartbeatSessionKey,
       DEFAULT_HEARTBEAT_SESSION_KEY,
     ),
-    toolAllow: firstToolAllow(overrides.toolAllow, envToolAllow, cached.toolAllow) || DEFAULT_TOOL_ALLOW,
     pairingPolicy:
       isValidPairingPolicy(overrides.pairingPolicy)
       || envPairingPolicy
@@ -997,6 +980,6 @@ export async function resolveFeishuGatewayConfig(
         envPairingPendingMax,
         cached.pairingPendingMax,
       ) || DEFAULT_PAIRING_PENDING_MAX,
-    pairingAllowFrom: firstToolAllow(overrides.pairingAllowFrom, envPairingAllowFrom, cached.pairingAllowFrom),
+    pairingAllowFrom: firstStringList(overrides.pairingAllowFrom, envPairingAllowFrom, cached.pairingAllowFrom),
   };
 }

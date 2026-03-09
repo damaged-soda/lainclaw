@@ -10,7 +10,6 @@ export type RunCtx = {
   profileId: string;
   sessionKey: string;
   withTools: boolean;
-  toolAllow: string[];
   memoryEnabled?: boolean;
   cwd?: string;
   emitEvent: CoreEventSink;

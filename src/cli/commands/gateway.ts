@@ -28,7 +28,6 @@ type GatewayCommonOptions = {
   provider?: string;
   profile?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   memory?: boolean;
   heartbeatEnabled?: boolean;
   heartbeatIntervalMs?: string;
@@ -55,7 +54,6 @@ type GatewayConfigOptions = {
   appId?: string;
   appSecret?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   memory?: boolean;
   heartbeatEnabled?: boolean;
   heartbeatIntervalMs?: string;
@@ -146,7 +144,6 @@ function parseFeishuGatewayConfigFromOptions(
     ...(profile ? { profileId: profile } : {}),
     ...(typeof options.withTools === 'boolean' ? { withTools: options.withTools } : {}),
     ...(typeof options.memory === 'boolean' ? { memory: options.memory } : {}),
-    ...(Array.isArray(options.toolAllow) && options.toolAllow.length > 0 ? { toolAllow: options.toolAllow } : {}),
     ...(parseOptionalString(options.appId) !== undefined ? { appId: parseOptionalString(options.appId)! } : {}),
     ...(parseOptionalString(options.appSecret) !== undefined ? { appSecret: parseOptionalString(options.appSecret)! } : {}),
     ...(requestTimeoutMs ? { requestTimeoutMs } : {}),
@@ -186,7 +183,6 @@ function parseLocalGatewayConfigFromOptions(options: GatewayCommonOptions): Gate
     ...(profile ? { profileId: profile } : {}),
     ...(typeof options.withTools === 'boolean' ? { withTools: options.withTools } : {}),
     ...(typeof options.memory === 'boolean' ? { memory: options.memory } : {}),
-    ...(Array.isArray(options.toolAllow) && options.toolAllow.length > 0 ? { toolAllow: options.toolAllow } : {}),
   };
 }
 
@@ -356,7 +352,6 @@ function addModelRuntimeOptions(command: Command, includeMemory: boolean): void 
     profileDescription: 'Model profile override.',
     withToolsDescription: 'Enable/disable tool calls.',
     noWithToolsDescription: 'Disable tool calls.',
-    toolAllowDescription: 'Limit allowed tool names.',
     ...(includeMemory
       ? {
         memoryDescription: includeMemory ? 'Enable/disable memory persistence.' : undefined,

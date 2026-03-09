@@ -19,13 +19,6 @@ export function parseOptionalBoolean(raw?: string): boolean {
   throw new Error(`Invalid value for boolean option: ${raw}`);
 }
 
-export function parseCsv(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
-
 export function parsePositiveInt(raw: string, label: string): number {
   const normalized = raw.trim();
   if (!/^\d+$/.test(normalized) || normalized.length === 0) {
@@ -54,10 +47,6 @@ export function buildNoWithToolsOption(description = 'Disable tool calls.'): Opt
   return new Option('--no-with-tools', description);
 }
 
-export function buildToolAllowOption(description = 'Limit allowed tool names.'): Option {
-  return new Option('--tool-allow <tools>', description).argParser(parseCsv);
-}
-
 export function buildBooleanValueOption(name: string, description: string): Option {
   return new Option(`--${name} [value]`, description).argParser(parseOptionalBoolean).default(undefined);
 }
@@ -79,7 +68,6 @@ export interface AddModelOptionsConfig {
   providerDescription?: string;
   profileDescription?: string;
   withToolsDescription?: string;
-  toolAllowDescription?: string;
   noWithToolsDescription?: string;
   memoryDescription?: string;
   noMemoryDescription?: string;
@@ -93,10 +81,8 @@ export function addModelOptions(
   command.addOption(buildProfileOption(options.profileDescription));
   command.addOption(buildWithToolsOption(options.withToolsDescription));
   command.addOption(buildNoWithToolsOption(options.noWithToolsDescription));
-  command.addOption(buildToolAllowOption(options.toolAllowDescription));
   if (options.includeMemory) {
     command.addOption(buildMemoryOption(options.memoryDescription));
     command.addOption(buildNoMemoryOption(options.noMemoryDescription));
   }
 }
-

@@ -15,7 +15,6 @@ interface FeishuRuntimeOptions {
   profileId?: string;
   withTools?: boolean;
   memory?: boolean;
-  toolAllow?: string[];
 }
 
 function normalizeFeishuOverrides(overrides: unknown): Partial<FeishuGatewayConfig> {
@@ -36,7 +35,6 @@ function buildRunInboundRuntime(config: FeishuGatewayConfig): FeishuRuntimeOptio
     profileId: config.profileId,
     withTools: config.withTools,
     memory: config.memory,
-    toolAllow: config.toolAllow,
   };
 }
 

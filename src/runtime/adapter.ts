@@ -53,7 +53,6 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
         const { adapter: adapterResult } = await runRuntime({
           requestContext: requestContext.requestContext,
           withTools: input.withTools,
-          toolAllow: input.toolAllow,
           ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
           ...(Array.isArray(input.tools) ? { toolSpecs: toCoreContextTools(input.tools) } : {}),
         });

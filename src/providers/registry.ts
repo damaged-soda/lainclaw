@@ -8,7 +8,6 @@ export interface ProviderRunInput {
   requestContext: RequestContext;
   route: string;
   withTools: boolean;
-  toolAllow: string[];
   cwd?: string;
   toolSpecs?: ContextToolSpec[];
 }

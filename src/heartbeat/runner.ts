@@ -55,7 +55,6 @@ interface HeartbeatRunLogEntry {
   provider?: string;
   profileId?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   rawDecision?: string;
   parsedDecision?: HeartbeatRuleDecision["decision"];
   parseError?: string;
@@ -69,7 +68,6 @@ export interface HeartbeatRunOptions {
   provider?: string;
   profileId?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   sessionKey?: string;
   workspaceDir?: string;
   memory?: boolean;
@@ -296,7 +294,6 @@ interface RuleAgentRuntimeInput {
   provider?: string;
   profileId?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   memory?: boolean;
   cwd?: string;
 }
@@ -319,7 +316,6 @@ function buildRuleAgentInput(
       provider: options.provider ?? rule.provider,
       profileId: options.profileId ?? rule.profileId,
       withTools: options.withTools ?? rule.withTools,
-      toolAllow: options.toolAllow ?? rule.toolAllow,
       memory: options.memory,
       cwd: workspaceDir,
     },
@@ -368,7 +364,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         provider: resolveText(options.provider) || rule.provider,
         profileId: resolveText(options.profileId) || rule.profileId,
         withTools: typeof options.withTools === "boolean" ? options.withTools : rule.withTools,
-        toolAllow: options.toolAllow,
         parsedDecision: "skip",
         status: skippedResult.status,
         reason: skippedResult.reason,
@@ -402,7 +397,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         provider: invocation.runtime.provider,
         profileId: invocation.runtime.profileId,
         withTools: invocation.runtime.withTools,
-        toolAllow: invocation.runtime.toolAllow,
         rawDecision: resolveLogPayloadLimit(reply ?? ""),
         parsedDecision: parsed.decision,
         parseError: parsed.parseError,
@@ -435,8 +429,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           provider: invocation.runtime.provider,
           profileId: invocation.runtime.profileId,
           withTools: invocation.runtime.withTools,
-          toolAllow: invocation.runtime.toolAllow,
-        rawDecision: resolveLogPayloadLimit(reply ?? ""),
+          rawDecision: resolveLogPayloadLimit(reply ?? ""),
           parsedDecision: parsed.decision,
           status: triggeredResult.status,
           reason: triggeredResult.message || triggeredResult.decisionRaw,
@@ -478,11 +471,10 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
               provider: invocation.runtime.provider,
               profileId: invocation.runtime.profileId,
               withTools: invocation.runtime.withTools,
-              toolAllow: invocation.runtime.toolAllow,
               parsedDecision: "error",
               status: erroredResult.status,
               reason: failure,
-            rawDecision: resolveLogPayloadLimit(reply ?? ""),
+              rawDecision: resolveLogPayloadLimit(reply ?? ""),
               message: parsed.message,
               sessionKey: invocation.sessionKey,
             });
@@ -517,8 +509,7 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
           provider: invocation.runtime.provider,
           profileId: invocation.runtime.profileId,
           withTools: invocation.runtime.withTools,
-          toolAllow: invocation.runtime.toolAllow,
-            rawDecision: resolveLogPayloadLimit(reply ?? ""),
+          rawDecision: resolveLogPayloadLimit(reply ?? ""),
           parsedDecision: parsed.decision,
           parseError: parsed.parseError,
           status: skippedResult.status,
@@ -552,7 +543,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         provider: invocation.runtime.provider,
         profileId: invocation.runtime.profileId,
         withTools: invocation.runtime.withTools,
-        toolAllow: invocation.runtime.toolAllow,
         rawDecision: "",
         parsedDecision: "error",
         status: erroredResult.status,
@@ -584,7 +574,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
         provider: invocation.runtime.provider,
         profileId: invocation.runtime.profileId,
         withTools: invocation.runtime.withTools,
-        toolAllow: invocation.runtime.toolAllow,
         parsedDecision: "error",
         status: erroredResult.status,
         reason: erroredResult.reason,
@@ -601,7 +590,6 @@ export async function runHeartbeatOnce(options: HeartbeatRunOptions = {}): Promi
     provider: resolveText(options.provider),
     profileId: resolveText(options.profileId),
     withTools: typeof options.withTools === "boolean" ? options.withTools : undefined,
-    toolAllow: options.toolAllow,
     status: summary.errors > 0 ? "errored" : summary.triggered > 0 ? "triggered" : "skipped",
     reason: `total=${summary.total} evaluated=${summary.evaluated} triggered=${summary.triggered} skipped=${summary.skipped} errors=${summary.errors}`,
   });

@@ -13,7 +13,6 @@ export interface AgentCommandInput {
   newSession?: boolean;
   memory?: boolean;
   withTools?: boolean;
-  toolAllow?: string[];
 }
 
 export async function runAgentCommand(input: AgentCommandInput): Promise<number> {
@@ -32,7 +31,6 @@ export async function runAgentCommand(input: AgentCommandInput): Promise<number>
         newSession: input.newSession,
         memory: input.memory,
         withTools: input.withTools,
-        toolAllow: input.toolAllow,
       },
     });
 
@@ -62,7 +60,6 @@ interface AgentOptions {
   newSession?: boolean;
   memory?: boolean;
   withTools?: boolean;
-  toolAllow?: string[];
 }
 
 function normalizeInput(input: string[]): string {
@@ -95,7 +92,6 @@ export function buildAgentCommand(program: Command): Command {
         ...(parsed.newSession === true ? { newSession: true } : {}),
         ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
         ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
-        ...(Array.isArray(parsed.toolAllow) ? { toolAllow: parsed.toolAllow } : {}),
       });
       setExitCode(command, code);
     });
@@ -105,7 +101,6 @@ export function buildAgentCommand(program: Command): Command {
     profileDescription: 'Select provider profile.',
     withToolsDescription: 'Enable/disable tool calls.',
     noWithToolsDescription: 'Disable tool calls.',
-    toolAllowDescription: 'Limit allowed tool names (comma-separated).',
     includeMemory: true,
     memoryDescription: 'Enable/disable memory persistence for this call.',
     noMemoryDescription: 'Disable memory persistence for this call.',

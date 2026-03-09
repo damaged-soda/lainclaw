@@ -7,12 +7,12 @@ import { setExitCode } from '../shared/exitCode.js';
 
 export type HeartbeatCommandInput =
   | { kind: 'init'; force?: boolean; templatePath?: string }
-  | { kind: 'add'; ruleText: string; provider?: string; profileId?: string; withTools?: boolean; toolAllow?: string[] }
+  | { kind: 'add'; ruleText: string; provider?: string; profileId?: string; withTools?: boolean }
   | { kind: 'list' }
   | { kind: 'remove'; ruleId: string }
   | { kind: 'enable'; ruleId: string }
   | { kind: 'disable'; ruleId: string }
-  | { kind: 'run'; provider?: string; profileId?: string; withTools?: boolean; toolAllow?: string[]; memory?: boolean };
+  | { kind: 'run'; provider?: string; profileId?: string; withTools?: boolean; memory?: boolean };
 
 export async function runHeartbeatCommand(parsed: HeartbeatCommandInput): Promise<number> {
   return runCommand(async () => {
@@ -40,7 +40,6 @@ export async function runHeartbeatCommand(parsed: HeartbeatCommandInput): Promis
         ruleText: parsed.ruleText,
         ...(parsed.provider ? { provider: parsed.provider } : {}),
         ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
-        ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
         ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
       });
       console.log(`Added heartbeat rule: ${rule.id}`);
@@ -79,7 +78,6 @@ export async function runHeartbeatCommand(parsed: HeartbeatCommandInput): Promis
       ...(parsed.provider ? { provider: parsed.provider } : {}),
       ...(parsed.profileId ? { profileId: parsed.profileId } : {}),
       ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
-      ...(parsed.toolAllow ? { toolAllow: parsed.toolAllow } : {}),
       ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
     });
     console.log(JSON.stringify(summary, null, 2));
@@ -91,7 +89,6 @@ interface HeartbeatRuleOptions {
   provider?: string;
   profile?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   memory?: boolean;
 }
 
@@ -136,7 +133,6 @@ export function buildHeartbeatCommand(program: Command): Command {
         ...(options.provider ? { provider: options.provider } : {}),
         ...(options.profile ? { profileId: options.profile } : {}),
         ...(typeof options.withTools === 'boolean' ? { withTools: options.withTools } : {}),
-        ...(Array.isArray(options.toolAllow) ? { toolAllow: options.toolAllow } : {}),
       };
       const code = await runHeartbeatCommand(parsed);
       setExitCode(command, code);
@@ -182,7 +178,6 @@ export function buildHeartbeatCommand(program: Command): Command {
         ...(options.provider ? { provider: options.provider } : {}),
         ...(options.profile ? { profileId: options.profile } : {}),
         ...(typeof options.withTools === 'boolean' ? { withTools: options.withTools } : {}),
-        ...(Array.isArray(options.toolAllow) ? { toolAllow: options.toolAllow } : {}),
         ...(typeof options.memory === 'boolean' ? { memory: options.memory } : {}),
       };
       setExitCode(command, await runHeartbeatCommand(parsed));
@@ -193,7 +188,6 @@ export function buildHeartbeatCommand(program: Command): Command {
     profileDescription: 'Provider profile override.',
     withToolsDescription: 'Enable/disable tool calls.',
     noWithToolsDescription: 'Disable tool calls.',
-    toolAllowDescription: 'Limit allowed tool names (comma-separated).',
   });
 
   addModelOptions(run, {
@@ -202,7 +196,6 @@ export function buildHeartbeatCommand(program: Command): Command {
     profileDescription: 'Provider profile override.',
     withToolsDescription: 'Enable/disable tool calls.',
     noWithToolsDescription: 'Disable tool calls.',
-    toolAllowDescription: 'Limit allowed tool names (comma-separated).',
     memoryDescription: 'Enable/disable memory usage in heartbeat run.',
     noMemoryDescription: 'Disable memory usage in heartbeat run.',
   });

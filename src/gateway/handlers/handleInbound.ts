@@ -15,7 +15,6 @@ interface AgentRuntimeContext {
   provider?: string;
   profileId?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   memory?: boolean;
 }
 
@@ -107,7 +106,6 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
       provider: params.runtime.provider,
       profileId: params.runtime.profileId,
       withTools: params.runtime.withTools,
-      toolAllow: params.runtime.toolAllow,
       memory: params.runtime.memory,
     },
   });

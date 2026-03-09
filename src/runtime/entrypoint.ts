@@ -9,7 +9,6 @@ import type { ProviderResult } from "../providers/stubAdapter.js";
 export interface RuntimeOptions {
   requestContext: ProviderRunInput["requestContext"];
   withTools: boolean;
-  toolAllow: string[];
   cwd?: string;
   toolSpecs?: ProviderRunInput["toolSpecs"];
 }
@@ -26,7 +25,6 @@ export async function runRuntime(input: RuntimeOptions): Promise<RuntimeResult> 
     requestContext,
     route,
     withTools: input.withTools,
-    toolAllow: input.toolAllow,
     ...(typeof input.cwd === "string" ? { cwd: path.resolve(input.cwd) } : {}),
     ...(Array.isArray(input.toolSpecs) ? { toolSpecs: input.toolSpecs } : {}),
   };

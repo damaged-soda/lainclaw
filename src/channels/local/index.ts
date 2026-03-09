@@ -12,7 +12,6 @@ interface LocalGatewayOverrides {
   profileId?: string;
   withTools?: boolean;
   memory?: boolean;
-  toolAllow?: string[];
 }
 
 function normalizeLocalOverrides(raw: unknown): LocalGatewayOverrides {
@@ -26,7 +25,6 @@ function buildRunInboundRuntime(overrides: LocalGatewayOverrides): {
   provider?: string;
   profileId?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   memory?: boolean;
 } {
   return {
@@ -34,7 +32,6 @@ function buildRunInboundRuntime(overrides: LocalGatewayOverrides): {
     profileId: overrides.profileId,
     withTools: overrides.withTools,
     memory: overrides.memory,
-    toolAllow: overrides.toolAllow,
   };
 }
 

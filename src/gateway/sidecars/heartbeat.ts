@@ -10,7 +10,6 @@ interface HeartbeatSidecarInput {
   provider?: string;
   profileId?: string;
   withTools?: boolean;
-  toolAllow?: string[];
   memory?: boolean;
   sessionKey?: string;
   targetReplyTo?: string;
@@ -49,7 +48,6 @@ export function startHeartbeatSidecar(
     provider: input.provider,
     ...(typeof input.profileId === 'string' && input.profileId.trim() ? { profileId: input.profileId.trim() } : {}),
     withTools: input.withTools,
-    ...(Array.isArray(input.toolAllow) ? { toolAllow: input.toolAllow } : {}),
     memory: input.memory,
     sessionKey: input.sessionKey,
     onSummary: (summary: HeartbeatRunSummary) => {

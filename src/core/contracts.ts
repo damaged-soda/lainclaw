@@ -75,12 +75,8 @@ export interface CoreToolContext {
   signal?: AbortSignal;
 }
 
-export interface CoreToolQueryOptions {
-  allowList?: string[];
-}
-
 export interface CoreToolsPort {
-  listTools(options?: CoreToolQueryOptions): CoreToolSpec[];
+  listTools(): CoreToolSpec[];
   executeTool(call: CoreToolCall, context: CoreToolContext): Promise<CoreToolExecutionLog>;
   firstToolErrorFromLogs(logs: CoreToolExecutionLog[] | undefined): CoreToolError | undefined;
 }
@@ -155,7 +151,6 @@ export interface CoreRunAgentOptions {
   newSession?: boolean;
   memory?: boolean;
   withTools: boolean;
-  toolAllow: string[];
   cwd?: string;
 }
 
@@ -170,7 +165,6 @@ export interface CoreRuntimeInput {
   provider: string;
   profileId: string;
   withTools: boolean;
-  toolAllow: string[];
   tools?: CoreContextToolSpec[];
   systemPrompt?: string;
   memoryEnabled?: boolean;

@@ -14,7 +14,6 @@ interface RunAgentRuntimeContext {
   provider?: unknown;
   profileId?: unknown;
   withTools?: unknown;
-  toolAllow?: unknown;
   newSession?: unknown;
   memory?: unknown;
   cwd?: unknown;
@@ -32,7 +31,6 @@ interface NormalizedRunAgentInput {
   profileId: string;
   sessionKey: string;
   withTools: boolean;
-  toolAllow: string[];
   newSession?: boolean;
   memory?: boolean;
   cwd?: string;
@@ -55,7 +53,6 @@ async function runAgentCore(input: string, request: RunAgentRequest): Promise<Ru
     profileId: invocation.profileId,
     sessionKey: invocation.sessionKey,
     withTools: invocation.withTools,
-    toolAllow: invocation.toolAllow,
     ...(typeof invocation.newSession === "boolean" ? { newSession: invocation.newSession } : {}),
     ...(typeof invocation.memory === "boolean" ? { memory: invocation.memory } : {}),
     ...(typeof invocation.cwd === "string" ? { cwd: invocation.cwd } : {}),
@@ -83,23 +80,12 @@ function trimOrUndefined(raw: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function normalizeToolAllow(raw: unknown): string[] | undefined {
-  if (!Array.isArray(raw)) {
-    return undefined;
-  }
-  const values = raw
-    .map((value) => (typeof value === "string" ? value.trim() : ""))
-    .filter((value) => value.length > 0);
-  return values.length > 0 ? values : undefined;
-}
-
 function normalizeRunAgentInput(input: RunAgentRuntimeContext, sessionKey?: unknown): NormalizedRunAgentInput {
   return {
     provider: trimOrUndefined(input.provider) || "",
     profileId: trimOrUndefined(input.profileId) || "",
     sessionKey: trimOrUndefined(sessionKey) || "main",
     withTools: typeof input.withTools === "boolean" ? input.withTools : true,
-    toolAllow: normalizeToolAllow(input.toolAllow) || [],
     ...(typeof input.newSession === "boolean" ? { newSession: input.newSession } : {}),
     ...(typeof input.memory === "boolean" ? { memory: input.memory } : {}),
     ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),

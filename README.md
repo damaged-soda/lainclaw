@@ -147,11 +147,10 @@ npm start -- gateway config set --channel feishu --app-id <AppID> --app-secret <
 可选参数：
 
 - `--request-timeout-ms <ms>`：飞书 API 请求超时（默认 10000）
- - `--provider <provider>`：模型提供商，按 runtime 配置路由到对应适配器
+- `--provider <provider>`：模型提供商，按 runtime 配置路由到对应适配器
 - `--profile <profileId>`：使用指定登录 Profile，若不提供可使用当前 active profile
-- `--with-tools` / `--no-with-tools`：是否允许模型发起 tool-call（默认打开）
+- `--with-tools` / `--no-with-tools`：是否允许模型发起 tool-call；开启时默认所有内置工具都可用
 - `--memory` / `--no-memory`：是否启用会话记忆摘要合并（默认关闭）
-- `--tool-allow <tool1,tool2>`：限制允许的工具白名单（默认允许所有内置工具，`gateway.json` 不配置则等于放开全部）
 示例（10秒超时）：
 
 ```bash
@@ -193,7 +192,6 @@ rm ~/.lainclaw/<channel>-gateway.json
 - `LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS` / `FEISHU_REQUEST_TIMEOUT_MS`
 - `LAINCLAW_FEISHU_PROVIDER` / `FEISHU_PROVIDER`：运行时 provider 标识（默认不回退）
 - `LAINCLAW_FEISHU_PROFILE_ID` / `FEISHU_PROFILE_ID`
-- `LAINCLAW_FEISHU_TOOL_ALLOW` / `FEISHU_TOOL_ALLOW`（逗号分隔）
 - `LAINCLAW_FEISHU_WITH_TOOLS` / `FEISHU_WITH_TOOLS`：`true|false`
 - `LAINCLAW_FEISHU_MEMORY` / `FEISHU_MEMORY`：`true|false`
 - `LAINCLAW_FEISHU_HEARTBEAT_ENABLED` / `FEISHU_HEARTBEAT_ENABLED`：`true|false`

@@ -7,7 +7,6 @@ import type { ProviderRunInput } from "./registry.js";
 import type { ProviderResult } from "./stubAdapter.js";
 import type { ToolCall, ToolExecutionLog, ToolError } from "../tools/types.js";
 import { buildRuntimeToolNameMap, createToolAdapter, resolveTools } from "../tools/runtimeTools.js";
-import { isToolAllowed } from "../tools/registry.js";
 import { executeTool } from "../tools/executor.js";
 import { createToolCallId } from "../shared/ids.js";
 import { resolveBooleanFlag } from "../shared/envFlags.js";
@@ -69,7 +68,6 @@ export async function runCodexAdapter(input: ProviderRunInput): Promise<Provider
   const requestId = requestContext.requestId;
   const toolSpecs = resolveTools(input.toolSpecs, input.withTools);
   const cwd = path.resolve(input.cwd || process.cwd());
-  const toolAllow = Array.isArray(input.toolAllow) ? input.toolAllow : [];
   const toolNameMap = buildRuntimeToolNameMap(toolSpecs);
   const toolState = createToolExecutionState();
   const canonicalByCodexName = toolNameMap.canonicalByCodex;
@@ -80,12 +78,6 @@ export async function runCodexAdapter(input: ProviderRunInput): Promise<Provider
       id: toolCall.id || createToolCallId(toolCall.name || "unknown"),
       source: "agent-runtime",
     };
-
-    if (!isToolAllowed(resolvedCall.name, toolAllow)) {
-      const blocked = buildToolErrorLog(resolvedCall, `tool not allowed: ${resolvedCall.name}`);
-      toolState.record(blocked);
-      return blocked;
-    }
 
     const startedAt = Date.now();
     try {

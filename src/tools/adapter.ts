@@ -1,5 +1,5 @@
 import { executeTool as executeToolInternal } from "./executor.js";
-import { listTools as listToolsInternal, type ToolQueryOptions } from "./registry.js";
+import { listTools as listToolsInternal } from "./registry.js";
 import { firstToolErrorFromLogs as firstToolErrorFromLogsInternal } from "./runtimeTools.js";
 import type {
   CoreToolCall,
@@ -90,9 +90,9 @@ function normalizeToolError(error: unknown): ValidationError {
 
 export function createToolsAdapter(): CoreToolsPort {
   return {
-    listTools: (options?: ToolQueryOptions): CoreToolSpec[] => {
+    listTools: (): CoreToolSpec[] => {
       try {
-        return listToolsInternal(options).map(toCoreToolSpec);
+        return listToolsInternal().map(toCoreToolSpec);
       } catch (error) {
         throw normalizeToolError(error);
       }

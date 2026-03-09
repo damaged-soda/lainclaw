@@ -40,7 +40,7 @@ export async function buildTurnContext(
     session.sessionKey,
     "TOOL_FAILURE",
     ctx.emitEvent,
-    () => ctx.toolsAdapter.listTools({ allowList: ctx.toolAllow }),
+    () => ctx.toolsAdapter.listTools(),
   );
 
   return { memorySnippet, priorMessages, tools };
@@ -246,7 +246,6 @@ async function runRuntimeForTurn(
         provider: ctx.provider,
         profileId: ctx.profileId,
         withTools: ctx.withTools,
-        toolAllow: ctx.toolAllow,
         tools: turnContext.tools,
         ...(session.memoryEnabled ? { memoryEnabled: session.memoryEnabled } : {}),
         ...(typeof ctx.cwd === "string" ? { cwd: ctx.cwd } : {}),
