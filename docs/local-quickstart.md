@@ -116,11 +116,11 @@ cat ~/.lainclaw/local-gateway/local-gateway-outbox.jsonl
 ### 4.3 工具调用
 - 在 local 模式下发送：
 ```json
-{"input":"tool:time.now","sessionKey":"local:demo","requestId":"t-tool"}
+{"input":"tool:read {\"path\":\"README.md\",\"limit\":20}","sessionKey":"local:demo","requestId":"t-tool-read"}
 ```
 - 与：
 ```json
-{"input":"tool:fs.pwd","sessionKey":"local:demo","requestId":"t-tool-pwd"}
+{"input":"tool:exec {\"command\":\"pwd\",\"yieldMs\":1000}","sessionKey":"local:demo","requestId":"t-tool-exec"}
 ```
 - 应有 outbox 记录，`output` 为响应文本；如需调试工具调用，需查看运行日志或会话记录中的工具摘要。
 

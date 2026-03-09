@@ -1,18 +1,16 @@
-import { echoTool } from "./echo.js";
-import { listDirTool } from "./listDir.js";
-import { editFileTool } from "./editFile.js";
-import { pwdTool } from "./pwd.js";
-import { readFileTool } from "./readFile.js";
-import { writeFileTool } from "./writeFile.js";
-import { timeNowTool } from "./timeNow.js";
+import { applyPatchTool } from "./applyPatch.js";
+import { editTool } from "./edit.js";
+import { execTool } from "./exec.js";
+import { processTool } from "./process.js";
+import { readTool } from "./read.js";
+import { writeTool } from "./write.js";
 import type { ToolSpec } from "../types.js";
 
 export const builtinTools: ToolSpec[] = [
-  timeNowTool,
-  echoTool,
-  pwdTool,
-  listDirTool,
-  editFileTool,
-  readFileTool,
-  writeFileTool,
+  readTool,
+  writeTool,
+  editTool,
+  applyPatchTool,
+  execTool,
+  processTool,
 ];

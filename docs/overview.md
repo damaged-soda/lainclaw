@@ -21,7 +21,7 @@
 - `sessions/sessionService`：会话、记忆与 transcript 持久化服务边界，统一封装 `src/sessions/sessionStore.ts` 文件落盘细节；`runtime` 只关注会话上下文拼装与执行编排，不直接持有文件路径和目录细节。
 - 会话持久化：会话索引与消息仍按 `~/.lainclaw` 目录记录（`sessions.json`、`<sessionId>.jsonl`、`memory/<sessionKey>.md`）。
 - 配置管理：网关参数和工具参数集中到配置文件。
-- 工具调用：内置文件读写/时间/目录等工具。
+- 工具调用：内置 `read` / `write` / `edit` / `apply_patch` / `exec` / `process` 六类工具。
 - 长期记忆：支持可选 compact（压缩）与 memory 文件。
 - 单次执行策略：每次请求在单次会话内完成 tool-call 循环，不依赖运行态中间状态恢复。
 - 心跳：定时触发规则的轻量运行任务。
