@@ -154,7 +154,7 @@ function makeRequestContext(overrides: Partial<RequestContext>): RequestContext 
     input: "latest input",
     sessionKey: "phase3-session",
     sessionId: "phase3-session-id",
-    transcriptMessages: [],
+    bootstrapMessages: [],
     contextMessageLimit: 12,
     provider: "openai-codex",
     profileId: "default",
@@ -324,7 +324,7 @@ test("older snapshot versions are ignored instead of being partially cleaned", a
         input: "new prompt",
         sessionKey: "phase3-legacy-snapshot",
         sessionId: "phase3-legacy-snapshot-id",
-        transcriptMessages: [makeUserMessage("transcript bootstrap")],
+        bootstrapMessages: [makeUserMessage("transcript bootstrap")],
       }),
     });
 
@@ -355,7 +355,7 @@ test("transformContext trims long transcript fallback to the configured context 
         input: "latest input",
         sessionKey: "phase3-trim",
         sessionId: "phase3-trim-id",
-        transcriptMessages: transcriptMessages.map((message) => makeUserMessage(message.content)),
+        bootstrapMessages: transcriptMessages.map((message) => makeUserMessage(message.content)),
       }),
     });
 
@@ -410,7 +410,7 @@ test("memory is injected only through transformContext and snapshot state wins o
         input: "follow up",
         sessionKey: "phase3-memory",
         sessionId: "phase3-memory-id",
-        transcriptMessages: [makeUserMessage("transcript fallback")],
+        bootstrapMessages: [makeUserMessage("transcript fallback")],
         memorySnippet: "fresh summary",
       }),
     });
@@ -432,5 +432,44 @@ test("memory is injected only through transformContext and snapshot state wins o
     assert.equal(persistedMemoryMessages.length, 0);
     assert.ok(transformedText.includes("snapshot user"));
     assert.ok(!transformedText.includes("transcript fallback"));
+  });
+});
+
+test("reused session agents clear stale optional context fields between turns", async () => {
+  await withTempHome(async () => {
+    const { createdAgents, runCodexAdapter } = await createPhase3Harness();
+
+    await runCodexAdapter({
+      route: "adapter.openai-codex",
+      withTools: false,
+      requestContext: makeRequestContext({
+        input: "first follow up",
+        sessionKey: "phase3-stale-context",
+        sessionId: "phase3-stale-context-id",
+        memorySnippet: "first summary",
+      }),
+    });
+
+    await runCodexAdapter({
+      route: "adapter.openai-codex",
+      withTools: false,
+      requestContext: makeRequestContext({
+        input: "second follow up",
+        sessionKey: "phase3-stale-context",
+        sessionId: "phase3-stale-context-id",
+      }),
+    });
+
+    const transformedContexts = createdAgents[0]?.transformedContexts ?? [];
+    const firstMemoryMessages = transformedContexts[0]?.filter(
+      (message) => message.role === "context_memory" && message.content === "first summary",
+    ) ?? [];
+    const secondMemoryMessages = transformedContexts[1]?.filter(
+      (message) => message.role === "context_memory",
+    ) ?? [];
+
+    assert.equal(createdAgents.length, 1);
+    assert.equal(firstMemoryMessages.length, 1);
+    assert.equal(secondMemoryMessages.length, 0);
   });
 });

@@ -19,8 +19,6 @@ import type {
   CoreSessionRecord,
   CoreSessionSnapshotCompact,
   CoreSessionTurnResult,
-  CoreToolCall,
-  CoreToolExecutionLog,
 } from "../core/contracts.js";
 import type { SessionHistoryMessage } from "../shared/types.js";
 
@@ -43,42 +41,6 @@ function toCoreHistoryMessage(item: SessionHistoryMessage): CoreSessionHistoryMe
     timestamp: item.timestamp,
     content: item.content,
   };
-}
-
-function buildToolMessages(calls: CoreToolCall[], results: CoreToolExecutionLog[]): string {
-  const resultById = new Map<string, CoreToolExecutionLog>();
-  const resultByName = new Map<string, CoreToolExecutionLog>();
-
-  for (const result of results) {
-    resultById.set(result.call.id, result);
-    if (!resultByName.has(result.call.name)) {
-      resultByName.set(result.call.name, result);
-    }
-  }
-
-  const normalized = calls.map((call) => {
-    const matched = resultById.get(call.id) || resultByName.get(call.name);
-    if (!matched) {
-      return {
-        call,
-        result: {
-          ok: false,
-          error: {
-            code: "execution_error",
-            tool: call.name,
-            message: "tool result missing",
-          },
-        },
-      };
-    }
-
-    return {
-      call: matched.call,
-      result: matched.result,
-    };
-  });
-
-  return JSON.stringify(normalized, null, 2);
 }
 
 function nowIso(): string {
@@ -110,7 +72,7 @@ function randomId(prefix: string): string {
 
 async function appendRuntimeMessage(
   sessionId: string,
-  role: "user" | "assistant" | "system",
+  role: "user" | "assistant",
   content: string,
   context: CoreSessionTurnResult,
   messageIdPrefix: string,
@@ -164,35 +126,6 @@ export function createSessionAdapter(): CoreSessionPort {
           await appendRuntimeMessage(sessionId, "user", userInput, finalResult, "msg-user");
         }
         await appendRuntimeMessage(sessionId, "assistant", finalResult.result, finalResult, "msg-assistant");
-      });
-    },
-    appendToolSummary: async (
-      sessionId: string,
-      toolCalls: CoreToolCall[],
-      toolResults: CoreToolExecutionLog[],
-      route: string,
-      stage: string,
-      provider: string,
-      profileId: string,
-    ): Promise<void> => {
-      await runWithSessionFailure(async () => {
-        if (toolResults.length === 0) {
-          return;
-        }
-        const summary = buildToolMessages(toolCalls, toolResults);
-        await appendRuntimeMessage(
-          sessionId,
-          "system",
-          `toolResults:\n${summary}`,
-          {
-            route,
-            stage,
-            result: "tool summary",
-            provider,
-            profileId,
-          },
-          "msg-tool-context",
-        );
       });
     },
     markRouteUsage: (sessionKey: string, route: string, profileId: string, provider: string): Promise<void> => {

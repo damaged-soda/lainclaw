@@ -29,7 +29,7 @@ declare module "@mariozechner/pi-agent-core" {
 
 interface RuntimeContextMessages {
   requestContext: RequestContext;
-  transcriptMessages: Message[];
+  bootstrapMessages: Message[];
   promptMessage?: Message;
 }
 
@@ -103,7 +103,7 @@ export function buildRuntimeRequestContext(params: {
   input: string;
   sessionKey: string;
   sessionId: string;
-  transcriptMessages: SessionHistoryMessage[];
+  bootstrapMessages: SessionHistoryMessage[];
   memorySnippet?: string;
   provider: string;
   profileId: string;
@@ -122,20 +122,21 @@ export function buildRuntimeRequestContext(params: {
     1,
     params.contextMessageLimit ?? DEFAULT_CONTEXT_MESSAGE_LIMIT,
   );
-  const transcriptMessages = contextMessagesFromHistory(
-    trimTranscriptMessages(params.transcriptMessages, contextMessageLimit),
+  const bootstrapMessages = contextMessagesFromHistory(
+    trimTranscriptMessages(params.bootstrapMessages, contextMessageLimit),
     provider,
   );
   const runMode = params.runMode ?? "prompt";
 
-  if (transcriptMessages.length > 0) {
-    writeDebugLogIfEnabled(params.debug, "runtime.context.transcript_attached", {
+  if (bootstrapMessages.length > 0) {
+    writeDebugLogIfEnabled(params.debug, "runtime.context.bootstrap_attached", {
       requestId: params.requestId,
       sessionKey: params.sessionKey,
       provider,
       profileId: params.profileId,
-      count: transcriptMessages.length,
-      messages: transcriptMessages,
+      source: "transcript",
+      count: bootstrapMessages.length,
+      messages: bootstrapMessages,
     });
   }
 
@@ -166,7 +167,7 @@ export function buildRuntimeRequestContext(params: {
     params.input,
     params.sessionKey,
     params.sessionId,
-    transcriptMessages,
+    bootstrapMessages,
     provider,
     params.profileId,
     resolvedTools,
@@ -198,7 +199,7 @@ export function buildRuntimeRequestContext(params: {
     requestContext,
   });
 
-  return { requestContext, transcriptMessages, promptMessage };
+  return { requestContext, bootstrapMessages, promptMessage };
 }
 
 function nowTs() {
@@ -333,7 +334,7 @@ export function makeBaseRequestContext(
   input: string,
   sessionKey: string,
   sessionId: string,
-  transcriptMessages: Message[],
+  bootstrapMessages: Message[],
   provider: string,
   profileId: string,
   tools?: ContextToolSpec[],
@@ -351,9 +352,9 @@ export function makeBaseRequestContext(
     input,
     sessionKey,
     sessionId,
-    transcriptMessages,
+    ...(bootstrapMessages.length > 0 ? { bootstrapMessages } : {}),
     ...(typeof memorySnippet === "string" && memorySnippet.length > 0 ? { memorySnippet } : {}),
-    contextMessageLimit,
+    ...(contextMessageLimit !== DEFAULT_CONTEXT_MESSAGE_LIMIT ? { contextMessageLimit } : {}),
     provider,
     profileId,
     runMode,

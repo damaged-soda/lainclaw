@@ -50,7 +50,7 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
           input: input.input,
           sessionKey: input.sessionKey,
           sessionId: input.sessionId,
-          transcriptMessages: input.transcriptMessages,
+          bootstrapMessages: input.bootstrapMessages,
           memorySnippet: input.memorySnippet,
           runMode: input.runMode,
           continueReason: input.continueReason,

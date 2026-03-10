@@ -156,7 +156,7 @@ function makeRequestContext(overrides: Partial<RequestContext>): RequestContext 
     input: "prompt",
     sessionKey: "event-session",
     sessionId: "event-session-id",
-    transcriptMessages: [],
+    bootstrapMessages: [],
     contextMessageLimit: 12,
     provider: "openai-codex",
     profileId: "default",

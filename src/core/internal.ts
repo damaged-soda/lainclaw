@@ -24,6 +24,6 @@ export type RunCtx = {
 
 export type TurnContext = {
   memorySnippet: string;
-  transcriptMessages: CoreSessionHistoryMessage[];
+  bootstrapMessages: CoreSessionHistoryMessage[];
   tools: ReturnType<CoreToolsAdapter["listTools"]>;
 };

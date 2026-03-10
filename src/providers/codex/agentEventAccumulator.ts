@@ -14,8 +14,6 @@ export interface CodexAgentEventAccumulator {
   readonly toolError: ToolError | undefined;
   readonly finalMessage: Message | undefined;
   readonly stopReason: string | undefined;
-  readonly hasToolCallEvents: boolean;
-  readonly hasToolResultEvents: boolean;
   consume(event: AgentEvent): void;
 }
 
@@ -39,6 +37,18 @@ function normalizeToolName(rawName: string, canonicalByCodexName: Map<string, st
     return normalized;
   }
   return canonicalByCodexName.get(normalized) ?? normalized;
+}
+
+function normalizeToolArgs(rawArgs: unknown): unknown {
+  if (typeof rawArgs !== "string") {
+    return rawArgs;
+  }
+
+  try {
+    return JSON.parse(rawArgs);
+  } catch {
+    return rawArgs;
+  }
 }
 
 function normalizeTextContent(raw: unknown): string | undefined {
@@ -158,6 +168,46 @@ function findLastAssistantMessage(messages: AgentMessage[]): Message | undefined
   return undefined;
 }
 
+function extractToolCallsFromAssistantMessage(
+  message: AgentMessage | undefined,
+  canonicalByCodexName: Map<string, string>,
+  provider: string,
+): ToolCall[] {
+  if (!isAssistantMessage(message) || !Array.isArray(message.content)) {
+    return [];
+  }
+
+  return message.content.flatMap((block) => {
+    if (!block || typeof block !== "object") {
+      return [];
+    }
+
+    const candidate = block as {
+      type?: unknown;
+      id?: unknown;
+      name?: unknown;
+      arguments?: unknown;
+    };
+
+    if (candidate.type !== "toolCall" && candidate.type !== "tool_call") {
+      return [];
+    }
+
+    const rawId = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    const rawName = typeof candidate.name === "string" ? candidate.name.trim() : "";
+    if (!rawId || !rawName) {
+      return [];
+    }
+
+    return [{
+      id: rawId,
+      name: normalizeToolName(rawName, canonicalByCodexName),
+      args: normalizeToolArgs(candidate.arguments),
+      source: provider,
+    }];
+  });
+}
+
 export function createCodexAgentEventAccumulator(
   options: CreateCodexAgentEventAccumulatorOptions,
 ): CodexAgentEventAccumulator {
@@ -171,8 +221,6 @@ export function createCodexAgentEventAccumulator(
   let toolError: ToolError | undefined;
   let finalMessage: Message | undefined;
   let stopReason: string | undefined;
-  let hasToolCallEvents = false;
-  let hasToolResultEvents = false;
 
   function upsertToolCall(call: ToolCall): ToolCall {
     const existingIndex = toolCallIndexById.get(call.id);
@@ -214,13 +262,21 @@ export function createCodexAgentEventAccumulator(
     if (log.result.error) {
       toolError = chooseFirstToolError(toolError, log.result.error);
     }
-    hasToolResultEvents = true;
   }
 
   function updateAssistantMessage(message: AgentMessage | undefined): void {
     if (!isAssistantMessage(message)) {
       return;
     }
+
+    for (const toolCall of extractToolCallsFromAssistantMessage(
+      message,
+      canonicalByCodexName,
+      provider,
+    )) {
+      upsertToolCall(toolCall);
+    }
+
     finalMessage = message;
     stopReason = message.stopReason;
   }
@@ -260,12 +316,6 @@ export function createCodexAgentEventAccumulator(
     get stopReason() {
       return stopReason;
     },
-    get hasToolCallEvents() {
-      return hasToolCallEvents;
-    },
-    get hasToolResultEvents() {
-      return hasToolResultEvents;
-    },
     consume(event: AgentEvent): void {
       switch (event.type) {
         case "message_start":
@@ -277,16 +327,13 @@ export function createCodexAgentEventAccumulator(
           }
           break;
         case "tool_execution_start":
-          hasToolCallEvents = true;
           upsertToolCall(toToolCall(event.toolCallId, event.toolName, event.args));
           break;
         case "tool_execution_update":
-          hasToolCallEvents = true;
           upsertToolCall(toToolCall(event.toolCallId, event.toolName, event.args));
           partialToolResultById.set(event.toolCallId, event.partialResult);
           break;
         case "tool_execution_end": {
-          hasToolCallEvents = true;
           const call = upsertToolCall(toToolCall(event.toolCallId, event.toolName, undefined));
           const resultLike =
             typeof event.result === "object" && event.result !== null

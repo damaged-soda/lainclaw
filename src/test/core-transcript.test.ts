@@ -8,7 +8,7 @@ import { getSessionTranscriptPath } from "../sessions/sessionStore.js";
 import { createToolsAdapter } from "../tools/adapter.js";
 import { withTempHome } from "./helpers.js";
 
-test("core coordinator still appends transcript messages and tool summaries", async () => {
+test("core coordinator keeps transcript focused on readable turn history", async () => {
   await withTempHome(async () => {
     const coordinator = createCoreCoordinator({
       sessionAdapter: createSessionAdapter(),
@@ -68,12 +68,10 @@ test("core coordinator still appends transcript messages and tool summaries", as
       };
     });
 
-    assert.equal(lines.length, 3);
-    assert.equal(lines[0]?.message.role, "system");
-    assert.match(lines[0]?.message.content ?? "", /toolResults:/);
-    assert.equal(lines[1]?.message.role, "user");
-    assert.equal(lines[1]?.message.content, "please write this");
-    assert.equal(lines[2]?.message.role, "assistant");
-    assert.equal(lines[2]?.message.content, "assistant reply");
+    assert.equal(lines.length, 2);
+    assert.equal(lines[0]?.message.role, "user");
+    assert.equal(lines[0]?.message.content, "please write this");
+    assert.equal(lines[1]?.message.role, "assistant");
+    assert.equal(lines[1]?.message.content, "assistant reply");
   });
 });

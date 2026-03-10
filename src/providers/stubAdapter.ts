@@ -29,8 +29,10 @@ export async function runStubAdapter(input: ProviderRunInput): Promise<ProviderR
     throw new ValidationError("Missing provider. Set --provider in runtime input.", "MISSING_PROVIDER");
   }
   const normalizedInput = input.requestContext.input.trim();
-  const historyCount = context.transcriptMessages.length;
-  const shortHistory = `context=${historyCount}条消息`;
+  const modeLabel = context.runMode === "continue"
+    ? `continue:${context.continueReason ?? "resume"}`
+    : "prompt";
+  const normalizedPayload = normalizedInput || "continue";
   const assistantMessage: Message = {
     role: "assistant",
     content: [
@@ -64,7 +66,7 @@ export async function runStubAdapter(input: ProviderRunInput): Promise<ProviderR
     return {
       route,
       stage: "adapter.stub.summary",
-      result: `[stub-summary] ${shortHistory}：我已接收到你的内容：${normalizedInput}`,
+      result: `[stub-summary][${modeLabel}] 我已接收到你的内容：${normalizedPayload}`,
       runMode: context.runMode,
       ...(context.continueReason ? { continueReason: context.continueReason } : {}),
       assistantMessage,
@@ -77,7 +79,7 @@ export async function runStubAdapter(input: ProviderRunInput): Promise<ProviderR
   return {
     route,
     stage: "adapter.stub.echo",
-    result: `[stub-echo][${context.sessionId}] ${shortHistory}，已接收到输入：${normalizedInput}`,
+    result: `[stub-echo][${context.sessionId}][${modeLabel}] 已接收到输入：${normalizedPayload}`,
     runMode: context.runMode,
     ...(context.continueReason ? { continueReason: context.continueReason } : {}),
     assistantMessage,

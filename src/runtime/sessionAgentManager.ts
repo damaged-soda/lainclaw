@@ -125,7 +125,22 @@ function syncRequestContext(
   source: RequestContext,
 ): void {
   Object.assign(target, {
-    ...source,
+    requestId: source.requestId,
+    createdAt: source.createdAt,
+    input: source.input,
+    sessionKey: source.sessionKey,
+    sessionId: source.sessionId,
+    bootstrapMessages: source.bootstrapMessages,
+    memorySnippet: source.memorySnippet,
+    contextMessageLimit: source.contextMessageLimit,
+    systemPrompt: source.systemPrompt,
+    tools: source.tools,
+    provider: source.provider,
+    profileId: source.profileId,
+    runMode: source.runMode,
+    continueReason: source.continueReason,
+    memoryEnabled: source.memoryEnabled,
+    debug: source.debug,
   });
 }
 
@@ -229,7 +244,7 @@ export function createSessionAgentManager(
     const canRestoreFromSnapshot = Boolean(snapshot && matchesSnapshot(snapshot, access));
     const restoredMessages = canRestoreFromSnapshot
       ? normalizePersistedMessages(snapshot?.messages)
-      : access.requestContext.transcriptMessages;
+      : access.requestContext.bootstrapMessages ?? [];
     const restoredPrompt = canRestoreFromSnapshot
       ? snapshot?.systemPrompt || access.systemPrompt
       : access.systemPrompt;
@@ -296,7 +311,7 @@ export function createSessionAgentManager(
           resolvedRunMode: runContext.runMode,
           continueReason: runContext.continueReason,
           lastMessageRole: runContext.lastMessageRole,
-          transcriptMessageCount: access.requestContext.transcriptMessages.length,
+          bootstrapMessageCount: access.requestContext.bootstrapMessages?.length ?? 0,
           agentMessageCount: normalizePersistedMessages(agent.state.messages).length,
         });
 

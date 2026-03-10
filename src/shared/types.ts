@@ -25,9 +25,9 @@ export interface RequestContext {
   input: string;
   sessionKey: string;
   sessionId: string;
-  transcriptMessages: Message[];
+  bootstrapMessages?: Message[];
   memorySnippet?: string;
-  contextMessageLimit: number;
+  contextMessageLimit?: number;
   systemPrompt?: string;
   tools?: ContextToolSpec[];
   provider: string;

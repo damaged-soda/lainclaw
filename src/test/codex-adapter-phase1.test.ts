@@ -116,6 +116,19 @@ class ToolAwareFakeAgent implements SessionManagedAgent {
         { type: "toolCall", id: toolCallId, name: tool.name, arguments: toolArgs },
       ], "toolUse");
       this.state.messages.push(toolCallMessage);
+      this.emit({
+        type: "message_update",
+        message: toolCallMessage,
+        assistantMessageEvent: {
+          type: "toolcall_end",
+          contentIndex: 0,
+          toolCall: toolCallMessage.content[0] as Extract<
+            Extract<Message, { role: "assistant" }>["content"][number],
+            { type: "toolCall" }
+          >,
+          partial: toolCallMessage as Extract<Message, { role: "assistant" }>,
+        },
+      });
       this.emit({ type: "message_end", message: toolCallMessage });
 
       const toolResult = await tool.execute(toolCallId, toolArgs, undefined);
@@ -129,6 +142,11 @@ class ToolAwareFakeAgent implements SessionManagedAgent {
         timestamp: Date.now(),
       };
       this.state.messages.push(toolResultMessage as Message);
+      this.emit({
+        type: "turn_end",
+        message: toolCallMessage,
+        toolResults: [toolResultMessage],
+      });
 
       const finalAssistant = makeAssistantMessage([
         { type: "text", text: "tool completed" },
@@ -168,7 +186,7 @@ function makeRequestContext(overrides: Partial<RequestContext>): RequestContext 
     input: "please use tool now",
     sessionKey: "tool-session",
     sessionId: "tool-session-id",
-    transcriptMessages: [],
+    bootstrapMessages: [],
     contextMessageLimit: 12,
     provider: "openai-codex",
     profileId: "default",

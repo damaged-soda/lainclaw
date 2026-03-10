@@ -29,7 +29,7 @@ test("runtime context emits stdout debug logs when debug is enabled", async () =
       input: "latest input",
       sessionKey: "session-debug",
       sessionId: "session-id-debug",
-      transcriptMessages: [
+      bootstrapMessages: [
         {
           id: "msg-1",
           role: "user",
@@ -49,13 +49,13 @@ test("runtime context emits stdout debug logs when debug is enabled", async () =
   );
 
   assert.equal(result.requestContext.debug, true);
-  assert.equal(result.requestContext.transcriptMessages.length, 1);
-  assert.equal(result.requestContext.transcriptMessages[0]?.role, "user");
+  assert.equal(result.requestContext.bootstrapMessages?.length, 1);
+  assert.equal(result.requestContext.bootstrapMessages?.[0]?.role, "user");
   assert.equal(result.requestContext.memorySnippet, "remember this");
   assert.equal(result.promptMessage?.role, "user");
   assert.equal(
-    typeof result.requestContext.transcriptMessages[0]?.content === "string"
-      ? result.requestContext.transcriptMessages[0]?.content
+    typeof result.requestContext.bootstrapMessages?.[0]?.content === "string"
+      ? result.requestContext.bootstrapMessages?.[0]?.content
       : "",
     "previous input",
   );
@@ -65,7 +65,7 @@ test("runtime context emits stdout debug logs when debug is enabled", async () =
       : "",
     "latest input",
   );
-  assert.match(output, /runtime\.context\.transcript_attached/);
+  assert.match(output, /runtime\.context\.bootstrap_attached/);
   assert.match(output, /runtime\.context\.memory_loaded/);
   assert.match(output, /runtime\.context\.user_input_attached/);
   assert.match(output, /runtime\.context\.request_built/);

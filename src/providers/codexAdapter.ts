@@ -1,8 +1,7 @@
 import path from "node:path";
 import type { AgentEvent, AgentMessage } from "@mariozechner/pi-agent-core";
-import { getModel, type Message, type StopReason as PiStopReason } from "@mariozechner/pi-ai";
+import { getModel } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext, OPENAI_CODEX_MODEL } from "../auth/authManager.js";
-import type { RequestContext } from "../shared/types.js";
 import type { ProviderRunInput } from "./registry.js";
 import type { ProviderResult } from "./stubAdapter.js";
 import type { ToolCall, ToolExecutionLog } from "../tools/types.js";
@@ -10,8 +9,6 @@ import { buildRuntimeToolNameMap, createToolAdapter, resolveTools } from "../too
 import { executeTool } from "../tools/executor.js";
 import { createToolCallId } from "../shared/ids.js";
 import { resolveBooleanFlag } from "../shared/envFlags.js";
-import { parseToolCallsFromResponse } from "../providers/codex/toolCallParser.js";
-import { buildToolErrorLog, createToolExecutionState } from "../providers/codex/toolExecutionState.js";
 import { toText } from "../providers/codex/messageText.js";
 import { createCodexAgentEventAccumulator } from "../providers/codex/agentEventAccumulator.js";
 import { writeDebugLogIfEnabled } from "../shared/debug.js";
@@ -58,6 +55,27 @@ function normalizeProvider(raw: string): string {
   return normalized;
 }
 
+function buildToolErrorLog(toolCall: ToolCall, message: string): ToolExecutionLog {
+  return {
+    call: {
+      ...toolCall,
+      source: "agent-runtime",
+    },
+    result: {
+      ok: false,
+      error: {
+        code: "execution_error",
+        tool: toolCall.name,
+        message,
+      },
+      meta: {
+        tool: toolCall.name,
+        durationMs: 0,
+      },
+    },
+  };
+}
+
 interface CodexAdapterDependencies {
   sessionAgentManager?: SessionAgentManager;
   executeToolFn?: typeof executeTool;
@@ -84,7 +102,6 @@ export function createRunCodexAdapter(
     const toolSpecs = resolveTools(input.toolSpecs, input.withTools);
     const cwd = path.resolve(input.cwd || process.cwd());
     const toolNameMap = buildRuntimeToolNameMap(toolSpecs);
-    const toolState = createToolExecutionState();
     const canonicalByCodexName = toolNameMap.canonicalByCodex;
     const eventState = createCodexAgentEventAccumulator({
       provider,
@@ -121,15 +138,12 @@ export function createRunCodexAdapter(
             },
           },
         };
-        toolState.record(log);
         return log;
       } catch (error) {
-        const failed = buildToolErrorLog(
+        return buildToolErrorLog(
           resolvedCall,
           error instanceof Error ? error.message : "tool execution failed",
         );
-        toolState.record(failed);
-        return failed;
       }
     };
 
@@ -152,8 +166,6 @@ export function createRunCodexAdapter(
       systemPrompt,
     });
 
-    let finalMessage: Message | undefined;
-    let finalStopReason: PiStopReason | undefined;
     let runErr: Error | undefined;
     let agentSource: "memory" | "snapshot" | "new" = "new";
     let runMode = requestContext.runMode;
@@ -241,9 +253,6 @@ export function createRunCodexAdapter(
                 }
               });
           }
-
-          finalMessage = eventState.finalMessage;
-          finalStopReason = eventState.stopReason as PiStopReason | undefined;
         });
 
         try {
@@ -272,29 +281,18 @@ export function createRunCodexAdapter(
       source: agentSource,
     });
 
-    const primaryToolError = eventState.toolError ?? toolState.toolError;
+    const primaryToolError = eventState.toolError;
     if (runErr && !primaryToolError && !isAbortError(runErr)) {
       throw runErr;
     }
 
     const failed = Boolean(runErr);
-    const resolvedFinalMessage = eventState.finalMessage ?? finalMessage;
-    const resolvedStopReason = eventState.stopReason ?? finalStopReason;
+    const resolvedFinalMessage = eventState.finalMessage;
+    const resolvedStopReason = eventState.stopReason;
     const responseText = toText(resolvedFinalMessage);
     const responsePrefix = shouldPrefixResponse(profile.id, provider);
-    const fallbackToolBlockContent =
-      resolvedFinalMessage && Array.isArray(resolvedFinalMessage.content) ? resolvedFinalMessage.content : [];
-    const fallbackToolCalls = parseToolCallsFromResponse(
-      { content: fallbackToolBlockContent },
-      canonicalByCodexName,
-      provider,
-    );
-    const resolvedToolCalls = eventState.hasToolCallEvents
-      ? eventState.toolCalls
-      : fallbackToolCalls;
-    const resolvedToolResults = eventState.hasToolResultEvents
-      ? eventState.toolResults
-      : toolState.toolResults;
+    const resolvedToolCalls = eventState.toolCalls;
+    const resolvedToolResults = eventState.toolResults;
 
     return {
       route: input.route,

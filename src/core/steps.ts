@@ -1,8 +1,6 @@
 import type {
   CoreSessionRecord,
-  CoreToolCall,
   CoreToolError,
-  CoreToolExecutionLog,
   CoreOutcome,
   CoreRuntimeResult,
 } from "./contracts.js";
@@ -16,7 +14,7 @@ export async function buildTurnContext(
   ctx: RunCtx,
   session: CoreSessionRecord,
 ): Promise<TurnContext> {
-  const [memorySnippet, transcriptMessages] = await Promise.all([
+  const [memorySnippet, bootstrapMessages] = await Promise.all([
     withFailureMapping(
       "core.session.loadMemory",
       ctx.requestId,
@@ -43,7 +41,7 @@ export async function buildTurnContext(
     () => ctx.toolsAdapter.listTools(),
   );
 
-  return { memorySnippet, transcriptMessages, tools };
+  return { memorySnippet, bootstrapMessages, tools };
 }
 
 export async function persistTurn(
@@ -51,30 +49,8 @@ export async function persistTurn(
   session: CoreSessionRecord,
   turnInput: string,
   runtimeResult: CoreRuntimeResult,
-  toolCalls: CoreToolCall[],
-  toolResults: CoreToolExecutionLog[],
   toolError: CoreToolError | undefined,
 ): Promise<boolean> {
-  if (toolResults.length > 0) {
-    await withFailureMapping(
-      "core.session.appendToolSummary",
-      ctx.requestId,
-      session.sessionKey,
-      "SESSION_FAILURE",
-      ctx.emitEvent,
-      () =>
-        ctx.sessionAdapter.appendToolSummary(
-          session.sessionId,
-          toolCalls,
-          toolResults,
-          runtimeResult.route,
-          runtimeResult.stage,
-          runtimeResult.provider,
-          runtimeResult.profileId,
-        ),
-    );
-  }
-
   await withFailureMapping(
     "core.session.appendTurnMessages",
     ctx.requestId,
@@ -246,7 +222,7 @@ async function runRuntimeForTurn(
         input: turnInput,
         sessionKey: session.sessionKey,
         sessionId: session.sessionId,
-        transcriptMessages: turnContext.transcriptMessages,
+        bootstrapMessages: turnContext.bootstrapMessages,
         memorySnippet: turnContext.memorySnippet,
         ...(ctx.runMode ? { runMode: ctx.runMode } : {}),
         ...(ctx.continueReason ? { continueReason: ctx.continueReason } : {}),
@@ -282,10 +258,9 @@ async function finalizeTurn(
   session: CoreSessionRecord,
   runtimeResult: CoreRuntimeResult,
 ): Promise<void> {
-  const toolCalls = runtimeResult.toolCalls ?? [];
   const toolResults = runtimeResult.toolResults ?? [];
   const toolError = ctx.toolsAdapter.firstToolErrorFromLogs(toolResults);
-  await persistTurn(ctx, session, turnInput, runtimeResult, toolCalls, toolResults, toolError);
+  await persistTurn(ctx, session, turnInput, runtimeResult, toolError);
 }
 
 export async function runTurn(ctx: RunCtx, turnInput: string, turnCreatedAt: string): Promise<CoreOutcome> {

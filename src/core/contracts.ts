@@ -136,15 +136,6 @@ export interface CoreSessionPort {
       includeUserMessage?: boolean;
     },
   ): Promise<void>;
-  appendToolSummary(
-    sessionId: string,
-    toolCalls: CoreToolCall[],
-    toolResults: CoreToolExecutionLog[],
-    route: string,
-    stage: string,
-    provider: string,
-    profileId: string,
-  ): Promise<void>;
   markRouteUsage(sessionKey: string, route: string, profileId: string, provider: string): Promise<void>;
   compactIfNeeded(input: CoreSessionSnapshotCompact): Promise<boolean>;
   resolveSessionMemoryPath(sessionKey: string): string;
@@ -169,7 +160,7 @@ export interface CoreRuntimeInput {
   input: string;
   sessionKey: string;
   sessionId: string;
-  transcriptMessages: CoreSessionHistoryMessage[];
+  bootstrapMessages: CoreSessionHistoryMessage[];
   memorySnippet: string;
   runMode?: RuntimeRunMode;
   continueReason?: RuntimeContinueReason;
