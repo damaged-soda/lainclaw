@@ -18,6 +18,7 @@ test("core coordinator still appends transcript messages and tool summaries", as
           route: "adapter.stub",
           stage: "adapter.stub.test",
           result: "assistant reply",
+          runMode: "prompt",
           toolCalls: [
             {
               id: "tool-1",

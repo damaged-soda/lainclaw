@@ -1,12 +1,14 @@
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "@mariozechner/pi-agent-core";
 import type { Message, Model } from "@mariozechner/pi-ai";
 import { writeDebugLogIfEnabled } from "../shared/debug.js";
+import type { RequestContext, RuntimeContinueReason, RuntimeRunMode } from "../shared/types.js";
 import {
   agentStateStore,
   normalizePersistedMessages,
   type AgentStateSnapshot,
   type AgentStateStore,
 } from "./agentStateStore.js";
+import { transformContextMessages } from "./context.js";
 
 export interface SessionManagedAgent {
   readonly state: {
@@ -18,6 +20,7 @@ export interface SessionManagedAgent {
   setModel(model: Model<any>): void;
   setTools(tools: AgentTool<any>[]): void;
   prompt(message: Message): Promise<void>;
+  continue(): Promise<void>;
   subscribe(listener: (event: AgentEvent) => void): () => void;
 }
 
@@ -29,19 +32,16 @@ export interface SessionAgentFactoryInput {
     tools: AgentTool<any>[];
   };
   convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
+  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   sessionId?: string;
 }
 
 export interface SessionAgentAccessOptions {
-  sessionKey: string;
-  sessionId: string;
-  provider: string;
-  profileId: string;
+  requestContext: RequestContext;
   systemPrompt: string;
   model: Model<any>;
   tools: AgentTool<any>[];
-  initialMessages: Message[];
   convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   debug?: boolean;
@@ -49,6 +49,9 @@ export interface SessionAgentAccessOptions {
 
 export interface SessionAgentRunContext {
   source: "memory" | "snapshot" | "new";
+  runMode: RuntimeRunMode;
+  continueReason?: RuntimeContinueReason;
+  lastMessageRole?: Message["role"];
 }
 
 export interface SessionAgentManager {
@@ -68,12 +71,14 @@ interface SessionAgentRecord {
   provider: string;
   profileId: string;
   agent: SessionManagedAgent;
+  requestContext: RequestContext;
 }
 
 function createDefaultAgent(input: SessionAgentFactoryInput): SessionManagedAgent {
   return new Agent({
     initialState: input.initialState,
     convertToLlm: input.convertToLlm,
+    transformContext: input.transformContext,
     getApiKey: input.getApiKey,
     sessionId: input.sessionId,
   }) as unknown as SessionManagedAgent;
@@ -85,17 +90,17 @@ function nowIso(): string {
 
 function matchesRecord(record: SessionAgentRecord, options: SessionAgentAccessOptions): boolean {
   return (
-    record.sessionId === options.sessionId &&
-    record.provider === options.provider &&
-    record.profileId === options.profileId
+    record.sessionId === options.requestContext.sessionId &&
+    record.provider === options.requestContext.provider &&
+    record.profileId === options.requestContext.profileId
   );
 }
 
 function matchesSnapshot(snapshot: AgentStateSnapshot, options: SessionAgentAccessOptions): boolean {
   return (
-    snapshot.sessionId === options.sessionId &&
-    snapshot.provider === options.provider &&
-    snapshot.profileId === options.profileId
+    snapshot.sessionId === options.requestContext.sessionId &&
+    snapshot.provider === options.requestContext.provider &&
+    snapshot.profileId === options.requestContext.profileId
   );
 }
 
@@ -104,14 +109,82 @@ function createSnapshot(
   agent: SessionManagedAgent,
 ): AgentStateSnapshot {
   return {
-    version: 1,
-    sessionKey: options.sessionKey,
-    sessionId: options.sessionId,
-    provider: options.provider,
-    profileId: options.profileId,
+    version: 2,
+    sessionKey: options.requestContext.sessionKey,
+    sessionId: options.requestContext.sessionId,
+    provider: options.requestContext.provider,
+    profileId: options.requestContext.profileId,
     systemPrompt: agent.state.systemPrompt || options.systemPrompt,
     messages: normalizePersistedMessages(agent.state.messages),
     updatedAt: nowIso(),
+  };
+}
+
+function syncRequestContext(
+  target: RequestContext,
+  source: RequestContext,
+): void {
+  Object.assign(target, {
+    ...source,
+  });
+}
+
+function resolveLastMessageRole(agent: SessionManagedAgent): Message["role"] | undefined {
+  const messages = normalizePersistedMessages(agent.state.messages);
+  const lastMessage = messages[messages.length - 1];
+  return lastMessage?.role;
+}
+
+function resolveContinueReason(
+  requestContext: RequestContext,
+  source: SessionAgentRunContext["source"],
+  lastMessageRole: Message["role"] | undefined,
+): RuntimeContinueReason {
+  if (requestContext.continueReason) {
+    return requestContext.continueReason;
+  }
+  if (source === "snapshot") {
+    return "restore_resume";
+  }
+  if (lastMessageRole === "toolResult") {
+    return "tool_result";
+  }
+  return "retry";
+}
+
+function resolveRunContext(
+  access: SessionAgentAccessOptions,
+  agent: SessionManagedAgent,
+  source: SessionAgentRunContext["source"],
+): SessionAgentRunContext {
+  const lastMessageRole = resolveLastMessageRole(agent);
+  const normalizedInput = access.requestContext.input.trim();
+
+  if (normalizedInput.length > 0) {
+    return {
+      source,
+      runMode: "prompt",
+      lastMessageRole,
+    };
+  }
+
+  if (access.requestContext.runMode !== "continue") {
+    throw new Error("Cannot run without user input. Use continue mode to resume the agent.");
+  }
+
+  if (!lastMessageRole) {
+    throw new Error("Cannot continue without existing agent state.");
+  }
+
+  if (lastMessageRole === "assistant") {
+    throw new Error("Cannot continue from last message role: assistant");
+  }
+
+  return {
+    source,
+    runMode: "continue",
+    continueReason: resolveContinueReason(access.requestContext, source, lastMessageRole),
+    lastMessageRole,
   };
 }
 
@@ -146,17 +219,23 @@ export function createSessionAgentManager(
   async function getOrCreateAgent(
     access: SessionAgentAccessOptions,
   ): Promise<{ agent: SessionManagedAgent; source: SessionAgentRunContext["source"] }> {
-    const cached = agents.get(access.sessionKey);
+    const cached = agents.get(access.requestContext.sessionKey);
     if (cached && matchesRecord(cached, access)) {
+      syncRequestContext(cached.requestContext, access.requestContext);
       return { agent: cached.agent, source: "memory" };
     }
 
-    const snapshot = await stateStore.load(access.sessionKey);
+    const snapshot = await stateStore.load(access.requestContext.sessionKey);
     const canRestoreFromSnapshot = Boolean(snapshot && matchesSnapshot(snapshot, access));
-    const restoredMessages = canRestoreFromSnapshot ? snapshot?.messages ?? [] : access.initialMessages;
+    const restoredMessages = canRestoreFromSnapshot
+      ? normalizePersistedMessages(snapshot?.messages)
+      : access.requestContext.transcriptMessages;
     const restoredPrompt = canRestoreFromSnapshot
       ? snapshot?.systemPrompt || access.systemPrompt
       : access.systemPrompt;
+    const currentRequestContext = {
+      ...access.requestContext,
+    };
     const agent = agentFactory({
       initialState: {
         systemPrompt: restoredPrompt,
@@ -165,15 +244,22 @@ export function createSessionAgentManager(
         tools: access.tools,
       },
       convertToLlm: access.convertToLlm,
+      transformContext: async (messages: AgentMessage[], signal?: AbortSignal) => {
+        return transformContextMessages({
+          requestContext: currentRequestContext,
+          messages,
+        });
+      },
       getApiKey: access.getApiKey,
-      sessionId: access.sessionId,
+      sessionId: access.requestContext.sessionId,
     });
 
-    agents.set(access.sessionKey, {
-      sessionId: access.sessionId,
-      provider: access.provider,
-      profileId: access.profileId,
+    agents.set(access.requestContext.sessionKey, {
+      sessionId: access.requestContext.sessionId,
+      provider: access.requestContext.provider,
+      profileId: access.requestContext.profileId,
       agent,
+      requestContext: currentRequestContext,
     });
 
     return {
@@ -187,25 +273,35 @@ export function createSessionAgentManager(
       access: SessionAgentAccessOptions,
       fn: (agent: SessionManagedAgent, context: SessionAgentRunContext) => Promise<T>,
     ): Promise<T> => {
-      return withSessionLock(access.sessionKey, async () => {
+      return withSessionLock(access.requestContext.sessionKey, async () => {
         const { agent, source } = await getOrCreateAgent(access);
-        agent.sessionId = access.sessionId;
+        const record = agents.get(access.requestContext.sessionKey);
+        if (record) {
+          syncRequestContext(record.requestContext, access.requestContext);
+        }
+
+        agent.sessionId = access.requestContext.sessionId;
         agent.setModel(access.model);
         agent.setSystemPrompt(access.systemPrompt);
         agent.setTools(access.tools);
+        const runContext = resolveRunContext(access, agent, source);
 
         writeDebugLogIfEnabled(access.debug, "runtime.agent.session.bound", {
-          sessionKey: access.sessionKey,
-          sessionId: access.sessionId,
-          provider: access.provider,
-          profileId: access.profileId,
+          sessionKey: access.requestContext.sessionKey,
+          sessionId: access.requestContext.sessionId,
+          provider: access.requestContext.provider,
+          profileId: access.requestContext.profileId,
           source,
-          initialMessageCount: access.initialMessages.length,
+          requestedRunMode: access.requestContext.runMode,
+          resolvedRunMode: runContext.runMode,
+          continueReason: runContext.continueReason,
+          lastMessageRole: runContext.lastMessageRole,
+          transcriptMessageCount: access.requestContext.transcriptMessages.length,
           agentMessageCount: normalizePersistedMessages(agent.state.messages).length,
         });
 
         try {
-          const result = await fn(agent, { source });
+          const result = await fn(agent, runContext);
           await stateStore.save(createSnapshot(access, agent));
           return result;
         } catch (error) {

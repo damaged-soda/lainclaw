@@ -3,9 +3,9 @@ import type { ToolCall, ToolExecutionLog } from "../tools/types.js";
 import {
   appendSessionMessage,
   appendSessionMemory,
-  getAllSessionMessages,
+  getAllSessionTranscriptMessages,
   getOrCreateSession,
-  getRecentSessionMessages,
+  getRecentSessionTranscriptMessages,
   getSessionMemoryPath,
   loadSessionMemorySnippet,
   recordSessionRoute,
@@ -168,7 +168,7 @@ async function appendRuntimeMessage(
 function createSessionService(): SessionService {
   return {
     resolveSession: (input: SessionLoadOptions): Promise<SessionSnapshot> => getOrCreateSession(input),
-    loadHistory: (sessionId: string): Promise<SessionHistoryMessage[]> => getRecentSessionMessages(sessionId),
+    loadHistory: (sessionId: string): Promise<SessionHistoryMessage[]> => getRecentSessionTranscriptMessages(sessionId),
     loadMemorySnippet: (sessionKey: string): Promise<string> => loadSessionMemorySnippet(sessionKey),
     appendTurnMessages: async (sessionId: string, userInput: string, finalResult: SessionTurnResult): Promise<void> => {
       const routeContext = toRouteContext(finalResult);
@@ -212,7 +212,7 @@ function createSessionService(): SessionService {
         return false;
       }
 
-      const allMessages = await getAllSessionMessages(session.sessionId);
+      const allMessages = await getAllSessionTranscriptMessages(session.sessionId);
       if (allMessages.length <= MEMORY_COMPACT_TRIGGER_MESSAGES) {
         return false;
       }

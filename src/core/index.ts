@@ -66,6 +66,8 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
       const {
         provider,
         profileId,
+        runMode,
+        continueReason,
         memory: memoryEnabled,
         sessionKey,
         withTools,
@@ -80,6 +82,8 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         provider,
         profileId,
         sessionKey,
+        runMode,
+        continueReason,
         withTools,
         memoryEnabled,
         cwd: typeof cwd === "string" ? cwd : undefined,

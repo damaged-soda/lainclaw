@@ -8,7 +8,7 @@ export interface CodexDebugRequestSnapshot {
     messages: Message[];
     tools?: ContextToolSpec[];
   };
-  prompt: Message;
+  prompt?: Message;
 }
 
 export function buildCodexDebugRequestSnapshot(params: {
@@ -16,7 +16,7 @@ export function buildCodexDebugRequestSnapshot(params: {
   modelName: string;
   messages: Message[];
   tools?: ContextToolSpec[];
-  prompt: Message;
+  prompt?: Message;
 }): CodexDebugRequestSnapshot {
   return {
     initialState: {
@@ -25,6 +25,6 @@ export function buildCodexDebugRequestSnapshot(params: {
       messages: params.messages,
       ...(Array.isArray(params.tools) && params.tools.length > 0 ? { tools: params.tools } : {}),
     },
-    prompt: params.prompt,
+    ...(params.prompt ? { prompt: params.prompt } : {}),
   };
 }

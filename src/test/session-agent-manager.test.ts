@@ -9,6 +9,7 @@ import {
   type SessionManagedAgent,
 } from "../runtime/sessionAgentManager.js";
 import { withTempHome } from "./helpers.js";
+import type { RequestContext } from "../shared/types.js";
 
 function makeUsageZero() {
   return {
@@ -86,6 +87,27 @@ class FakeSessionAgent implements SessionManagedAgent {
     this.state.messages.push(message);
     this.state.messages.push(makeAssistantMessage(`echo:${this.tools.length}:${String(message.content)}`));
   }
+
+  async continue(): Promise<void> {
+    this.state.messages.push(makeAssistantMessage(`continue:${this.tools.length}`));
+  }
+}
+
+function makeRequestContext(overrides: Partial<RequestContext> & Pick<RequestContext, "sessionKey" | "sessionId">): RequestContext {
+  return {
+    requestId: "req-session-agent-manager",
+    createdAt: "2026-03-11T00:00:00.000Z",
+    input: "prompt",
+    sessionKey: overrides.sessionKey,
+    sessionId: overrides.sessionId,
+    transcriptMessages: [],
+    contextMessageLimit: 12,
+    provider: "openai-codex",
+    profileId: "default",
+    runMode: "prompt",
+    memoryEnabled: true,
+    ...overrides,
+  };
 }
 
 test("session agent manager reuses the same agent instance within one process", async () => {
@@ -108,14 +130,15 @@ test("session agent manager reuses the same agent instance within one process", 
 
     await manager.runWithSessionAgent(
       {
-        sessionKey: "reuse-session",
-        sessionId: "session-1",
-        provider: "openai-codex",
-        profileId: "default",
+        requestContext: makeRequestContext({
+          sessionKey: "reuse-session",
+          sessionId: "session-1",
+          input: "first",
+          transcriptMessages: [makeUserMessage("history")],
+        }),
         systemPrompt: "system",
         model,
         tools: [],
-        initialMessages: [makeUserMessage("history")],
         convertToLlm: async (messages) => messages as Message[],
       },
       async (agent, context) => {
@@ -127,14 +150,15 @@ test("session agent manager reuses the same agent instance within one process", 
 
     await manager.runWithSessionAgent(
       {
-        sessionKey: "reuse-session",
-        sessionId: "session-1",
-        provider: "openai-codex",
-        profileId: "default",
+        requestContext: makeRequestContext({
+          sessionKey: "reuse-session",
+          sessionId: "session-1",
+          input: "second",
+          transcriptMessages: [makeUserMessage("should-not-replay")],
+        }),
         systemPrompt: "system",
         model,
         tools: [],
-        initialMessages: [makeUserMessage("should-not-replay")],
         convertToLlm: async (messages) => messages as Message[],
       },
       async (agent, context) => {
@@ -168,14 +192,14 @@ test("session agent manager restores persisted snapshots after restart", async (
     });
     await manager1.runWithSessionAgent(
       {
-        sessionKey: "restore-session",
-        sessionId: "session-restore",
-        provider: "openai-codex",
-        profileId: "default",
+        requestContext: makeRequestContext({
+          sessionKey: "restore-session",
+          sessionId: "session-restore",
+          input: "first turn",
+        }),
         systemPrompt: "system",
         model,
         tools: [],
-        initialMessages: [],
         convertToLlm: async (messages) => messages as Message[],
       },
       async (agent) => {
@@ -189,14 +213,15 @@ test("session agent manager restores persisted snapshots after restart", async (
     });
     await manager2.runWithSessionAgent(
       {
-        sessionKey: "restore-session",
-        sessionId: "session-restore",
-        provider: "openai-codex",
-        profileId: "default",
+        requestContext: makeRequestContext({
+          sessionKey: "restore-session",
+          sessionId: "session-restore",
+          input: "second turn",
+          transcriptMessages: [makeUserMessage("fallback-history")],
+        }),
         systemPrompt: "system",
         model,
         tools: [],
-        initialMessages: [makeUserMessage("fallback-history")],
         convertToLlm: async (messages) => messages as Message[],
       },
       async (agent, context) => {

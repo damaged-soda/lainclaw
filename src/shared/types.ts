@@ -15,17 +15,25 @@ export interface ContextToolSpec {
   };
 }
 
+export type RuntimeRunMode = "prompt" | "continue";
+
+export type RuntimeContinueReason = "tool_result" | "restore_resume" | "retry";
+
 export interface RequestContext {
   requestId: string;
   createdAt: string;
   input: string;
   sessionKey: string;
   sessionId: string;
-  initialMessages: Message[];
+  transcriptMessages: Message[];
+  memorySnippet?: string;
+  contextMessageLimit: number;
   systemPrompt?: string;
   tools?: ContextToolSpec[];
   provider: string;
   profileId: string;
+  runMode: RuntimeRunMode;
+  continueReason?: RuntimeContinueReason;
   memoryEnabled?: boolean;
   debug?: boolean;
 }

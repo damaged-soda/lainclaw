@@ -20,6 +20,12 @@ import {
   sessionAgentManager as defaultSessionAgentManager,
   type SessionAgentManager,
 } from "../runtime/sessionAgentManager.js";
+import { normalizePersistedMessages } from "../runtime/agentStateStore.js";
+import {
+  convertAgentMessagesToLlm,
+  makeUserContextMessage,
+  transformContextMessages,
+} from "../runtime/context.js";
 
 // 该系统提示词是 MVP 阶段的临时兜底：用于让 provider responses 在最小路径下可直接返回结果。
 // 这是可替换配置，不是对外契约；后续接手时可按体验目标调整文案、样式或完全替换。
@@ -135,13 +141,7 @@ export function createRunCodexAdapter(
     }
 
     const profileId = profile.id;
-    const initialMessages = requestContext.initialMessages;
     const systemPrompt = requestContext.systemPrompt ?? OPENAI_CODEX_SYSTEM_PROMPT;
-    const promptMessage: Message = {
-      role: "user",
-      content: requestContext.input,
-      timestamp: Date.now(),
-    };
 
     writeDebugLogIfEnabled(requestContext.debug, "provider.codex.system_prompt_attached", {
       requestId,
@@ -152,47 +152,72 @@ export function createRunCodexAdapter(
       systemPrompt,
     });
 
-    writeDebugLogIfEnabled(requestContext.debug, "provider.codex.pi_agent_core_request", {
-      requestId,
-      sessionKey: requestContext.sessionKey,
-      provider,
-      profileId,
-      route: input.route,
-      withTools: input.withTools,
-      request: buildCodexDebugRequestSnapshot({
-        systemPrompt,
-        modelName: OPENAI_CODEX_MODEL,
-        messages: initialMessages,
-        tools: toolSpecs,
-        prompt: promptMessage,
-      }),
-    });
-
     let finalMessage: Message | undefined;
     let finalStopReason: PiStopReason | undefined;
     let runErr: Error | undefined;
     let agentSource: "memory" | "snapshot" | "new" = "new";
+    let runMode = requestContext.runMode;
+    let continueReason = requestContext.continueReason;
     let agentEventDispatch = Promise.resolve();
 
     await sessionAgentManager.runWithSessionAgent(
       {
-        sessionKey: requestContext.sessionKey,
-        sessionId: requestContext.sessionId,
-        provider,
-        profileId,
+        requestContext,
         systemPrompt,
         model,
         tools: agentTools,
-        initialMessages,
-        convertToLlm: (messages: AgentMessage[]) =>
-          messages.filter((message) =>
-            message.role === "user" || message.role === "assistant" || message.role === "toolResult",
-          ) as Message[],
+        convertToLlm: (messages: AgentMessage[]) => convertAgentMessagesToLlm(messages),
         getApiKey: async () => apiKey,
         debug: requestContext.debug === true,
       },
       async (agent, context) => {
         agentSource = context.source;
+        runMode = context.runMode;
+        continueReason = context.continueReason;
+        const promptMessage = context.runMode === "prompt"
+          ? makeUserContextMessage(requestContext.input)
+          : undefined;
+        const requestMessages = context.runMode === "prompt" && promptMessage
+          ? [...normalizePersistedMessages(agent.state.messages), promptMessage]
+          : normalizePersistedMessages(agent.state.messages);
+        const transformedMessages = await transformContextMessages({
+          requestContext,
+          messages: requestMessages,
+        });
+
+        writeDebugLogIfEnabled(requestContext.debug, "provider.codex.run_selected", {
+          requestId,
+          sessionKey: requestContext.sessionKey,
+          sessionId: requestContext.sessionId,
+          provider,
+          profileId,
+          route: input.route,
+          source: agentSource,
+          requestedRunMode: requestContext.runMode,
+          runMode,
+          continueReason,
+          lastMessageRole: context.lastMessageRole,
+        });
+
+        writeDebugLogIfEnabled(requestContext.debug, "provider.codex.pi_agent_core_request", {
+          requestId,
+          sessionKey: requestContext.sessionKey,
+          provider,
+          profileId,
+          route: input.route,
+          withTools: input.withTools,
+          runMode,
+          continueReason,
+          transformedMessageCount: transformedMessages.length,
+          request: buildCodexDebugRequestSnapshot({
+            systemPrompt,
+            modelName: OPENAI_CODEX_MODEL,
+            messages: convertAgentMessagesToLlm(transformedMessages),
+            tools: toolSpecs,
+            ...(promptMessage ? { prompt: promptMessage } : {}),
+          }),
+        });
+
         const unsubscribe = agent.subscribe((event: AgentEvent) => {
           eventState.consume(event);
 
@@ -222,7 +247,13 @@ export function createRunCodexAdapter(
         });
 
         try {
-          await agent.prompt(promptMessage);
+          if (context.runMode === "continue") {
+            await agent.continue();
+          } else if (promptMessage) {
+            await agent.prompt(promptMessage);
+          } else {
+            throw new Error("Prompt mode requires a user message.");
+          }
         } catch (error) {
           runErr = error instanceof Error ? error : new Error(String(error));
         } finally {
@@ -269,6 +300,8 @@ export function createRunCodexAdapter(
       route: input.route,
       stage: getAdapterStage(input.route, profileId, failed),
       result: `${responsePrefix}${responseText || requestContext.input}`,
+      runMode,
+      ...(continueReason ? { continueReason } : {}),
       toolCalls: resolvedToolCalls.length > 0 ? resolvedToolCalls : undefined,
       toolResults: resolvedToolResults.length > 0 ? resolvedToolResults : undefined,
       assistantMessage: resolvedFinalMessage,

@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import {
   ContextToolSpec,
@@ -12,70 +13,152 @@ import {
 import { writeDebugLogIfEnabled } from "../shared/debug.js";
 
 export const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;
+export const MEMORY_CONTEXT_PREFIX = "[memory]\n";
+
+export interface RuntimeMemoryContextMessage {
+  role: "context_memory";
+  content: string;
+  timestamp: number;
+}
+
+declare module "@mariozechner/pi-agent-core" {
+  interface CustomAgentMessages {
+    runtimeMemoryContext: RuntimeMemoryContextMessage;
+  }
+}
 
 interface RuntimeContextMessages {
   requestContext: RequestContext;
-  initialMessages: Message[];
-  historyMessages: Message[];
-  promptMessage: Message;
+  transcriptMessages: Message[];
+  promptMessage?: Message;
 }
 
-// Core flow: 上下文构建与主流程入参准备
+function isLlmCompatibleMessage(message: AgentMessage): message is Message {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const candidate = message as { role?: unknown };
+  return (
+    candidate.role === "user" ||
+    candidate.role === "assistant" ||
+    candidate.role === "toolResult"
+  );
+}
+
+export function isRuntimeMemoryContextMessage(
+  message: AgentMessage,
+): message is RuntimeMemoryContextMessage {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const candidate = message as { role?: unknown; content?: unknown };
+  return candidate.role === "context_memory" && typeof candidate.content === "string";
+}
+
+export async function transformContextMessages(params: {
+  requestContext: Pick<
+    RequestContext,
+    | "requestId"
+    | "sessionKey"
+    | "sessionId"
+    | "provider"
+    | "profileId"
+    | "memoryEnabled"
+    | "memorySnippet"
+    | "contextMessageLimit"
+    | "debug"
+  >;
+  messages: AgentMessage[];
+}): Promise<AgentMessage[]> {
+  const compatibleMessages = params.messages.filter(isLlmCompatibleMessage);
+  const trimmedMessages = trimAgentContextMessages(
+    compatibleMessages,
+    params.requestContext.contextMessageLimit,
+  );
+  const memoryMessage = makeMemoryContextMessage(
+    params.requestContext.memoryEnabled !== false ? params.requestContext.memorySnippet : undefined,
+  );
+  const transformed = memoryMessage ? [memoryMessage, ...trimmedMessages] : trimmedMessages;
+
+  writeDebugLogIfEnabled(params.requestContext.debug, "runtime.context.transform_applied", {
+    requestId: params.requestContext.requestId,
+    sessionKey: params.requestContext.sessionKey,
+    sessionId: params.requestContext.sessionId,
+    provider: params.requestContext.provider,
+    profileId: params.requestContext.profileId,
+    originalMessageCount: compatibleMessages.length,
+    finalMessageCount: transformed.length,
+    trimmedMessageCount: Math.max(compatibleMessages.length - trimmedMessages.length, 0),
+    memoryInjected: Boolean(memoryMessage),
+    contextMessageLimit: params.requestContext.contextMessageLimit,
+  });
+
+  return transformed;
+}
+
+// Core flow: transcript fallback 与主流程入参准备
 export function buildRuntimeRequestContext(params: {
   requestId: string;
   createdAt: string;
   input: string;
   sessionKey: string;
   sessionId: string;
-  priorMessages: SessionHistoryMessage[];
+  transcriptMessages: SessionHistoryMessage[];
   memorySnippet?: string;
   provider: string;
   profileId: string;
   withTools: boolean;
   tools?: ContextToolSpec[];
   systemPrompt?: string;
+  runMode?: RequestContext["runMode"];
+  continueReason?: RequestContext["continueReason"];
   memoryEnabled?: boolean;
+  contextMessageLimit?: number;
   debug?: boolean;
 }): RuntimeContextMessages {
   const resolvedTools = params.withTools && Array.isArray(params.tools) ? params.tools : undefined;
   const provider = params.provider.trim();
-  const historyMessages = contextMessagesFromHistory(
-    trimContextMessages(params.priorMessages),
+  const contextMessageLimit = Math.max(
+    1,
+    params.contextMessageLimit ?? DEFAULT_CONTEXT_MESSAGE_LIMIT,
+  );
+  const transcriptMessages = contextMessagesFromHistory(
+    trimTranscriptMessages(params.transcriptMessages, contextMessageLimit),
     provider,
   );
-  const initialMessages: Message[] = [...historyMessages];
+  const runMode = params.runMode ?? "prompt";
 
-  if (historyMessages.length > 0) {
-    writeDebugLogIfEnabled(params.debug, "runtime.context.history_attached", {
+  if (transcriptMessages.length > 0) {
+    writeDebugLogIfEnabled(params.debug, "runtime.context.transcript_attached", {
       requestId: params.requestId,
       sessionKey: params.sessionKey,
       provider,
       profileId: params.profileId,
-      count: historyMessages.length,
-      messages: historyMessages,
+      count: transcriptMessages.length,
+      messages: transcriptMessages,
     });
   }
 
   if (typeof params.memorySnippet === "string" && params.memorySnippet.length > 0) {
-    const memoryMessage = makeUserContextMessage(`[memory]\n${params.memorySnippet}`);
-    initialMessages.push(memoryMessage);
-    writeDebugLogIfEnabled(params.debug, "runtime.context.memory_attached", {
+    writeDebugLogIfEnabled(params.debug, "runtime.context.memory_loaded", {
       requestId: params.requestId,
       sessionKey: params.sessionKey,
       provider,
       profileId: params.profileId,
-      message: memoryMessage,
+      length: params.memorySnippet.length,
     });
   }
 
-  const promptMessage = makeUserContextMessage(params.input);
-  writeDebugLogIfEnabled(params.debug, "runtime.context.user_input_attached", {
-    requestId: params.requestId,
-    sessionKey: params.sessionKey,
-    provider,
-    profileId: params.profileId,
-    message: promptMessage,
-  });
+  const promptMessage = runMode === "prompt" ? makeUserContextMessage(params.input) : undefined;
+  if (promptMessage) {
+    writeDebugLogIfEnabled(params.debug, "runtime.context.user_input_attached", {
+      requestId: params.requestId,
+      sessionKey: params.sessionKey,
+      provider,
+      profileId: params.profileId,
+      message: promptMessage,
+    });
+  }
 
   const requestContext = makeBaseRequestContext(
     params.requestId,
@@ -83,11 +166,15 @@ export function buildRuntimeRequestContext(params: {
     params.input,
     params.sessionKey,
     params.sessionId,
-    initialMessages,
+    transcriptMessages,
     provider,
     params.profileId,
     resolvedTools,
     params.systemPrompt,
+    params.memorySnippet,
+    contextMessageLimit,
+    runMode,
+    params.continueReason,
     params.memoryEnabled ?? true,
     params.debug === true,
   );
@@ -107,10 +194,11 @@ export function buildRuntimeRequestContext(params: {
     sessionKey: params.sessionKey,
     provider,
     profileId: params.profileId,
+    runMode,
     requestContext,
   });
 
-  return { requestContext, initialMessages, historyMessages, promptMessage };
+  return { requestContext, transcriptMessages, promptMessage };
 }
 
 function nowTs() {
@@ -134,11 +222,14 @@ export function toTimestamp(raw: string): number {
   return Number.isFinite(parsed) ? parsed : nowTs();
 }
 
-export function trimContextMessages(messages: SessionHistoryMessage[]): SessionHistoryMessage[] {
-  if (messages.length <= DEFAULT_CONTEXT_MESSAGE_LIMIT) {
+export function trimTranscriptMessages(
+  messages: SessionHistoryMessage[],
+  limit: number = DEFAULT_CONTEXT_MESSAGE_LIMIT,
+): SessionHistoryMessage[] {
+  if (messages.length <= limit) {
     return messages;
   }
-  return messages.slice(-DEFAULT_CONTEXT_MESSAGE_LIMIT);
+  return messages.slice(-limit);
 }
 
 export async function buildWorkspaceSystemPrompt(cwd: string | undefined): Promise<string> {
@@ -197,17 +288,60 @@ export function makeUserContextMessage(content: string): Message {
   } as Message;
 }
 
+export function makeMemoryContextMessage(
+  content: string | undefined,
+): RuntimeMemoryContextMessage | undefined {
+  if (typeof content !== "string" || content.trim().length === 0) {
+    return undefined;
+  }
+  return {
+    role: "context_memory",
+    content,
+    timestamp: nowTs(),
+  };
+}
+
+export function trimAgentContextMessages(
+  messages: Message[],
+  limit: number = DEFAULT_CONTEXT_MESSAGE_LIMIT,
+): Message[] {
+  if (messages.length <= limit) {
+    return messages;
+  }
+  return messages.slice(-limit);
+}
+
+export function convertAgentMessagesToLlm(messages: AgentMessage[]): Message[] {
+  return messages.flatMap((message) => {
+    if (isLlmCompatibleMessage(message)) {
+      return [message];
+    }
+    if (isRuntimeMemoryContextMessage(message)) {
+      return [{
+        role: "user",
+        content: `${MEMORY_CONTEXT_PREFIX}${message.content}`,
+        timestamp: message.timestamp,
+      } as Message];
+    }
+    return [];
+  });
+}
+
 export function makeBaseRequestContext(
   requestId: string,
   createdAt: string,
   input: string,
   sessionKey: string,
   sessionId: string,
-  initialMessages: Message[],
+  transcriptMessages: Message[],
   provider: string,
   profileId: string,
   tools?: ContextToolSpec[],
   systemPrompt?: string,
+  memorySnippet?: string,
+  contextMessageLimit: number = DEFAULT_CONTEXT_MESSAGE_LIMIT,
+  runMode: RequestContext["runMode"] = "prompt",
+  continueReason?: RequestContext["continueReason"],
   memoryEnabled: boolean = true,
   debug = false,
 ): RequestContext {
@@ -217,9 +351,13 @@ export function makeBaseRequestContext(
     input,
     sessionKey,
     sessionId,
-    initialMessages,
+    transcriptMessages,
+    ...(typeof memorySnippet === "string" && memorySnippet.length > 0 ? { memorySnippet } : {}),
+    contextMessageLimit,
     provider,
     profileId,
+    runMode,
+    ...(continueReason ? { continueReason } : {}),
     ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
     ...(typeof systemPrompt === "string" && systemPrompt.trim().length > 0 ? { systemPrompt } : {}),
     memoryEnabled,

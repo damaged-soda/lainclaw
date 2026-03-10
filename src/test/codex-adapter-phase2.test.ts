@@ -11,6 +11,7 @@ import {
   type SessionManagedAgent,
 } from "../runtime/sessionAgentManager.js";
 import { withTempHome } from "./helpers.js";
+import type { RequestContext } from "../shared/types.js";
 
 function makeUsageZero() {
   return {
@@ -125,11 +126,43 @@ class ScriptedEventAgent implements SessionManagedAgent {
     }
   }
 
+  async continue(): Promise<void> {
+    const lastMessage = this.state.messages[this.state.messages.length - 1] as Message | undefined;
+    const seedMessage = lastMessage && lastMessage.role !== "assistant"
+      ? lastMessage
+      : ({
+          role: "user",
+          content: "continue",
+          timestamp: Date.now(),
+        } as Message);
+    const { persistedMessages, events } = this.script(seedMessage);
+    this.state.messages.push(...persistedMessages.slice(1));
+    for (const event of events) {
+      this.emit(event);
+    }
+  }
+
   private emit(event: AgentEvent): void {
     for (const listener of this.listeners) {
       listener(event);
     }
   }
+}
+
+function makeRequestContext(overrides: Partial<RequestContext>): RequestContext {
+  return {
+    requestId: "req-event",
+    createdAt: "2026-03-11T00:00:00.000Z",
+    input: "prompt",
+    sessionKey: "event-session",
+    sessionId: "event-session-id",
+    transcriptMessages: [],
+    contextMessageLimit: 12,
+    provider: "openai-codex",
+    profileId: "default",
+    runMode: "prompt",
+    ...overrides,
+  };
 }
 
 function buildSuccessfulToolConversation(message: Message, runtimeToolName: string): ScriptedConversation {
@@ -411,14 +444,12 @@ test("codex adapter uses AgentEvent order and event-derived tool state for succe
         observedEvents.push(runtimeAgentEvent.event.type);
       },
       requestContext: {
-        requestId: "req-event-success",
-        createdAt: "2026-03-11T00:00:00.000Z",
-        input: "please write the file",
-        sessionKey: "event-success-session",
-        sessionId: "event-success-session-id",
-        initialMessages: [],
-        provider: "openai-codex",
-        profileId: "default",
+        ...makeRequestContext({
+          requestId: "req-event-success",
+          input: "please write the file",
+          sessionKey: "event-success-session",
+          sessionId: "event-success-session-id",
+        }),
       },
     });
 
@@ -500,14 +531,12 @@ test("codex adapter accumulates tool failures from AgentEvent without relying on
         },
       ],
       requestContext: {
-        requestId: "req-event-failure",
-        createdAt: "2026-03-11T00:00:00.000Z",
-        input: "run the protected command",
-        sessionKey: "event-failure-session",
-        sessionId: "event-failure-session-id",
-        initialMessages: [],
-        provider: "openai-codex",
-        profileId: "default",
+        ...makeRequestContext({
+          requestId: "req-event-failure",
+          input: "run the protected command",
+          sessionKey: "event-failure-session",
+          sessionId: "event-failure-session-id",
+        }),
       },
     });
 

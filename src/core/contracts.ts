@@ -1,4 +1,5 @@
 import type { RuntimeAgentEventSink } from "../shared/types.js";
+import type { RuntimeContinueReason, RuntimeRunMode } from "../shared/types.js";
 
 export type CoreErrorCode =
   | "VALIDATION_ERROR"
@@ -125,12 +126,15 @@ export interface CoreSessionHistoryMessage {
 
 export interface CoreSessionPort {
   resolveSession(input: CoreSessionLoadInput): Promise<CoreSessionRecord>;
-  loadHistory(sessionId: string): Promise<CoreSessionHistoryMessage[]>;
+  loadTranscriptMessages(sessionId: string): Promise<CoreSessionHistoryMessage[]>;
   loadMemorySnippet(sessionKey: string): Promise<string>;
   appendTurnMessages(
     sessionId: string,
     userInput: string,
     finalResult: CoreSessionTurnResult,
+    options?: {
+      includeUserMessage?: boolean;
+    },
   ): Promise<void>;
   appendToolSummary(
     sessionId: string,
@@ -151,6 +155,8 @@ export interface CoreRunAgentOptions {
   profileId: string;
   sessionKey: string;
   newSession?: boolean;
+  runMode?: RuntimeRunMode;
+  continueReason?: RuntimeContinueReason;
   memory?: boolean;
   withTools: boolean;
   cwd?: string;
@@ -163,14 +169,17 @@ export interface CoreRuntimeInput {
   input: string;
   sessionKey: string;
   sessionId: string;
-  priorMessages: CoreSessionHistoryMessage[];
+  transcriptMessages: CoreSessionHistoryMessage[];
   memorySnippet: string;
+  runMode?: RuntimeRunMode;
+  continueReason?: RuntimeContinueReason;
   provider: string;
   profileId: string;
   withTools: boolean;
   tools?: CoreContextToolSpec[];
   systemPrompt?: string;
   memoryEnabled?: boolean;
+  contextMessageLimit?: number;
   cwd?: string;
   debug?: boolean;
   onAgentEvent?: RuntimeAgentEventSink;
@@ -180,6 +189,8 @@ export interface CoreRuntimeResult {
   route: string;
   stage: string;
   result: string;
+  runMode: RuntimeRunMode;
+  continueReason?: RuntimeContinueReason;
   toolCalls?: CoreToolCall[];
   toolResults?: CoreToolExecutionLog[];
   assistantMessage?: unknown;

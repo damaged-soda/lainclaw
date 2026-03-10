@@ -29,7 +29,7 @@ test("runtime context emits stdout debug logs when debug is enabled", async () =
       input: "latest input",
       sessionKey: "session-debug",
       sessionId: "session-id-debug",
-      priorMessages: [
+      transcriptMessages: [
         {
           id: "msg-1",
           role: "user",
@@ -42,29 +42,31 @@ test("runtime context emits stdout debug logs when debug is enabled", async () =
       profileId: "default",
       withTools: true,
       tools: [],
+      runMode: "prompt",
       memoryEnabled: true,
       debug: true,
     })),
   );
 
   assert.equal(result.requestContext.debug, true);
-  assert.equal(result.requestContext.initialMessages.length, 2);
-  assert.equal(result.requestContext.initialMessages[0]?.role, "user");
-  assert.equal(result.requestContext.initialMessages[1]?.role, "user");
+  assert.equal(result.requestContext.transcriptMessages.length, 1);
+  assert.equal(result.requestContext.transcriptMessages[0]?.role, "user");
+  assert.equal(result.requestContext.memorySnippet, "remember this");
+  assert.equal(result.promptMessage?.role, "user");
   assert.equal(
-    typeof result.requestContext.initialMessages[0]?.content === "string"
-      ? result.requestContext.initialMessages[0]?.content
+    typeof result.requestContext.transcriptMessages[0]?.content === "string"
+      ? result.requestContext.transcriptMessages[0]?.content
       : "",
     "previous input",
   );
   assert.equal(
-    typeof result.requestContext.initialMessages[1]?.content === "string"
-      ? result.requestContext.initialMessages[1]?.content
+    typeof result.promptMessage?.content === "string"
+      ? result.promptMessage?.content
       : "",
-    "[memory]\nremember this",
+    "latest input",
   );
-  assert.match(output, /runtime\.context\.history_attached/);
-  assert.match(output, /runtime\.context\.memory_attached/);
+  assert.match(output, /runtime\.context\.transcript_attached/);
+  assert.match(output, /runtime\.context\.memory_loaded/);
   assert.match(output, /runtime\.context\.user_input_attached/);
   assert.match(output, /runtime\.context\.request_built/);
   assert.match(output, /latest input/);

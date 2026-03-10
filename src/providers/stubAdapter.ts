@@ -2,11 +2,14 @@ import type { Message } from "@mariozechner/pi-ai";
 import type { ToolExecutionLog } from "../tools/types.js";
 import type { ProviderRunInput } from "./registry.js";
 import { ValidationError } from "../shared/types.js";
+import type { RuntimeContinueReason, RuntimeRunMode } from "../shared/types.js";
 
 export interface ProviderResult {
   route: string;
   stage: string;
   result: string;
+  runMode: RuntimeRunMode;
+  continueReason?: RuntimeContinueReason;
   toolCalls?: import("../tools/types.js").ToolCall[];
   toolResults?: ToolExecutionLog[];
   assistantMessage?: Message;
@@ -26,7 +29,7 @@ export async function runStubAdapter(input: ProviderRunInput): Promise<ProviderR
     throw new ValidationError("Missing provider. Set --provider in runtime input.", "MISSING_PROVIDER");
   }
   const normalizedInput = input.requestContext.input.trim();
-  const historyCount = context.initialMessages.length;
+  const historyCount = context.transcriptMessages.length;
   const shortHistory = `context=${historyCount}条消息`;
   const assistantMessage: Message = {
     role: "assistant",
@@ -62,6 +65,8 @@ export async function runStubAdapter(input: ProviderRunInput): Promise<ProviderR
       route,
       stage: "adapter.stub.summary",
       result: `[stub-summary] ${shortHistory}：我已接收到你的内容：${normalizedInput}`,
+      runMode: context.runMode,
+      ...(context.continueReason ? { continueReason: context.continueReason } : {}),
       assistantMessage,
       stopReason: assistantMessage.stopReason,
       provider,
@@ -73,6 +78,8 @@ export async function runStubAdapter(input: ProviderRunInput): Promise<ProviderR
     route,
     stage: "adapter.stub.echo",
     result: `[stub-echo][${context.sessionId}] ${shortHistory}，已接收到输入：${normalizedInput}`,
+    runMode: context.runMode,
+    ...(context.continueReason ? { continueReason: context.continueReason } : {}),
     assistantMessage,
     stopReason: assistantMessage.stopReason,
     provider,

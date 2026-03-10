@@ -73,6 +73,7 @@ test("core and runtime adapter can observe raw AgentEvent envelopes", async () =
               route: "adapter.stub",
               stage: "adapter.stub.event-test",
               result: "runtime reply",
+              runMode: "prompt",
               assistantMessage,
               stopReason: "stop",
               provider: input.requestContext.provider,

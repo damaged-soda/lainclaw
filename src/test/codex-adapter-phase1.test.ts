@@ -14,6 +14,7 @@ import {
   type SessionManagedAgent,
 } from "../runtime/sessionAgentManager.js";
 import { withTempHome } from "./helpers.js";
+import type { RequestContext } from "../shared/types.js";
 
 function makeUsageZero() {
   return {
@@ -145,11 +146,35 @@ class ToolAwareFakeAgent implements SessionManagedAgent {
     this.emit({ type: "message_end", message: assistantMessage });
   }
 
+  async continue(): Promise<void> {
+    const assistantMessage = makeAssistantMessage([
+      { type: "text", text: "continued" },
+    ]);
+    this.state.messages.push(assistantMessage);
+    this.emit({ type: "message_end", message: assistantMessage });
+  }
+
   private emit(event: AgentEvent): void {
     for (const listener of this.listeners) {
       listener(event);
     }
   }
+}
+
+function makeRequestContext(overrides: Partial<RequestContext>): RequestContext {
+  return {
+    requestId: "req-tool",
+    createdAt: "2026-03-10T00:00:00.000Z",
+    input: "please use tool now",
+    sessionKey: "tool-session",
+    sessionId: "tool-session-id",
+    transcriptMessages: [],
+    contextMessageLimit: 12,
+    provider: "openai-codex",
+    profileId: "default",
+    runMode: "prompt",
+    ...overrides,
+  };
 }
 
 test("codex adapter keeps tool execution working with session-managed agents", async () => {
@@ -199,14 +224,7 @@ test("codex adapter keeps tool execution working with session-managed agents", a
           },
         ],
         requestContext: {
-          requestId: "req-tool",
-          createdAt: "2026-03-10T00:00:00.000Z",
-          input: "please use tool now",
-          sessionKey: "tool-session",
-          sessionId: "tool-session-id",
-          initialMessages: [],
-          provider: "openai-codex",
-          profileId: "default",
+          ...makeRequestContext({}),
         },
       });
 

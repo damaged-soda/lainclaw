@@ -16,7 +16,7 @@ export async function buildTurnContext(
   ctx: RunCtx,
   session: CoreSessionRecord,
 ): Promise<TurnContext> {
-  const [memorySnippet, priorMessages] = await Promise.all([
+  const [memorySnippet, transcriptMessages] = await Promise.all([
     withFailureMapping(
       "core.session.loadMemory",
       ctx.requestId,
@@ -26,12 +26,12 @@ export async function buildTurnContext(
       () => ctx.sessionAdapter.loadMemorySnippet(session.sessionKey),
     ),
     withFailureMapping(
-      "core.session.loadHistory",
+      "core.session.loadTranscript",
       ctx.requestId,
       session.sessionKey,
       "SESSION_FAILURE",
       ctx.emitEvent,
-      () => ctx.sessionAdapter.loadHistory(session.sessionId),
+      () => ctx.sessionAdapter.loadTranscriptMessages(session.sessionId),
     ),
   ]);
   const tools = await withFailureMapping(
@@ -43,7 +43,7 @@ export async function buildTurnContext(
     () => ctx.toolsAdapter.listTools(),
   );
 
-  return { memorySnippet, priorMessages, tools };
+  return { memorySnippet, transcriptMessages, tools };
 }
 
 export async function persistTurn(
@@ -91,6 +91,9 @@ export async function persistTurn(
           result: runtimeResult.result,
           provider: runtimeResult.provider,
           profileId: runtimeResult.profileId,
+        },
+        {
+          includeUserMessage: runtimeResult.runMode === "prompt",
         },
       ),
   );
@@ -157,6 +160,8 @@ export async function persistTurn(
       sessionId: session.sessionId,
       provider: runtimeResult.provider,
       profileId: runtimeResult.profileId,
+      runMode: runtimeResult.runMode,
+      continueReason: runtimeResult.continueReason,
       toolError: Boolean(toolError),
     },
   });
@@ -241,8 +246,10 @@ async function runRuntimeForTurn(
         input: turnInput,
         sessionKey: session.sessionKey,
         sessionId: session.sessionId,
-        priorMessages: turnContext.priorMessages,
+        transcriptMessages: turnContext.transcriptMessages,
         memorySnippet: turnContext.memorySnippet,
+        ...(ctx.runMode ? { runMode: ctx.runMode } : {}),
+        ...(ctx.continueReason ? { continueReason: ctx.continueReason } : {}),
         provider: ctx.provider,
         profileId: ctx.profileId,
         withTools: ctx.withTools,

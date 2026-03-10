@@ -366,11 +366,11 @@ export async function recordSessionRoute(
   await saveSessionCatalog(catalog);
 }
 
-export function getRecentSessionMessages(sessionId: string): Promise<SessionHistoryMessage[]> {
+export function getRecentSessionTranscriptMessages(sessionId: string): Promise<SessionHistoryMessage[]> {
   return loadMessages(sessionId, CONTEXT_MESSAGE_LIMIT);
 }
 
-export function getAllSessionMessages(sessionId: string): Promise<SessionHistoryMessage[]> {
+export function getAllSessionTranscriptMessages(sessionId: string): Promise<SessionHistoryMessage[]> {
   return loadMessages(sessionId);
 }
 

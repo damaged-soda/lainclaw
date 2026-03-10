@@ -5,7 +5,7 @@ import { resolveAuthDirectory } from "../auth/configStore.js";
 
 const AGENT_STATE_DIR_NAME = "agent-state";
 const AGENT_STATE_FILE_EXTENSION = ".json";
-const AGENT_STATE_VERSION = 1 as const;
+const AGENT_STATE_VERSION = 2 as const;
 
 export interface AgentStateSnapshot {
   version: typeof AGENT_STATE_VERSION;
@@ -75,6 +75,7 @@ function sanitizeAgentStateSnapshot(raw: unknown): AgentStateSnapshot | undefine
 
   const candidate = raw as Partial<AgentStateSnapshot>;
   if (
+    candidate.version !== AGENT_STATE_VERSION ||
     !isNonEmptyString(candidate.sessionKey) ||
     !isNonEmptyString(candidate.sessionId) ||
     !isNonEmptyString(candidate.provider) ||

@@ -2,6 +2,7 @@ import type { CoreToolsAdapter } from "./adapters/tools.js";
 import type { CoreSessionAdapter } from "./adapters/session.js";
 import type { CoreRuntimeAdapter } from "./adapters/runtime.js";
 import type { CoreEventSink, CoreSessionHistoryMessage } from "./contracts.js";
+import type { RuntimeContinueReason, RuntimeRunMode } from "../shared/types.js";
 
 export type RunCtx = {
   requestId: string;
@@ -9,6 +10,8 @@ export type RunCtx = {
   provider: string;
   profileId: string;
   sessionKey: string;
+  runMode?: RuntimeRunMode;
+  continueReason?: RuntimeContinueReason;
   withTools: boolean;
   memoryEnabled?: boolean;
   cwd?: string;
@@ -21,6 +24,6 @@ export type RunCtx = {
 
 export type TurnContext = {
   memorySnippet: string;
-  priorMessages: CoreSessionHistoryMessage[];
+  transcriptMessages: CoreSessionHistoryMessage[];
   tools: ReturnType<CoreToolsAdapter["listTools"]>;
 };

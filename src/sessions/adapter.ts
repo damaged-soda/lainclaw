@@ -1,9 +1,9 @@
 import {
   appendSessionMessage,
   appendSessionMemory,
-  getAllSessionMessages,
+  getAllSessionTranscriptMessages,
   getOrCreateSession,
-  getRecentSessionMessages,
+  getRecentSessionTranscriptMessages,
   getSessionMemoryPath,
   loadSessionMemorySnippet,
   recordSessionRoute,
@@ -142,9 +142,10 @@ export function createSessionAdapter(): CoreSessionPort {
         return toCoreSessionRecord(snapshot);
       });
     },
-    loadHistory: (sessionId: string): Promise<CoreSessionHistoryMessage[]> => {
+    loadTranscriptMessages: (sessionId: string): Promise<CoreSessionHistoryMessage[]> => {
       return runWithSessionFailure(
-        async () => getRecentSessionMessages(sessionId).then((messages) => messages.map(toCoreHistoryMessage)),
+        async () =>
+          getRecentSessionTranscriptMessages(sessionId).then((messages) => messages.map(toCoreHistoryMessage)),
       );
     },
     loadMemorySnippet: (sessionKey: string): Promise<string> => {
@@ -154,9 +155,14 @@ export function createSessionAdapter(): CoreSessionPort {
       sessionId: string,
       userInput: string,
       finalResult: CoreSessionTurnResult,
+      options?: {
+        includeUserMessage?: boolean;
+      },
     ): Promise<void> => {
       await runWithSessionFailure(async () => {
-        await appendRuntimeMessage(sessionId, "user", userInput, finalResult, "msg-user");
+        if (options?.includeUserMessage !== false) {
+          await appendRuntimeMessage(sessionId, "user", userInput, finalResult, "msg-user");
+        }
         await appendRuntimeMessage(sessionId, "assistant", finalResult.result, finalResult, "msg-assistant");
       });
     },
@@ -200,7 +206,7 @@ export function createSessionAdapter(): CoreSessionPort {
           return false;
         }
 
-        const allMessages = await getAllSessionMessages(input.sessionId);
+        const allMessages = await getAllSessionTranscriptMessages(input.sessionId);
         if (allMessages.length <= 24) {
           return false;
         }
