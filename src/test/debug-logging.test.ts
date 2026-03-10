@@ -48,6 +48,21 @@ test("runtime context emits stdout debug logs when debug is enabled", async () =
   );
 
   assert.equal(result.requestContext.debug, true);
+  assert.equal(result.requestContext.initialMessages.length, 2);
+  assert.equal(result.requestContext.initialMessages[0]?.role, "user");
+  assert.equal(result.requestContext.initialMessages[1]?.role, "user");
+  assert.equal(
+    typeof result.requestContext.initialMessages[0]?.content === "string"
+      ? result.requestContext.initialMessages[0]?.content
+      : "",
+    "previous input",
+  );
+  assert.equal(
+    typeof result.requestContext.initialMessages[1]?.content === "string"
+      ? result.requestContext.initialMessages[1]?.content
+      : "",
+    "[memory]\nremember this",
+  );
   assert.match(output, /runtime\.context\.history_attached/);
   assert.match(output, /runtime\.context\.memory_attached/);
   assert.match(output, /runtime\.context\.user_input_attached/);

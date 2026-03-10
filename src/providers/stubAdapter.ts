@@ -26,7 +26,7 @@ export async function runStubAdapter(input: ProviderRunInput): Promise<ProviderR
     throw new ValidationError("Missing provider. Set --provider in runtime input.", "MISSING_PROVIDER");
   }
   const normalizedInput = input.requestContext.input.trim();
-  const historyCount = Array.isArray(context.messages) ? context.messages.length : 0;
+  const historyCount = context.initialMessages.length;
   const shortHistory = `context=${historyCount}条消息`;
   const assistantMessage: Message = {
     role: "assistant",

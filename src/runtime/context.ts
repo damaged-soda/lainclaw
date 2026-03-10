@@ -15,8 +15,9 @@ export const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;
 
 interface RuntimeContextMessages {
   requestContext: RequestContext;
-  contextMessages: Message[];
-  historyContext: Message[];
+  initialMessages: Message[];
+  historyMessages: Message[];
+  promptMessage: Message;
 }
 
 // Core flow: 上下文构建与主流程入参准备
@@ -38,26 +39,26 @@ export function buildRuntimeRequestContext(params: {
 }): RuntimeContextMessages {
   const resolvedTools = params.withTools && Array.isArray(params.tools) ? params.tools : undefined;
   const provider = params.provider.trim();
-  const historyContext = contextMessagesFromHistory(
+  const historyMessages = contextMessagesFromHistory(
     trimContextMessages(params.priorMessages),
     provider,
   );
-  const contextMessages: Message[] = [...historyContext];
+  const initialMessages: Message[] = [...historyMessages];
 
-  if (historyContext.length > 0) {
+  if (historyMessages.length > 0) {
     writeDebugLogIfEnabled(params.debug, "runtime.context.history_attached", {
       requestId: params.requestId,
       sessionKey: params.sessionKey,
       provider,
       profileId: params.profileId,
-      count: historyContext.length,
-      messages: historyContext,
+      count: historyMessages.length,
+      messages: historyMessages,
     });
   }
 
   if (typeof params.memorySnippet === "string" && params.memorySnippet.length > 0) {
     const memoryMessage = makeUserContextMessage(`[memory]\n${params.memorySnippet}`);
-    contextMessages.push(memoryMessage);
+    initialMessages.push(memoryMessage);
     writeDebugLogIfEnabled(params.debug, "runtime.context.memory_attached", {
       requestId: params.requestId,
       sessionKey: params.sessionKey,
@@ -67,14 +68,13 @@ export function buildRuntimeRequestContext(params: {
     });
   }
 
-  const inputMessage = makeUserContextMessage(params.input);
-  contextMessages.push(inputMessage);
+  const promptMessage = makeUserContextMessage(params.input);
   writeDebugLogIfEnabled(params.debug, "runtime.context.user_input_attached", {
     requestId: params.requestId,
     sessionKey: params.sessionKey,
     provider,
     profileId: params.profileId,
-    message: inputMessage,
+    message: promptMessage,
   });
 
   const requestContext = makeBaseRequestContext(
@@ -83,7 +83,7 @@ export function buildRuntimeRequestContext(params: {
     params.input,
     params.sessionKey,
     params.sessionId,
-    contextMessages,
+    initialMessages,
     provider,
     params.profileId,
     resolvedTools,
@@ -110,7 +110,7 @@ export function buildRuntimeRequestContext(params: {
     requestContext,
   });
 
-  return { requestContext, contextMessages, historyContext };
+  return { requestContext, initialMessages, historyMessages, promptMessage };
 }
 
 function nowTs() {
@@ -203,7 +203,7 @@ export function makeBaseRequestContext(
   input: string,
   sessionKey: string,
   sessionId: string,
-  messages: Message[],
+  initialMessages: Message[],
   provider: string,
   profileId: string,
   tools?: ContextToolSpec[],
@@ -217,7 +217,7 @@ export function makeBaseRequestContext(
     input,
     sessionKey,
     sessionId,
-    messages,
+    initialMessages,
     provider,
     profileId,
     ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),

@@ -53,6 +53,10 @@ function resolveSessionTranscriptPath(sessionId: string) {
   return path.join(resolveSessionDirectory(), `${sessionId}.jsonl`);
 }
 
+export function getSessionTranscriptPath(sessionId: string): string {
+  return resolveSessionTranscriptPath(sessionId);
+}
+
 function resolveMemoryDirectory() {
   return path.join(resolveAuthDirectory(), MEMORY_DIR_NAME);
 }

@@ -13,7 +13,7 @@
     "lint": "tsc --noEmit",
     "build": "rm -rf dist && node scripts/gen-version.mjs && tsc && chmod +x dist/index.js",
     "bootstrap": "npm run build && npm link",
-    "test": "npm run build && node --test dist/test/pairing-store.test.js"
+    "test": "npm run build && node --test --test-concurrency=1 dist/test/*.test.js"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.59.0",

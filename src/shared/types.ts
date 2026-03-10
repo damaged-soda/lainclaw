@@ -20,7 +20,7 @@ export interface RequestContext {
   input: string;
   sessionKey: string;
   sessionId: string;
-  messages: Message[];
+  initialMessages: Message[];
   systemPrompt?: string;
   tools?: ContextToolSpec[];
   provider: string;
