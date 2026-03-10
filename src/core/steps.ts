@@ -249,6 +249,7 @@ async function runRuntimeForTurn(
         tools: turnContext.tools,
         ...(session.memoryEnabled ? { memoryEnabled: session.memoryEnabled } : {}),
         ...(typeof ctx.cwd === "string" ? { cwd: ctx.cwd } : {}),
+        ...(ctx.debug === true ? { debug: true } : {}),
       }),
   );
 }

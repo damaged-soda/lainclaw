@@ -26,6 +26,7 @@ export interface RequestContext {
   provider: string;
   profileId: string;
   memoryEnabled?: boolean;
+  debug?: boolean;
 }
 
 export interface PipelineResult {

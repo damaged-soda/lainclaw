@@ -12,6 +12,7 @@ export type RunCtx = {
   withTools: boolean;
   memoryEnabled?: boolean;
   cwd?: string;
+  debug?: boolean;
   emitEvent: CoreEventSink;
   sessionAdapter: CoreSessionAdapter;
   toolsAdapter: CoreToolsAdapter;

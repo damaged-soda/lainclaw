@@ -152,6 +152,7 @@ export interface CoreRunAgentOptions {
   memory?: boolean;
   withTools: boolean;
   cwd?: string;
+  debug?: boolean;
 }
 
 export interface CoreRuntimeInput {
@@ -169,6 +170,7 @@ export interface CoreRuntimeInput {
   systemPrompt?: string;
   memoryEnabled?: boolean;
   cwd?: string;
+  debug?: boolean;
 }
 
 export interface CoreRuntimeResult {

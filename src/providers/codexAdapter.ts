@@ -13,6 +13,8 @@ import { resolveBooleanFlag } from "../shared/envFlags.js";
 import { parseToolCallsFromResponse } from "../providers/codex/toolCallParser.js";
 import { buildToolErrorLog, createToolExecutionState } from "../providers/codex/toolExecutionState.js";
 import { toText } from "../providers/codex/messageText.js";
+import { writeDebugLogIfEnabled } from "../shared/debug.js";
+import { buildCodexDebugRequestSnapshot } from "./codexDebug.js";
 
 // 该系统提示词是 MVP 阶段的临时兜底：用于让 provider responses 在最小路径下可直接返回结果。
 // 这是可替换配置，不是对外契约；后续接手时可按体验目标调整文案、样式或完全替换。
@@ -121,12 +123,44 @@ export async function runCodexAdapter(input: ProviderRunInput): Promise<Provider
     throw new Error(`No model found: ${provider}/${OPENAI_CODEX_MODEL}`);
   }
   const profileId = profile.id;
+  const normalizedMessages = normalizeMessages(requestContext);
+  const systemPrompt = requestContext.systemPrompt ?? OPENAI_CODEX_SYSTEM_PROMPT;
+  const promptMessage: Message = {
+    role: "user",
+    content: requestContext.input,
+    timestamp: Date.now(),
+  };
+
+  writeDebugLogIfEnabled(requestContext.debug, "provider.codex.system_prompt_attached", {
+    requestId,
+    sessionKey: requestContext.sessionKey,
+    provider,
+    profileId,
+    source: requestContext.systemPrompt ? "request_context" : "default",
+    systemPrompt,
+  });
+
+  writeDebugLogIfEnabled(requestContext.debug, "provider.codex.pi_agent_core_request", {
+    requestId,
+    sessionKey: requestContext.sessionKey,
+    provider,
+    profileId,
+    route: input.route,
+    withTools: input.withTools,
+    request: buildCodexDebugRequestSnapshot({
+      systemPrompt,
+      modelName: OPENAI_CODEX_MODEL,
+      messages: normalizedMessages,
+      tools: toolSpecs,
+      prompt: promptMessage,
+    }),
+  });
 
   const agent = new Agent({
     initialState: {
-      systemPrompt: requestContext.systemPrompt ?? OPENAI_CODEX_SYSTEM_PROMPT,
+      systemPrompt,
       model,
-      messages: normalizeMessages(requestContext),
+      messages: normalizedMessages,
       tools: agentTools,
     },
     convertToLlm: (messages) =>
@@ -149,11 +183,7 @@ export async function runCodexAdapter(input: ProviderRunInput): Promise<Provider
   });
 
   try {
-    await agent.prompt({
-      role: "user",
-      content: requestContext.input,
-      timestamp: Date.now(),
-    });
+    await agent.prompt(promptMessage);
   } catch (error) {
     runErr = error instanceof Error ? error : new Error(String(error));
   } finally {

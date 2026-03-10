@@ -71,6 +71,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         withTools,
         newSession,
         cwd,
+        debug,
       } = options;
 
       const ctx: RunCtx = {
@@ -82,6 +83,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         withTools,
         memoryEnabled,
         cwd: typeof cwd === "string" ? cwd : undefined,
+        debug: debug === true,
         emitEvent,
         sessionAdapter,
         toolsAdapter,
@@ -101,6 +103,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
             provider: ctx.provider,
             profileId: ctx.profileId,
             withTools: ctx.withTools,
+            debug: ctx.debug === true,
           },
         });
 

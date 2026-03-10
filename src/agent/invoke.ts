@@ -17,6 +17,7 @@ interface RunAgentRuntimeContext {
   newSession?: unknown;
   memory?: unknown;
   cwd?: unknown;
+  debug?: unknown;
 }
 
 interface RunAgentRequest {
@@ -34,6 +35,7 @@ interface NormalizedRunAgentInput {
   newSession?: boolean;
   memory?: boolean;
   cwd?: string;
+  debug?: boolean;
 }
 
 function toRunAgentResult(result: NormalizedCoreResult): RunAgentOutput {
@@ -56,6 +58,7 @@ async function runAgentCore(input: string, request: RunAgentRequest): Promise<Ru
     ...(typeof invocation.newSession === "boolean" ? { newSession: invocation.newSession } : {}),
     ...(typeof invocation.memory === "boolean" ? { memory: invocation.memory } : {}),
     ...(typeof invocation.cwd === "string" ? { cwd: invocation.cwd } : {}),
+    ...(typeof invocation.debug === "boolean" ? { debug: invocation.debug } : {}),
   });
   return toRunAgentResult(result);
 }
@@ -89,5 +92,6 @@ function normalizeRunAgentInput(input: RunAgentRuntimeContext, sessionKey?: unkn
     ...(typeof input.newSession === "boolean" ? { newSession: input.newSession } : {}),
     ...(typeof input.memory === "boolean" ? { memory: input.memory } : {}),
     ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
+    ...(typeof input.debug === "boolean" ? { debug: input.debug } : {}),
   };
 }

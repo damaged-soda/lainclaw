@@ -13,6 +13,7 @@ export interface AgentCommandInput {
   newSession?: boolean;
   memory?: boolean;
   withTools?: boolean;
+  debug?: boolean;
 }
 
 export async function runAgentCommand(input: AgentCommandInput): Promise<number> {
@@ -31,6 +32,7 @@ export async function runAgentCommand(input: AgentCommandInput): Promise<number>
         newSession: input.newSession,
         memory: input.memory,
         withTools: input.withTools,
+        debug: input.debug,
       },
     });
 
@@ -60,6 +62,7 @@ interface AgentOptions {
   newSession?: boolean;
   memory?: boolean;
   withTools?: boolean;
+  debug?: boolean;
 }
 
 function normalizeInput(input: string[]): string {
@@ -92,6 +95,7 @@ export function buildAgentCommand(program: Command): Command {
         ...(parsed.newSession === true ? { newSession: true } : {}),
         ...(typeof parsed.memory === 'boolean' ? { memory: parsed.memory } : {}),
         ...(typeof parsed.withTools === 'boolean' ? { withTools: parsed.withTools } : {}),
+        ...(parsed.debug === true ? { debug: true } : {}),
       });
       setExitCode(command, code);
     });
@@ -107,7 +111,8 @@ export function buildAgentCommand(program: Command): Command {
   });
   command
     .addOption(new Option('--session <name>', 'Use specified session id.'))
-    .addOption(new Option('--new-session', 'Start a fresh session.'));
+    .addOption(new Option('--new-session', 'Start a fresh session.'))
+    .addOption(new Option('--debug', 'Enable local debug output.'));
 
   return command;
 }

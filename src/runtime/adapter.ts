@@ -48,6 +48,7 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
           tools: toCoreContextTools(input.tools),
           systemPrompt: input.systemPrompt,
           memoryEnabled: input.memoryEnabled ?? true,
+          debug: input.debug === true,
         });
 
         const { adapter: adapterResult } = await runRuntime({

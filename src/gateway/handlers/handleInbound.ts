@@ -16,6 +16,7 @@ interface AgentRuntimeContext {
   profileId?: string;
   withTools?: boolean;
   memory?: boolean;
+  debug?: boolean;
 }
 
 interface HandleInboundOptions {
@@ -107,6 +108,7 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
       profileId: params.runtime.profileId,
       withTools: params.runtime.withTools,
       memory: params.runtime.memory,
+      debug: params.runtime.debug,
     },
   });
 

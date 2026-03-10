@@ -12,6 +12,7 @@ interface LocalGatewayOverrides {
   profileId?: string;
   withTools?: boolean;
   memory?: boolean;
+  debug?: boolean;
 }
 
 function normalizeLocalOverrides(raw: unknown): LocalGatewayOverrides {
@@ -21,26 +22,29 @@ function normalizeLocalOverrides(raw: unknown): LocalGatewayOverrides {
   return raw as LocalGatewayOverrides;
 }
 
-function buildRunInboundRuntime(overrides: LocalGatewayOverrides): {
+function buildRunInboundRuntime(overrides: LocalGatewayOverrides, context?: ChannelRunContext): {
   provider?: string;
   profileId?: string;
   withTools?: boolean;
   memory?: boolean;
+  debug?: boolean;
 } {
   return {
     provider: overrides.provider,
     profileId: overrides.profileId,
     withTools: overrides.withTools,
     memory: overrides.memory,
+    ...(context?.debug === true ? { debug: true } : {}),
   };
 }
 
 async function runCoreInbound(
   inbound: InboundMessage,
   overrides: LocalGatewayOverrides,
+  context?: ChannelRunContext,
 ): Promise<OutboundMessage | void> {
   return handleInbound(inbound, {
-    runtime: buildRunInboundRuntime(overrides),
+    runtime: buildRunInboundRuntime(overrides, context),
     policyConfig: {},
   });
 }
@@ -60,7 +64,7 @@ export const localChannel: Channel = {
           return overridden;
         }
       }
-      return runCoreInbound(inbound, runtimeOverrides);
+      return runCoreInbound(inbound, runtimeOverrides, _context);
     });
   },
 };

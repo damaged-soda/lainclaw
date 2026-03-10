@@ -15,6 +15,7 @@ interface FeishuRuntimeOptions {
   profileId?: string;
   withTools?: boolean;
   memory?: boolean;
+  debug?: boolean;
 }
 
 function normalizeFeishuOverrides(overrides: unknown): Partial<FeishuGatewayConfig> {
@@ -29,21 +30,23 @@ async function toRuntimeConfig(overrides: unknown, context?: ChannelRunContext):
   return resolveFeishuGatewayConfig(normalizeFeishuOverrides(overrides), channel);
 }
 
-function buildRunInboundRuntime(config: FeishuGatewayConfig): FeishuRuntimeOptions {
+function buildRunInboundRuntime(config: FeishuGatewayConfig, context?: ChannelRunContext): FeishuRuntimeOptions {
   return {
     provider: config.provider,
     profileId: config.profileId,
     withTools: config.withTools,
     memory: config.memory,
+    ...(context?.debug === true ? { debug: true } : {}),
   };
 }
 
 async function runCoreInbound(
   inbound: Parameters<typeof handleInbound>[0],
   config: FeishuGatewayConfig,
+  context?: ChannelRunContext,
 ): ReturnType<typeof handleInbound> {
   return handleInbound(inbound, {
-    runtime: buildRunInboundRuntime(config),
+    runtime: buildRunInboundRuntime(config, context),
     policyConfig: config,
     timeoutMs: config.requestTimeoutMs || DEFAULT_AGENT_TIMEOUT_MS,
     onFailureHint: makeFeishuFailureHint,
@@ -102,7 +105,7 @@ export const feishuChannel: Channel = {
           return overridden;
         }
       }
-      return runCoreInbound(inbound, config);
+      return runCoreInbound(inbound, config, context);
     };
 
     await runFeishuTransport({

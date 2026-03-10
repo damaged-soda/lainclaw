@@ -231,7 +231,10 @@ async function runChannelRuntime(
   overrides: GatewayStartOverrides,
   serviceContext: GatewayServiceRunContext,
 ): Promise<void> {
-  const context: ChannelRunContext = { channel };
+  const context: ChannelRunContext = {
+    channel,
+    ...(serviceContext.debug === true ? { debug: true } : {}),
+  };
   const shouldPreflightInProcess = !serviceContext.daemon || serviceContext.serviceChild === true;
 
   const runInProcess = async (): Promise<void> => {

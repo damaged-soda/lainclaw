@@ -9,6 +9,7 @@ import {
   inspectWorkspaceContext,
   resolveWorkspaceDir,
 } from "../shared/workspaceContext.js";
+import { writeDebugLogIfEnabled } from "../shared/debug.js";
 
 export const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;
 
@@ -33,6 +34,7 @@ export function buildRuntimeRequestContext(params: {
   tools?: ContextToolSpec[];
   systemPrompt?: string;
   memoryEnabled?: boolean;
+  debug?: boolean;
 }): RuntimeContextMessages {
   const resolvedTools = params.withTools && Array.isArray(params.tools) ? params.tools : undefined;
   const provider = params.provider.trim();
@@ -42,11 +44,38 @@ export function buildRuntimeRequestContext(params: {
   );
   const contextMessages: Message[] = [...historyContext];
 
-  if (typeof params.memorySnippet === "string" && params.memorySnippet.length > 0) {
-    contextMessages.push(makeUserContextMessage(`[memory]\n${params.memorySnippet}`));
+  if (historyContext.length > 0) {
+    writeDebugLogIfEnabled(params.debug, "runtime.context.history_attached", {
+      requestId: params.requestId,
+      sessionKey: params.sessionKey,
+      provider,
+      profileId: params.profileId,
+      count: historyContext.length,
+      messages: historyContext,
+    });
   }
 
-  contextMessages.push(makeUserContextMessage(params.input));
+  if (typeof params.memorySnippet === "string" && params.memorySnippet.length > 0) {
+    const memoryMessage = makeUserContextMessage(`[memory]\n${params.memorySnippet}`);
+    contextMessages.push(memoryMessage);
+    writeDebugLogIfEnabled(params.debug, "runtime.context.memory_attached", {
+      requestId: params.requestId,
+      sessionKey: params.sessionKey,
+      provider,
+      profileId: params.profileId,
+      message: memoryMessage,
+    });
+  }
+
+  const inputMessage = makeUserContextMessage(params.input);
+  contextMessages.push(inputMessage);
+  writeDebugLogIfEnabled(params.debug, "runtime.context.user_input_attached", {
+    requestId: params.requestId,
+    sessionKey: params.sessionKey,
+    provider,
+    profileId: params.profileId,
+    message: inputMessage,
+  });
 
   const requestContext = makeBaseRequestContext(
     params.requestId,
@@ -60,7 +89,26 @@ export function buildRuntimeRequestContext(params: {
     resolvedTools,
     params.systemPrompt,
     params.memoryEnabled ?? true,
+    params.debug === true,
   );
+
+  if (typeof requestContext.systemPrompt === "string" && requestContext.systemPrompt.length > 0) {
+    writeDebugLogIfEnabled(params.debug, "runtime.context.system_prompt_attached", {
+      requestId: params.requestId,
+      sessionKey: params.sessionKey,
+      provider,
+      profileId: params.profileId,
+      systemPrompt: requestContext.systemPrompt,
+    });
+  }
+
+  writeDebugLogIfEnabled(params.debug, "runtime.context.request_built", {
+    requestId: params.requestId,
+    sessionKey: params.sessionKey,
+    provider,
+    profileId: params.profileId,
+    requestContext,
+  });
 
   return { requestContext, contextMessages, historyContext };
 }
@@ -161,6 +209,7 @@ export function makeBaseRequestContext(
   tools?: ContextToolSpec[],
   systemPrompt?: string,
   memoryEnabled: boolean = true,
+  debug = false,
 ): RequestContext {
   return {
     requestId,
@@ -174,5 +223,6 @@ export function makeBaseRequestContext(
     ...(Array.isArray(tools) && tools.length > 0 ? { tools } : {}),
     ...(typeof systemPrompt === "string" && systemPrompt.trim().length > 0 ? { systemPrompt } : {}),
     memoryEnabled,
+    ...(debug ? { debug: true } : {}),
   };
 }
