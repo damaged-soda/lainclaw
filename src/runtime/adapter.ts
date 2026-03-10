@@ -4,6 +4,7 @@ import {
 } from "./context.js";
 import {
   runRuntime,
+  type RuntimeResult,
 } from "./entrypoint.js";
 import {
   type CoreContextToolSpec,
@@ -15,6 +16,13 @@ import {
 
 export interface RuntimeAdapterOptions {
   run?: (input: CoreRuntimeInput) => Promise<CoreRuntimeResult>;
+  runRuntimeFn?: (input: {
+    requestContext: ReturnType<typeof buildRuntimeRequestContext>["requestContext"];
+    withTools: boolean;
+    cwd?: string;
+    toolSpecs?: CoreContextToolSpec[];
+    onAgentEvent?: CoreRuntimeInput["onAgentEvent"];
+  }) => Promise<RuntimeResult>;
 }
 
 function toCoreContextTools(rawTools: CoreContextToolSpec[] | undefined): CoreContextToolSpec[] {
@@ -30,6 +38,8 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
       run: options.run,
     };
   }
+
+  const runRuntimeFn = options.runRuntimeFn ?? runRuntime;
 
   return {
     run: async (input: CoreRuntimeInput): Promise<CoreRuntimeResult> => {
@@ -51,11 +61,12 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
           debug: input.debug === true,
         });
 
-        const { adapter: adapterResult } = await runRuntime({
+        const { adapter: adapterResult } = await runRuntimeFn({
           requestContext: requestContext.requestContext,
           withTools: input.withTools,
           ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
           ...(Array.isArray(input.tools) ? { toolSpecs: toCoreContextTools(input.tools) } : {}),
+          ...(input.onAgentEvent ? { onAgentEvent: input.onAgentEvent } : {}),
         });
 
         return {

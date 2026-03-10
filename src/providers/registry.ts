@@ -2,7 +2,7 @@ import { runCodexAdapter } from "./codexAdapter.js";
 import { runStubAdapter } from "./stubAdapter.js";
 import type { ProviderResult } from "./stubAdapter.js";
 import type { RequestContext } from "../shared/types.js";
-import type { ContextToolSpec } from "../shared/types.js";
+import type { ContextToolSpec, RuntimeAgentEventSink } from "../shared/types.js";
 
 export interface ProviderRunInput {
   requestContext: RequestContext;
@@ -10,6 +10,7 @@ export interface ProviderRunInput {
   withTools: boolean;
   cwd?: string;
   toolSpecs?: ContextToolSpec[];
+  onAgentEvent?: RuntimeAgentEventSink;
 }
 
 export type RuntimeProvider = (input: ProviderRunInput) => Promise<ProviderResult>;

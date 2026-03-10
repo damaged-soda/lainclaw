@@ -250,6 +250,21 @@ async function runRuntimeForTurn(
         ...(session.memoryEnabled ? { memoryEnabled: session.memoryEnabled } : {}),
         ...(typeof ctx.cwd === "string" ? { cwd: ctx.cwd } : {}),
         ...(ctx.debug === true ? { debug: true } : {}),
+        onAgentEvent: async (agentEvent) => {
+          await ctx.emitEvent({
+            level: "trace",
+            requestId: ctx.requestId,
+            at: nowIso(),
+            name: "agent.runtime.event",
+            message: agentEvent.event.type,
+            sessionKey: session.sessionKey,
+            route: agentEvent.route,
+            stage: "core.runtime.run",
+            payload: {
+              agentEvent,
+            },
+          });
+        },
       }),
   );
 }

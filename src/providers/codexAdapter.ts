@@ -13,6 +13,7 @@ import { resolveBooleanFlag } from "../shared/envFlags.js";
 import { parseToolCallsFromResponse } from "../providers/codex/toolCallParser.js";
 import { buildToolErrorLog, createToolExecutionState } from "../providers/codex/toolExecutionState.js";
 import { toText } from "../providers/codex/messageText.js";
+import { createCodexAgentEventAccumulator } from "../providers/codex/agentEventAccumulator.js";
 import { writeDebugLogIfEnabled } from "../shared/debug.js";
 import { buildCodexDebugRequestSnapshot } from "./codexDebug.js";
 import {
@@ -79,6 +80,10 @@ export function createRunCodexAdapter(
     const toolNameMap = buildRuntimeToolNameMap(toolSpecs);
     const toolState = createToolExecutionState();
     const canonicalByCodexName = toolNameMap.canonicalByCodex;
+    const eventState = createCodexAgentEventAccumulator({
+      provider,
+      canonicalByCodexName,
+    });
 
     const runTool = async (toolCall: ToolCall, signal?: AbortSignal): Promise<ToolExecutionLog> => {
       const resolvedCall: ToolCall = {
@@ -167,6 +172,7 @@ export function createRunCodexAdapter(
     let finalStopReason: PiStopReason | undefined;
     let runErr: Error | undefined;
     let agentSource: "memory" | "snapshot" | "new" = "new";
+    let agentEventDispatch = Promise.resolve();
 
     await sessionAgentManager.runWithSessionAgent(
       {
@@ -188,10 +194,31 @@ export function createRunCodexAdapter(
       async (agent, context) => {
         agentSource = context.source;
         const unsubscribe = agent.subscribe((event: AgentEvent) => {
-          if (event.type === "message_end" && event.message.role === "assistant") {
-            finalMessage = event.message;
-            finalStopReason = event.message.stopReason;
+          eventState.consume(event);
+
+          if (input.onAgentEvent) {
+            const runtimeAgentEvent = {
+              requestId,
+              sessionKey: requestContext.sessionKey,
+              sessionId: requestContext.sessionId,
+              route: input.route,
+              provider,
+              profileId,
+              event,
+            };
+            agentEventDispatch = agentEventDispatch
+              .catch(() => undefined)
+              .then(async () => {
+                try {
+                  await input.onAgentEvent?.(runtimeAgentEvent);
+                } catch {
+                  // Runtime event sinks are observational only.
+                }
+              });
           }
+
+          finalMessage = eventState.finalMessage;
+          finalStopReason = eventState.stopReason as PiStopReason | undefined;
         });
 
         try {
@@ -200,6 +227,7 @@ export function createRunCodexAdapter(
           runErr = error instanceof Error ? error : new Error(String(error));
         } finally {
           unsubscribe();
+          await agentEventDispatch;
         }
       },
     );
@@ -213,28 +241,38 @@ export function createRunCodexAdapter(
       source: agentSource,
     });
 
-    if (runErr && !toolState.toolError && !isAbortError(runErr)) {
+    const primaryToolError = eventState.toolError ?? toolState.toolError;
+    if (runErr && !primaryToolError && !isAbortError(runErr)) {
       throw runErr;
     }
 
     const failed = Boolean(runErr);
-    const responseText = toText(finalMessage);
+    const resolvedFinalMessage = eventState.finalMessage ?? finalMessage;
+    const resolvedStopReason = eventState.stopReason ?? finalStopReason;
+    const responseText = toText(resolvedFinalMessage);
     const responsePrefix = shouldPrefixResponse(profile.id, provider);
-    const toolBlockContent = finalMessage && Array.isArray(finalMessage.content) ? finalMessage.content : [];
-    const toolCalls = parseToolCallsFromResponse(
-      { content: toolBlockContent },
+    const fallbackToolBlockContent =
+      resolvedFinalMessage && Array.isArray(resolvedFinalMessage.content) ? resolvedFinalMessage.content : [];
+    const fallbackToolCalls = parseToolCallsFromResponse(
+      { content: fallbackToolBlockContent },
       canonicalByCodexName,
       provider,
     );
+    const resolvedToolCalls = eventState.hasToolCallEvents
+      ? eventState.toolCalls
+      : fallbackToolCalls;
+    const resolvedToolResults = eventState.hasToolResultEvents
+      ? eventState.toolResults
+      : toolState.toolResults;
 
     return {
       route: input.route,
       stage: getAdapterStage(input.route, profileId, failed),
       result: `${responsePrefix}${responseText || requestContext.input}`,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      toolResults: toolState.toolResults.length > 0 ? toolState.toolResults : undefined,
-      assistantMessage: finalMessage,
-      stopReason: failed ? "tool_error_or_runtime_error" : finalStopReason,
+      toolCalls: resolvedToolCalls.length > 0 ? resolvedToolCalls : undefined,
+      toolResults: resolvedToolResults.length > 0 ? resolvedToolResults : undefined,
+      assistantMessage: resolvedFinalMessage,
+      stopReason: failed ? "tool_error_or_runtime_error" : resolvedStopReason,
       provider,
       profileId,
     };

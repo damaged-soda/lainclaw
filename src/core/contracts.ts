@@ -1,3 +1,5 @@
+import type { RuntimeAgentEventSink } from "../shared/types.js";
+
 export type CoreErrorCode =
   | "VALIDATION_ERROR"
   | "MISSING_PROVIDER"
@@ -171,6 +173,7 @@ export interface CoreRuntimeInput {
   memoryEnabled?: boolean;
   cwd?: string;
   debug?: boolean;
+  onAgentEvent?: RuntimeAgentEventSink;
 }
 
 export interface CoreRuntimeResult {

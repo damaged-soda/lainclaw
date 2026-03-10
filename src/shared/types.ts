@@ -1,3 +1,4 @@
+import type { AgentEvent } from "@mariozechner/pi-agent-core";
 import type { ToolCall, ToolError, ToolExecutionLog } from "../tools/types.js";
 import type { Message } from "@mariozechner/pi-ai";
 
@@ -28,6 +29,18 @@ export interface RequestContext {
   memoryEnabled?: boolean;
   debug?: boolean;
 }
+
+export interface RuntimeAgentEvent {
+  requestId: string;
+  sessionKey: string;
+  sessionId: string;
+  route: string;
+  provider: string;
+  profileId: string;
+  event: AgentEvent;
+}
+
+export type RuntimeAgentEventSink = (event: RuntimeAgentEvent) => Promise<void> | void;
 
 export interface PipelineResult {
   requestId: string;

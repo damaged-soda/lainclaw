@@ -5,12 +5,14 @@ import {
   type ResolvedProvider,
 } from "../providers/registry.js";
 import type { ProviderResult } from "../providers/stubAdapter.js";
+import type { RuntimeAgentEventSink } from "../shared/types.js";
 
 export interface RuntimeOptions {
   requestContext: ProviderRunInput["requestContext"];
   withTools: boolean;
   cwd?: string;
   toolSpecs?: ProviderRunInput["toolSpecs"];
+  onAgentEvent?: RuntimeAgentEventSink;
 }
 
 export interface RuntimeResult {
@@ -27,6 +29,7 @@ export async function runRuntime(input: RuntimeOptions): Promise<RuntimeResult> 
     withTools: input.withTools,
     ...(typeof input.cwd === "string" ? { cwd: path.resolve(input.cwd) } : {}),
     ...(Array.isArray(input.toolSpecs) ? { toolSpecs: input.toolSpecs } : {}),
+    ...(input.onAgentEvent ? { onAgentEvent: input.onAgentEvent } : {}),
   };
 
   const adapter = await resolved.run(providerInput);
