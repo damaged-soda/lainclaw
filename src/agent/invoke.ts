@@ -1,4 +1,11 @@
 import { coreCoordinator } from "../app/coreCoordinator.js";
+import {
+  buildLangfuseTags,
+  isLangfuseTracingReady,
+  propagateAttributes,
+  runWithLangfuseFallback,
+  startActiveObservation,
+} from "../observability/langfuse.js";
 
 type NormalizedCoreResult = Awaited<ReturnType<typeof coreCoordinator.runAgent>>;
 
@@ -18,6 +25,7 @@ interface RunAgentRuntimeContext {
   memory?: unknown;
   cwd?: unknown;
   debug?: unknown;
+  userId?: unknown;
 }
 
 interface RunAgentRequest {
@@ -36,6 +44,7 @@ interface NormalizedRunAgentInput {
   memory?: boolean;
   cwd?: string;
   debug?: boolean;
+  userId?: string;
 }
 
 function toRunAgentResult(result: NormalizedCoreResult): RunAgentOutput {
@@ -50,17 +59,98 @@ function toRunAgentResult(result: NormalizedCoreResult): RunAgentOutput {
 
 async function runAgentCore(input: string, request: RunAgentRequest): Promise<RunAgentOutput> {
   const invocation = resolveRunAgentInput(request);
-  const result = await coreCoordinator.runAgent(input, {
-    provider: invocation.provider,
-    profileId: invocation.profileId,
-    sessionKey: invocation.sessionKey,
-    withTools: invocation.withTools,
-    ...(typeof invocation.newSession === "boolean" ? { newSession: invocation.newSession } : {}),
-    ...(typeof invocation.memory === "boolean" ? { memory: invocation.memory } : {}),
-    ...(typeof invocation.cwd === "string" ? { cwd: invocation.cwd } : {}),
-    ...(typeof invocation.debug === "boolean" ? { debug: invocation.debug } : {}),
-  });
-  return toRunAgentResult(result);
+  const execute = async (): Promise<RunAgentOutput> => {
+    const result = await coreCoordinator.runAgent(input, {
+      provider: invocation.provider,
+      profileId: invocation.profileId,
+      sessionKey: invocation.sessionKey,
+      withTools: invocation.withTools,
+      ...(typeof invocation.newSession === "boolean" ? { newSession: invocation.newSession } : {}),
+      ...(typeof invocation.memory === "boolean" ? { memory: invocation.memory } : {}),
+      ...(typeof invocation.cwd === "string" ? { cwd: invocation.cwd } : {}),
+      ...(typeof invocation.debug === "boolean" ? { debug: invocation.debug } : {}),
+    });
+    return toRunAgentResult(result);
+  };
+
+  if (!isLangfuseTracingReady()) {
+    return execute();
+  }
+
+  const tags = buildLangfuseTags([
+    "app:lainclaw",
+    "feature:agent",
+    request.channelId ? `channel:${request.channelId}` : undefined,
+    invocation.provider ? `provider:${invocation.provider}` : undefined,
+    invocation.withTools ? "tools:on" : "tools:off",
+  ]);
+
+  return runWithLangfuseFallback(
+    (executeObserved) => propagateAttributes(
+      {
+        sessionId: invocation.sessionKey,
+        ...(invocation.userId ? { userId: invocation.userId } : {}),
+        ...(tags.length > 0 ? { tags } : {}),
+        metadata: {
+          provider: invocation.provider,
+          profileId: invocation.profileId,
+          sessionKey: invocation.sessionKey,
+          channel: request.channelId ?? "unknown",
+        },
+        traceName: "lainclaw.agent.run",
+      },
+      async () => startActiveObservation(
+        "lainclaw.agent.run",
+        async (agentObservation) => {
+          agentObservation.update({
+            input,
+            metadata: {
+              provider: invocation.provider,
+              profileId: invocation.profileId,
+              sessionKey: invocation.sessionKey,
+              channelId: request.channelId ?? "unknown",
+              withTools: invocation.withTools,
+              ...(invocation.userId ? { userId: invocation.userId } : {}),
+            },
+          });
+          agentObservation.setTraceIO({ input });
+
+          try {
+            const result = await executeObserved();
+            agentObservation.update({
+              output: result.text,
+              metadata: {
+                requestId: result.requestId,
+                sessionId: result.sessionId,
+                sessionKey: result.sessionKey,
+                isNewSession: result.isNewSession === true,
+              },
+            });
+            agentObservation.setTraceIO({ output: result.text });
+            return result;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            agentObservation.update({
+              level: "ERROR",
+              statusMessage: message,
+              output: {
+                error: message,
+              },
+            });
+            agentObservation.setTraceIO({
+              output: {
+                error: message,
+              },
+            });
+            throw error;
+          }
+        },
+        { asType: "agent" },
+      ),
+    ),
+    execute,
+    "agent.run",
+  );
 }
 
 export async function runAgent(request: RunAgentRequest): Promise<RunAgentOutput> {
@@ -84,6 +174,7 @@ function trimOrUndefined(raw: unknown): string | undefined {
 }
 
 function normalizeRunAgentInput(input: RunAgentRuntimeContext, sessionKey?: unknown): NormalizedRunAgentInput {
+  const userId = trimOrUndefined(input.userId);
   return {
     provider: trimOrUndefined(input.provider) || "",
     profileId: trimOrUndefined(input.profileId) || "",
@@ -93,5 +184,6 @@ function normalizeRunAgentInput(input: RunAgentRuntimeContext, sessionKey?: unkn
     ...(typeof input.memory === "boolean" ? { memory: input.memory } : {}),
     ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
     ...(typeof input.debug === "boolean" ? { debug: input.debug } : {}),
+    ...(userId ? { userId } : {}),
   };
 }

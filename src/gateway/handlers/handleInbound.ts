@@ -17,6 +17,7 @@ interface AgentRuntimeContext {
   withTools?: boolean;
   memory?: boolean;
   debug?: boolean;
+  userId?: string;
 }
 
 interface HandleInboundOptions {
@@ -62,11 +63,17 @@ export async function handleInbound(
   }
 
   try {
+    const runtime = message.actorId.trim()
+      ? {
+        ...options.runtime,
+        userId: message.actorId.trim(),
+      }
+      : options.runtime;
     const responseText = await runAgentWithTimeout({
       input,
       channelId: message.channel,
       sessionKey,
-      runtime: options.runtime,
+      runtime,
       timeoutMs: options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
     });
 
@@ -109,6 +116,7 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
       withTools: params.runtime.withTools,
       memory: params.runtime.memory,
       debug: params.runtime.debug,
+      userId: params.runtime.userId,
     },
   });
 

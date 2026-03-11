@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { Message } from "@mariozechner/pi-ai";
 import { buildRuntimeRequestContext } from "../runtime/context.js";
 import { buildCodexDebugRequestSnapshot } from "../providers/codexDebug.js";
+import { buildDebugObservationContent } from "../shared/debug.js";
 
 async function captureStdout<T>(fn: () => T | Promise<T>): Promise<{ output: string; result: T }> {
   const originalWrite = process.stdout.write.bind(process.stdout);
@@ -21,7 +22,7 @@ async function captureStdout<T>(fn: () => T | Promise<T>): Promise<{ output: str
   }
 }
 
-test("runtime context emits stdout debug logs when debug is enabled", async () => {
+test("runtime context no longer emits stdout debug logs when debug is enabled", async () => {
   const { output, result } = await captureStdout(() =>
     Promise.resolve(buildRuntimeRequestContext({
       requestId: "req-debug",
@@ -65,12 +66,7 @@ test("runtime context emits stdout debug logs when debug is enabled", async () =
       : "",
     "latest input",
   );
-  assert.match(output, /runtime\.context\.bootstrap_attached/);
-  assert.match(output, /runtime\.context\.memory_loaded/);
-  assert.match(output, /runtime\.context\.user_input_attached/);
-  assert.match(output, /runtime\.context\.request_built/);
-  assert.match(output, /latest input/);
-  assert.match(output, /remember this/);
+  assert.equal(output, "");
 });
 
 test("codex debug snapshot includes the final pi-agent-core request payload", () => {
@@ -109,4 +105,92 @@ test("codex debug snapshot includes the final pi-agent-core request payload", ()
   assert.equal(snapshot.initialState.messages, messages);
   assert.equal(snapshot.prompt, prompt);
   assert.equal(snapshot.initialState.tools?.[0]?.name, "read");
+});
+
+test("debug log observation promotes the most important field out of metadata", () => {
+  const observation = buildDebugObservationContent("provider.codex.system_prompt_attached", {
+    requestId: "req-debug",
+    sessionKey: "session-debug",
+    provider: "openai-codex",
+    profileId: "default",
+    source: "default",
+    systemPrompt: "You are a concise and reliable coding assistant.",
+  });
+
+  assert.equal(
+    observation.input,
+    "You are a concise and reliable coding assistant.",
+  );
+  assert.equal(observation.output, undefined);
+  assert.deepEqual(observation.metadata, {
+    requestId: "req-debug",
+    sessionKey: "session-debug",
+    provider: "openai-codex",
+    profileId: "default",
+    source: "default",
+  });
+});
+
+test("debug log observation promotes state-style payloads into input", () => {
+  const observation = buildDebugObservationContent("runtime.agent.session.bound", {
+    sessionKey: "session-debug",
+    sessionId: "session-id-debug",
+    provider: "openai-codex",
+    source: "new",
+    requestedRunMode: "prompt",
+    resolvedRunMode: "prompt",
+    lastMessageRole: "assistant",
+    bootstrapMessageCount: 12,
+    agentMessageCount: 12,
+  });
+
+  assert.deepEqual(observation.input, {
+    source: "new",
+    requestedRunMode: "prompt",
+    resolvedRunMode: "prompt",
+    lastMessageRole: "assistant",
+    bootstrapMessageCount: 12,
+    agentMessageCount: 12,
+  });
+  assert.equal(observation.output, undefined);
+  assert.deepEqual(observation.metadata, {
+    sessionKey: "session-debug",
+    sessionId: "session-id-debug",
+    provider: "openai-codex",
+  });
+});
+
+test("debug log observation serializes unsupported values safely", () => {
+  const circular: { self?: unknown } = {};
+  circular.self = circular;
+
+  const observation = buildDebugObservationContent("runtime.context.request_built", {
+    count: 1n,
+    handler: function testHandler() {
+      return undefined;
+    },
+    error: new Error("boom"),
+    circular,
+  });
+
+  assert.equal(observation.input, undefined);
+  assert.deepEqual(observation.output && typeof observation.output === "object"
+    ? {
+      name: (observation.output as { name?: unknown }).name,
+      message: (observation.output as { message?: unknown }).message,
+      stack: typeof (observation.output as { stack?: unknown }).stack === "string",
+    }
+    : undefined, {
+    name: "Error",
+    message: "boom",
+    stack: true,
+  });
+  assert.equal(observation.metadata?.count, "1");
+  assert.equal(observation.metadata?.handler, "[Function testHandler]");
+  assert.equal(
+    observation.metadata?.circular && typeof observation.metadata.circular === "object"
+      ? (observation.metadata.circular as { self?: unknown }).self
+      : undefined,
+    "[Circular]",
+  );
 });

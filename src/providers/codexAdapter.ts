@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { AgentEvent, AgentMessage } from "@mariozechner/pi-agent-core";
-import { getModel } from "@mariozechner/pi-ai";
+import { getModel, type AssistantMessage, type Message, type Usage } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext, OPENAI_CODEX_MODEL } from "../auth/authManager.js";
 import type { ProviderRunInput } from "./registry.js";
 import type { ProviderResult } from "./stubAdapter.js";
@@ -13,6 +13,13 @@ import { toText } from "../providers/codex/messageText.js";
 import { createCodexAgentEventAccumulator } from "../providers/codex/agentEventAccumulator.js";
 import { writeDebugLogIfEnabled } from "../shared/debug.js";
 import { buildCodexDebugRequestSnapshot } from "./codexDebug.js";
+import {
+  isLangfuseTracingReady,
+  reportLangfuseRuntimeFailure,
+  runLangfuseOperationSafely,
+  startActiveObservation,
+  startObservation,
+} from "../observability/langfuse.js";
 import {
   sessionAgentManager as defaultSessionAgentManager,
   type SessionAgentManager,
@@ -27,6 +34,106 @@ import {
 // 该系统提示词是 MVP 阶段的临时兜底：用于让 provider responses 在最小路径下可直接返回结果。
 // 这是可替换配置，不是对外契约；后续接手时可按体验目标调整文案、样式或完全替换。
 const OPENAI_CODEX_SYSTEM_PROMPT = "You are a concise and reliable coding assistant.";
+
+interface AggregatedUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  totalTokens: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+}
+
+function isAssistantMessage(message: AgentMessage | Message | undefined): message is AssistantMessage {
+  return Boolean(message && typeof message === "object" && "role" in message && message.role === "assistant");
+}
+
+function createEmptyUsage(): AggregatedUsage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0,
+    },
+  };
+}
+
+function addUsage(target: AggregatedUsage, usage: Usage | undefined): void {
+  if (!usage) {
+    return;
+  }
+
+  target.input += usage.input || 0;
+  target.output += usage.output || 0;
+  target.cacheRead += usage.cacheRead || 0;
+  target.cacheWrite += usage.cacheWrite || 0;
+  target.totalTokens += usage.totalTokens || 0;
+  target.cost.input += usage.cost?.input || 0;
+  target.cost.output += usage.cost?.output || 0;
+  target.cost.cacheRead += usage.cost?.cacheRead || 0;
+  target.cost.cacheWrite += usage.cost?.cacheWrite || 0;
+  target.cost.total += usage.cost?.total || 0;
+}
+
+function hasUsage(usage: AggregatedUsage): boolean {
+  return (
+    usage.input > 0
+    || usage.output > 0
+    || usage.cacheRead > 0
+    || usage.cacheWrite > 0
+    || usage.totalTokens > 0
+    || usage.cost.total > 0
+  );
+}
+
+function toLangfuseUsageDetails(usage: AggregatedUsage): Record<string, number> {
+  return {
+    input: usage.input,
+    output: usage.output,
+    cacheRead: usage.cacheRead,
+    cacheWrite: usage.cacheWrite,
+    totalTokens: usage.totalTokens,
+  };
+}
+
+function toLangfuseCostDetails(usage: AggregatedUsage): Record<string, number> {
+  return {
+    input: usage.cost.input,
+    output: usage.cost.output,
+    cacheRead: usage.cost.cacheRead,
+    cacheWrite: usage.cost.cacheWrite,
+    total: usage.cost.total,
+  };
+}
+
+function buildGenerationInput(systemPrompt: string, messages: Message[]) {
+  return {
+    systemPrompt,
+    messages,
+  };
+}
+
+function buildToolObservationOutput(log: ToolExecutionLog): unknown {
+  return {
+    ok: log.result.ok,
+    ...(log.result.content !== undefined ? { content: log.result.content } : {}),
+    ...(log.result.error ? { error: log.result.error } : {}),
+    ...(log.result.meta ? { meta: log.result.meta } : {}),
+  };
+}
 
 function isAbortError(error: unknown): error is Error {
   return (
@@ -101,6 +208,7 @@ export function createRunCodexAdapter(
     const requestId = requestContext.requestId;
     const toolSpecs = resolveTools(input.toolSpecs, input.withTools);
     const cwd = path.resolve(input.cwd || process.cwd());
+    const tracingEnabled = isLangfuseTracingReady();
     const toolNameMap = buildRuntimeToolNameMap(toolSpecs);
     const canonicalByCodexName = toolNameMap.canonicalByCodex;
     const eventState = createCodexAgentEventAccumulator({
@@ -138,12 +246,63 @@ export function createRunCodexAdapter(
             },
           },
         };
+        if (tracingEnabled) {
+          runLangfuseOperationSafely(() => {
+            const toolObservation = startObservation(
+              `tool.${resolvedCall.name}`,
+              {
+                input: resolvedCall.args,
+                output: buildToolObservationOutput(log),
+                metadata: {
+                  requestId,
+                  sessionId: requestContext.sessionId,
+                  sessionKey: requestContext.sessionKey,
+                  provider,
+                  profileId: requestContext.profileId,
+                  toolCallId: resolvedCall.id,
+                  toolName: resolvedCall.name,
+                },
+                ...(log.result.ok ? {} : {
+                  level: "ERROR" as const,
+                  statusMessage: log.result.error?.message ?? `tool ${resolvedCall.name} failed`,
+                }),
+              },
+              { asType: "tool" },
+            );
+            toolObservation.end();
+          }, `tool.${resolvedCall.name}`);
+        }
         return log;
       } catch (error) {
-        return buildToolErrorLog(
+        const log = buildToolErrorLog(
           resolvedCall,
           error instanceof Error ? error.message : "tool execution failed",
         );
+        if (tracingEnabled) {
+          runLangfuseOperationSafely(() => {
+            const toolObservation = startObservation(
+              `tool.${resolvedCall.name}`,
+              {
+                input: resolvedCall.args,
+                output: buildToolObservationOutput(log),
+                metadata: {
+                  requestId,
+                  sessionId: requestContext.sessionId,
+                  sessionKey: requestContext.sessionKey,
+                  provider,
+                  profileId: requestContext.profileId,
+                  toolCallId: resolvedCall.id,
+                  toolName: resolvedCall.name,
+                },
+                level: "ERROR",
+                statusMessage: log.result.error?.message ?? `tool ${resolvedCall.name} failed`,
+              },
+              { asType: "tool" },
+            );
+            toolObservation.end();
+          }, `tool.${resolvedCall.name}`);
+        }
+        return log;
       }
     };
 
@@ -196,6 +355,7 @@ export function createRunCodexAdapter(
           requestContext,
           messages: requestMessages,
         });
+        const llmMessages = convertAgentMessagesToLlm(transformedMessages);
 
         writeDebugLogIfEnabled(requestContext.debug, "provider.codex.run_selected", {
           requestId,
@@ -224,38 +384,13 @@ export function createRunCodexAdapter(
           request: buildCodexDebugRequestSnapshot({
             systemPrompt,
             modelName: OPENAI_CODEX_MODEL,
-            messages: convertAgentMessagesToLlm(transformedMessages),
+            messages: llmMessages,
             tools: toolSpecs,
             ...(promptMessage ? { prompt: promptMessage } : {}),
           }),
         });
 
-        const unsubscribe = agent.subscribe((event: AgentEvent) => {
-          eventState.consume(event);
-
-          if (input.onAgentEvent) {
-            const runtimeAgentEvent = {
-              requestId,
-              sessionKey: requestContext.sessionKey,
-              sessionId: requestContext.sessionId,
-              route: input.route,
-              provider,
-              profileId,
-              event,
-            };
-            agentEventDispatch = agentEventDispatch
-              .catch(() => undefined)
-              .then(async () => {
-                try {
-                  await input.onAgentEvent?.(runtimeAgentEvent);
-                } catch {
-                  // Runtime event sinks are observational only.
-                }
-              });
-          }
-        });
-
-        try {
+        const executeAgentRun = async () => {
           if (context.runMode === "continue") {
             await agent.continue();
           } else if (promptMessage) {
@@ -263,11 +398,160 @@ export function createRunCodexAdapter(
           } else {
             throw new Error("Prompt mode requires a user message.");
           }
+        };
+
+        const runWithSubscription = async (onEvent?: (event: AgentEvent) => void) => {
+          const unsubscribe = agent.subscribe((event: AgentEvent) => {
+            eventState.consume(event);
+            onEvent?.(event);
+
+            if (input.onAgentEvent) {
+              const runtimeAgentEvent = {
+                requestId,
+                sessionKey: requestContext.sessionKey,
+                sessionId: requestContext.sessionId,
+                route: input.route,
+                provider,
+                profileId,
+                event,
+              };
+              agentEventDispatch = agentEventDispatch
+                .catch(() => undefined)
+                .then(async () => {
+                  try {
+                    await input.onAgentEvent?.(runtimeAgentEvent);
+                  } catch {
+                    // Runtime event sinks are observational only.
+                  }
+                });
+            }
+          });
+
+          try {
+            await executeAgentRun();
+          } catch (error) {
+            runErr = error instanceof Error ? error : new Error(String(error));
+          } finally {
+            unsubscribe();
+            await agentEventDispatch;
+          }
+        };
+
+        if (!tracingEnabled) {
+          await runWithSubscription();
+          return;
+        }
+
+        const generationInput = buildGenerationInput(systemPrompt, llmMessages);
+        let generationRunStarted = false;
+        try {
+          await startActiveObservation(
+            "openai-codex.run",
+            async (generationObservation) => {
+              const usage = createEmptyUsage();
+              let completionStartTime: Date | undefined;
+              let streamedOutput = "";
+              let assistantMessageCount = 0;
+
+              generationObservation.update({
+                model: OPENAI_CODEX_MODEL,
+                input: generationInput,
+                metadata: {
+                  requestId,
+                  route: input.route,
+                  provider,
+                  profileId,
+                  source: agentSource,
+                  requestedRunMode: requestContext.runMode,
+                  runMode,
+                  continueReason: continueReason ?? "none",
+                  withTools: input.withTools,
+                  sessionId: requestContext.sessionId,
+                  sessionKey: requestContext.sessionKey,
+                },
+              });
+
+              generationRunStarted = true;
+              await runWithSubscription((event) => {
+                if (event.type === "message_start" && isAssistantMessage(event.message) && !completionStartTime) {
+                  completionStartTime = new Date();
+                }
+
+                if (event.type === "message_update" && isAssistantMessage(event.message)) {
+                  if (!completionStartTime) {
+                    completionStartTime = new Date();
+                  }
+                  const partialText = toText(event.message);
+                  if (partialText) {
+                    streamedOutput = partialText;
+                    runLangfuseOperationSafely(() => {
+                      generationObservation.update({
+                        ...(completionStartTime ? { completionStartTime } : {}),
+                        output: streamedOutput,
+                      });
+                    }, "codex.generation.stream");
+                  }
+                }
+
+                if (event.type === "message_end" && isAssistantMessage(event.message)) {
+                  assistantMessageCount += 1;
+                  addUsage(usage, event.message.usage);
+                  const messageText = toText(event.message);
+                  if (messageText) {
+                    streamedOutput = messageText;
+                  }
+                }
+              });
+
+              const finalAssistant = eventState.finalMessage;
+              const finalOutput = toText(finalAssistant);
+              const resolvedOutput = finalOutput || streamedOutput;
+
+              runLangfuseOperationSafely(() => {
+                generationObservation.update({
+                  ...(completionStartTime ? { completionStartTime } : {}),
+                  ...(resolvedOutput ? { output: resolvedOutput } : {}),
+                  ...(finalAssistant && isAssistantMessage(finalAssistant)
+                    ? { model: finalAssistant.model }
+                    : {}),
+                  ...(hasUsage(usage)
+                    ? {
+                      usageDetails: toLangfuseUsageDetails(usage),
+                      costDetails: toLangfuseCostDetails(usage),
+                    }
+                    : {}),
+                  metadata: {
+                    requestId,
+                    route: input.route,
+                    provider,
+                    profileId,
+                    source: agentSource,
+                    requestedRunMode: requestContext.runMode,
+                    runMode,
+                    continueReason: continueReason ?? "none",
+                    withTools: input.withTools,
+                    sessionId: requestContext.sessionId,
+                    sessionKey: requestContext.sessionKey,
+                    assistantMessageCount,
+                    toolCallCount: eventState.toolCalls.length,
+                    stopReason: eventState.stopReason ?? "unknown",
+                  },
+                  ...(runErr
+                    ? {
+                      level: "ERROR" as const,
+                      statusMessage: runErr.message,
+                    }
+                    : {}),
+                });
+              }, "codex.generation.final");
+            },
+            { asType: "generation" },
+          );
         } catch (error) {
-          runErr = error instanceof Error ? error : new Error(String(error));
-        } finally {
-          unsubscribe();
-          await agentEventDispatch;
+          reportLangfuseRuntimeFailure("codex.generation", error);
+          if (!generationRunStarted) {
+            await runWithSubscription();
+          }
         }
       },
     );
