@@ -19,8 +19,8 @@
     "@langfuse/otel": "^5.0.0",
     "@langfuse/tracing": "^5.0.0",
     "@larksuiteoapi/node-sdk": "^1.59.0",
-    "@mariozechner/pi-agent-core": "latest",
-    "@mariozechner/pi-ai": "^0.55.0",
+    "@mariozechner/pi-agent-core": "^0.57.1",
+    "@mariozechner/pi-ai": "^0.57.1",
     "@opentelemetry/sdk-node": "^0.213.0",
     "commander": "^14.0.3"
   },

@@ -1,11 +1,11 @@
 import readline from "node:readline";
-import { loginOpenAICodex, getOAuthApiKey } from "@mariozechner/pi-ai";
-import type { OAuthCredentials } from "@mariozechner/pi-ai";
+import { loginOpenAICodex, getOAuthApiKey } from "@mariozechner/pi-ai/oauth";
+import type { OAuthCredentials } from "@mariozechner/pi-ai/oauth";
 import { loadAuthStore, saveAuthStore, resolveAuthFilePath } from "./configStore.js";
 import type { AuthProfile, AuthStore } from "./types.js";
 
 const OPENAI_CODEX_PROVIDER = "openai-codex";
-const OPENAI_CODEX_MODEL = "gpt-5.3-codex";
+const OPENAI_CODEX_MODEL = "gpt-5.4";
 
 export { OPENAI_CODEX_PROVIDER, OPENAI_CODEX_MODEL };
 
