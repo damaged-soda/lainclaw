@@ -30,7 +30,7 @@ const DEFAULT_EXPIRE_BUFFER_SECONDS = 300;
 const FALLBACK_TOKEN_CACHE_SECONDS = 3600;
 const FEISHU_TEXT_MESSAGE_TYPE = "text";
 const DEFAULT_HEARTBEAT_ENABLED = false;
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 60 * 60_000;
 const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 
 function toNumber(raw: unknown): number | undefined {

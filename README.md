@@ -173,7 +173,7 @@ lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> --request-timeo
 
 ```bash
 lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
-  --heartbeat-enabled --heartbeat-target-open-id <openId> --heartbeat-interval-ms 300000
+  --heartbeat-enabled --heartbeat-target-open-id <openId> --heartbeat-interval-ms 3600000
 ```
 
 参数会优先来自命令行，未传入时会从环境变量回退，最后从配置作用域文件（默认 `~/.lainclaw/gateway.json`）读取上次配置（如存在）。
