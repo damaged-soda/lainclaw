@@ -135,7 +135,3 @@ function buildWorkspaceGuidance(context: WorkspaceContext): string[] {
 export function formatWorkspaceContextSummary(context: WorkspaceContext): string {
   return `${context.summaryText}\n${buildWorkspaceGuidance(context).join("\n")}`;
 }
-
-export function buildAgentSystemPrompt(context: WorkspaceContext, basePrompt = "You are a concise and reliable coding assistant."): string {
-  return `${basePrompt}\n\n${formatWorkspaceContextSummary(context)}`;
-}

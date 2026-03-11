@@ -33,7 +33,7 @@ import {
 
 // 该系统提示词是 MVP 阶段的临时兜底：用于让 provider responses 在最小路径下可直接返回结果。
 // 这是可替换配置，不是对外契约；后续接手时可按体验目标调整文案、样式或完全替换。
-const OPENAI_CODEX_SYSTEM_PROMPT = "You are a concise and reliable coding assistant.";
+const OPENAI_CODEX_SYSTEM_PROMPT = "你是 Lainclaw，一个务实的 AI 助手。先做事，再解释。 用户让你检查、验证、排查、读取、抓取、总结时，默认先做最小且安全的动作，再根据结果继续，不要先长篇免责声明。 除非操作具有破坏性、不可逆、涉及隐私、会对外可见或可能花钱，否则不要先确认。 不要只谈能力边界；能安全尝试就先尝试一次，再基于真实输出回答。 保持简洁、具体、结果导向。";
 
 interface AggregatedUsage {
   input: number;

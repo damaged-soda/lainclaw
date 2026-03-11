@@ -18,6 +18,7 @@ interface AgentRuntimeContext {
   memory?: boolean;
   debug?: boolean;
   userId?: string;
+  newSession?: boolean;
 }
 
 interface HandleInboundOptions {
@@ -25,6 +26,23 @@ interface HandleInboundOptions {
   policyConfig?: unknown;
   timeoutMs?: number;
   onFailureHint?: (rawMessage: string) => string;
+  runAgentFn?: typeof runAgent;
+}
+
+interface InboundBuiltinCommand {
+  kind: 'new-session';
+  replyText: string;
+}
+
+export function resolveBuiltinInboundCommand(input: string): InboundBuiltinCommand | undefined {
+  const normalized = input.trim();
+  if (normalized === '/new') {
+    return {
+      kind: 'new-session',
+      replyText: '已为你开启新会话。接下来我会按新的上下文继续。',
+    };
+  }
+  return undefined;
 }
 
 export async function handleInbound(
@@ -69,12 +87,34 @@ export async function handleInbound(
         userId: message.actorId.trim(),
       }
       : options.runtime;
+    const builtinCommand = resolveBuiltinInboundCommand(input);
+    if (builtinCommand?.kind === 'new-session') {
+      await runAgentWithTimeout({
+        input,
+        channelId: message.channel,
+        sessionKey,
+        runtime: {
+          ...runtime,
+          newSession: true,
+        },
+        timeoutMs: options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
+        runAgentFn: options.runAgentFn,
+      });
+
+      return {
+        requestId: message.requestId,
+        replyTo: message.replyTo,
+        text: builtinCommand.replyText,
+      };
+    }
+
     const responseText = await runAgentWithTimeout({
       input,
       channelId: message.channel,
       sessionKey,
       runtime,
       timeoutMs: options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS,
+      runAgentFn: options.runAgentFn,
     });
 
     return {
@@ -99,6 +139,7 @@ interface AgentRequest {
   sessionKey: string;
   runtime: AgentRuntimeContext;
   timeoutMs: number;
+  runAgentFn?: typeof runAgent;
 }
 
 async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
@@ -106,7 +147,8 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
     ? params.timeoutMs
     : DEFAULT_AGENT_TIMEOUT_MS;
 
-  const invoke = runAgent({
+  const runAgentFn = params.runAgentFn ?? runAgent;
+  const invoke = runAgentFn({
     input: params.input,
     channelId: params.channelId,
     sessionKey: params.sessionKey,
@@ -117,6 +159,7 @@ async function runAgentWithTimeout(params: AgentRequest): Promise<string> {
       memory: params.runtime.memory,
       debug: params.runtime.debug,
       userId: params.runtime.userId,
+      newSession: params.runtime.newSession,
     },
   });
 

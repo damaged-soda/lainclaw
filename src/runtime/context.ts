@@ -5,11 +5,6 @@ import {
   RequestContext,
   SessionHistoryMessage,
 } from "../shared/types.js";
-import {
-  buildAgentSystemPrompt,
-  inspectWorkspaceContext,
-  resolveWorkspaceDir,
-} from "../shared/workspaceContext.js";
 import { writeDebugLogIfEnabled } from "../shared/debug.js";
 
 export const DEFAULT_CONTEXT_MESSAGE_LIMIT = 12;
@@ -206,10 +201,6 @@ function nowTs() {
   return Date.now();
 }
 
-export function nowIso(): string {
-  return new Date(nowTs()).toISOString();
-}
-
 export function createRequestId(): string {
   return `lc-${nowTs()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
 }
@@ -231,11 +222,6 @@ export function trimTranscriptMessages(
     return messages;
   }
   return messages.slice(-limit);
-}
-
-export async function buildWorkspaceSystemPrompt(cwd: string | undefined): Promise<string> {
-  const workspaceContext = await inspectWorkspaceContext(resolveWorkspaceDir(cwd), nowIso());
-  return buildAgentSystemPrompt(workspaceContext);
 }
 
 function makeUsageZero() {
