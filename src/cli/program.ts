@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import { buildAuthCommand } from './commands/auth.js';
 import { buildGatewayCommand } from './commands/gateway.js';
-import { buildHeartbeatCommand } from './commands/heartbeat.js';
 import { buildPairingCommand } from './commands/pairing.js';
 import { buildToolsCommand } from './commands/tools.js';
 import { buildAgentCommand } from './commands/agent.js';
@@ -43,7 +42,6 @@ export function buildProgram(): Command {
   buildAuthCommand(program);
   buildToolsCommand(program);
   buildPairingCommand(program);
-  buildHeartbeatCommand(program);
   buildGatewayCommand(program);
 
   return program;

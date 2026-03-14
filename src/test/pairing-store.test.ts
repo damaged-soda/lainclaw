@@ -31,6 +31,15 @@ async function delay(ms: number): Promise<void> {
   });
 }
 
+async function runCliIsolated(argv: string[]): Promise<number> {
+  const previousExitCode = process.exitCode;
+  try {
+    return await runCli(argv);
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+}
+
 test("pairing store isolates requests by account id", async () => {
   await withTempHome(async (env) => {
     await upsertChannelPairingRequest({
@@ -167,18 +176,11 @@ test("expired pairing requests are pruned and revoked entries can be removed", a
 });
 
 test("model command parser rejects removed tool max steps flag", () => {
-  return runCli(["agent", "--tool-max-steps", "5", "hello"]).then((code) => assert.equal(code, 1));
+  return runCliIsolated(["agent", "--tool-max-steps", "5", "hello"]).then((code) => assert.equal(code, 1));
 });
 
 test("agent args parser rejects removed tool max steps flag", () => {
-  return runCli(["agent", "--tool-max-steps", "5", "hello"]).then((code) => {
+  return runCliIsolated(["agent", "--tool-max-steps", "5", "hello"]).then((code) => {
     assert.equal(code, 1);
   });
-});
-
-test("heartbeat parser rejects removed tool max steps flag", async () => {
-  await Promise.all([
-    runCli(["heartbeat", "run", "--tool-max-steps=5"]).then((code) => assert.equal(code, 1)),
-    runCli(["heartbeat", "add", "--tool-max-steps", "5", "summary"]).then((code) => assert.equal(code, 1)),
-  ]);
 });

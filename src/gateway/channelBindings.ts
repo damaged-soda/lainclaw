@@ -3,7 +3,6 @@ import {
   type ChannelSendText,
   type ChannelRunContext,
   type InboundHandler,
-  type SidecarHandle,
 } from '../channels/contracts.js';
 import {
   type FeishuChannelConfig,
@@ -18,13 +17,11 @@ import {
   type GatewayAgentRuntimeContext,
   type GatewayRuntimeConfig,
 } from './runtimeConfig.js';
-import { startHeartbeatSidecar } from './sidecars/heartbeat.js';
 
 export interface ResolvedGatewayChannelBinding {
   channelConfig?: unknown;
   runtimeConfig: GatewayRuntimeConfig;
   inboundHandler: InboundHandler;
-  startSidecars?: (preflightResult?: unknown) => Promise<SidecarHandle | void> | SidecarHandle | void;
 }
 
 function bindChannelOutboundText(
@@ -82,23 +79,6 @@ async function resolveFeishuBinding(
         },
       });
       return undefined;
-    },
-    startSidecars: (preflightResult?: unknown) => {
-      const nextChannelConfig = (preflightResult as FeishuChannelConfig | undefined) ?? channelConfig;
-      return startHeartbeatSidecar({
-        outbound,
-        enabled: nextChannelConfig.heartbeatEnabled,
-        provider: runtimeConfig.provider,
-        ...(typeof runtimeConfig.profileId === 'string' && runtimeConfig.profileId.trim()
-          ? { profileId: runtimeConfig.profileId.trim() }
-          : {}),
-        withTools: runtimeConfig.withTools,
-        memory: runtimeConfig.memory,
-        targetReplyTo: nextChannelConfig.heartbeatTargetOpenId,
-        sessionKey: nextChannelConfig.heartbeatSessionKey,
-        intervalMs: nextChannelConfig.heartbeatIntervalMs,
-        onFailureHint: makeFeishuRequestFailureHint,
-      });
     },
   };
 }

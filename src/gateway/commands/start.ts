@@ -261,32 +261,18 @@ async function runChannelRuntime(
   const binding = await resolveGatewayChannelBinding(channel, runtime, overrides, context);
 
   const runInProcess = async (): Promise<void> => {
-    const preflightResult = shouldPreflightInProcess
-      ? await runtime.preflight?.({
+    if (shouldPreflightInProcess) {
+      await runtime.preflight?.({
         config: binding.channelConfig,
         context,
-      })
-      : undefined;
-
-    let sidecarStop: (() => Promise<void> | void) | undefined;
-    if (binding.startSidecars) {
-      const sidecarHandle = await binding.startSidecars(preflightResult);
-      if (sidecarHandle) {
-        sidecarStop = sidecarHandle.stop;
-      }
-    }
-
-    try {
-      await runtime.run({
-        config: binding.channelConfig,
-        context,
-        onInbound: binding.inboundHandler,
       });
-    } finally {
-      if (sidecarStop) {
-        await sidecarStop();
-      }
     }
+
+    await runtime.run({
+      config: binding.channelConfig,
+      context,
+      onInbound: binding.inboundHandler,
+    });
   };
 
   await runGatewayServiceRunner({

@@ -1,4 +1,3 @@
-import { inspectHeartbeatTargetOpenId } from './diagnostics.js';
 import { validateFeishuGatewayCredentials } from './credentials.js';
 import { resolveFeishuChannelConfig, type FeishuChannelConfig } from './config.js';
 import { runFeishuTransport } from './transport.js';
@@ -35,19 +34,6 @@ export const feishuChannel: Channel = {
   preflight: async (input?: ChannelPreflightInput): Promise<FeishuChannelConfig> => {
     const config = await toChannelConfig(input?.config, input?.context);
     validateFeishuGatewayCredentials(config);
-    if (config.heartbeatEnabled && !config.heartbeatTargetOpenId) {
-      throw new Error('Missing value for heartbeat-target-open-id');
-    }
-    if (config.heartbeatEnabled && config.heartbeatTargetOpenId) {
-      const targetDiagnostic = inspectHeartbeatTargetOpenId(config.heartbeatTargetOpenId);
-      if (typeof targetDiagnostic.warning === 'string' && targetDiagnostic.warning.length > 0) {
-        if (targetDiagnostic.kind === 'unknown') {
-          console.warn(`[heartbeat] ${targetDiagnostic.warning}`);
-        } else {
-          console.info(`[heartbeat] ${targetDiagnostic.warning}`);
-        }
-      }
-    }
     return config;
   },
   sendText: async (replyTo, text, options): Promise<void> => {

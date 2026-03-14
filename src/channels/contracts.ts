@@ -35,10 +35,6 @@ export interface ChannelRunContext {
   [key: string]: unknown;
 }
 
-export interface SidecarHandle {
-  stop: () => Promise<void> | void;
-}
-
 export interface ChannelSendTextOptions {
   config?: unknown;
   meta?: Record<string, unknown>;

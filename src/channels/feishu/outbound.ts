@@ -29,9 +29,7 @@ const SEND_MESSAGE_ENDPOINT = "https://open.feishu.cn/open-apis/im/v1/messages";
 const DEFAULT_EXPIRE_BUFFER_SECONDS = 300;
 const FALLBACK_TOKEN_CACHE_SECONDS = 3600;
 const FEISHU_TEXT_MESSAGE_TYPE = "text";
-const DEFAULT_HEARTBEAT_ENABLED = false;
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 60 * 60_000;
-const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 
 function toNumber(raw: unknown): number | undefined {
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
@@ -191,14 +189,8 @@ export async function sendFeishuTextMessage(rawConfig: Partial<FeishuChannelConf
   openId: string;
   text: string;
 }): Promise<void> {
-  const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
   const config: FeishuChannelConfig = {
     requestTimeoutMs: rawConfig.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
-    heartbeatEnabled: rawConfig.heartbeatEnabled ?? DEFAULT_HEARTBEAT_ENABLED,
-    heartbeatIntervalMs: rawConfig.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
-    heartbeatSessionKey: typeof rawConfig.heartbeatSessionKey === "string" && rawConfig.heartbeatSessionKey.trim()
-      ? rawConfig.heartbeatSessionKey.trim()
-      : DEFAULT_HEARTBEAT_SESSION_KEY,
     ...(typeof rawConfig.appId === "string" && rawConfig.appId.trim() ? { appId: rawConfig.appId.trim() } : {}),
     ...(typeof rawConfig.appSecret === "string" && rawConfig.appSecret.trim() ? { appSecret: rawConfig.appSecret.trim() } : {}),
   };

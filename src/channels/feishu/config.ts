@@ -11,9 +11,6 @@ import {
 } from "../../gateway/configFile.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
-const DEFAULT_HEARTBEAT_ENABLED = false;
-const DEFAULT_HEARTBEAT_INTERVAL_MS = 60 * 60_000;
-const DEFAULT_HEARTBEAT_SESSION_KEY = "heartbeat";
 const DEFAULT_PAIRING_POLICY = "open" as PairingPolicy;
 
 function resolveText(raw: unknown): string {
@@ -135,10 +132,6 @@ export interface FeishuChannelConfig {
   appId?: string;
   appSecret?: string;
   requestTimeoutMs: number;
-  heartbeatEnabled: boolean;
-  heartbeatIntervalMs: number;
-  heartbeatTargetOpenId?: string;
-  heartbeatSessionKey?: string;
   pairingPolicy?: PairingPolicy;
   pairingPendingTtlMs?: number;
   pairingPendingMax?: number;
@@ -149,10 +142,6 @@ export interface FeishuChannelConfigSources {
   appId?: "channel";
   appSecret?: "channel";
   requestTimeoutMs?: "channel";
-  heartbeatEnabled?: "channel";
-  heartbeatIntervalMs?: "channel";
-  heartbeatTargetOpenId?: "channel";
-  heartbeatSessionKey?: "channel";
   pairingPolicy?: "channel";
   pairingPendingTtlMs?: "channel";
   pairingPendingMax?: "channel";
@@ -171,13 +160,6 @@ function normalizeStoredFeishuChannelConfig(raw: unknown): Partial<FeishuChannel
     typeof candidate.requestTimeoutMs === "number" && Number.isFinite(candidate.requestTimeoutMs)
       ? candidate.requestTimeoutMs
       : undefined;
-  const heartbeatEnabled = resolveBoolean(candidate.heartbeatEnabled);
-  const heartbeatIntervalMs =
-    typeof candidate.heartbeatIntervalMs === "number" && Number.isFinite(candidate.heartbeatIntervalMs)
-      ? candidate.heartbeatIntervalMs
-      : undefined;
-  const heartbeatTargetOpenId = resolveText(candidate.heartbeatTargetOpenId);
-  const heartbeatSessionKey = resolveText(candidate.heartbeatSessionKey);
   const pairingPolicy = isValidPairingPolicy(candidate.pairingPolicy);
   const pairingPendingTtlMs =
     typeof candidate.pairingPendingTtlMs === "number" && Number.isFinite(candidate.pairingPendingTtlMs)
@@ -193,10 +175,6 @@ function normalizeStoredFeishuChannelConfig(raw: unknown): Partial<FeishuChannel
     ...(appId ? { appId } : {}),
     ...(appSecret ? { appSecret } : {}),
     ...(typeof requestTimeoutMs === "number" && requestTimeoutMs > 0 ? { requestTimeoutMs } : {}),
-    ...(typeof heartbeatEnabled === "boolean" ? { heartbeatEnabled } : {}),
-    ...(typeof heartbeatIntervalMs === "number" && heartbeatIntervalMs > 0 ? { heartbeatIntervalMs } : {}),
-    ...(heartbeatTargetOpenId ? { heartbeatTargetOpenId } : {}),
-    ...(heartbeatSessionKey ? { heartbeatSessionKey } : {}),
     ...(pairingPolicy ? { pairingPolicy } : {}),
     ...(typeof pairingPendingTtlMs === "number" && pairingPendingTtlMs > 0 ? { pairingPendingTtlMs } : {}),
     ...(typeof pairingPendingMax === "number" && pairingPendingMax > 0 ? { pairingPendingMax } : {}),
@@ -211,10 +189,6 @@ function buildChannelSources(
     ...(typeof channelConfig.appId === "string" ? { appId: "channel" as const } : {}),
     ...(typeof channelConfig.appSecret === "string" ? { appSecret: "channel" as const } : {}),
     ...(typeof channelConfig.requestTimeoutMs === "number" ? { requestTimeoutMs: "channel" as const } : {}),
-    ...(typeof channelConfig.heartbeatEnabled === "boolean" ? { heartbeatEnabled: "channel" as const } : {}),
-    ...(typeof channelConfig.heartbeatIntervalMs === "number" ? { heartbeatIntervalMs: "channel" as const } : {}),
-    ...(typeof channelConfig.heartbeatTargetOpenId === "string" ? { heartbeatTargetOpenId: "channel" as const } : {}),
-    ...(typeof channelConfig.heartbeatSessionKey === "string" ? { heartbeatSessionKey: "channel" as const } : {}),
     ...(typeof channelConfig.pairingPolicy === "string" ? { pairingPolicy: "channel" as const } : {}),
     ...(typeof channelConfig.pairingPendingTtlMs === "number"
       ? { pairingPendingTtlMs: "channel" as const }
@@ -311,18 +285,6 @@ export async function resolveFeishuChannelConfig(
   const envRequestTimeoutMs = resolveText(
     process.env.LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS || process.env.FEISHU_REQUEST_TIMEOUT_MS,
   );
-  const envHeartbeatEnabled = resolveText(
-    process.env.LAINCLAW_FEISHU_HEARTBEAT_ENABLED || process.env.FEISHU_HEARTBEAT_ENABLED,
-  );
-  const envHeartbeatIntervalMs = resolveText(
-    process.env.LAINCLAW_FEISHU_HEARTBEAT_INTERVAL_MS || process.env.FEISHU_HEARTBEAT_INTERVAL_MS,
-  );
-  const envHeartbeatTargetOpenId = resolveText(
-    process.env.LAINCLAW_FEISHU_HEARTBEAT_TARGET_OPEN_ID || process.env.FEISHU_HEARTBEAT_TARGET_OPEN_ID,
-  );
-  const envHeartbeatSessionKey = resolveText(
-    process.env.LAINCLAW_FEISHU_HEARTBEAT_SESSION_KEY || process.env.FEISHU_HEARTBEAT_SESSION_KEY,
-  );
   const envPairingPolicy = isValidPairingPolicy(
     process.env.LAINCLAW_FEISHU_PAIRING_POLICY || process.env.FEISHU_PAIRING_POLICY,
   );
@@ -342,28 +304,6 @@ export async function resolveFeishuChannelConfig(
     requestTimeoutMs:
       firstNumber(overrides.requestTimeoutMs, envRequestTimeoutMs, stored.requestTimeoutMs)
       || DEFAULT_REQUEST_TIMEOUT_MS,
-    heartbeatEnabled:
-      firstBoolean(
-        overrides.heartbeatEnabled,
-        resolveBoolean(envHeartbeatEnabled),
-        stored.heartbeatEnabled,
-        DEFAULT_HEARTBEAT_ENABLED,
-      ) ?? DEFAULT_HEARTBEAT_ENABLED,
-    heartbeatIntervalMs:
-      firstNumber(overrides.heartbeatIntervalMs, envHeartbeatIntervalMs, stored.heartbeatIntervalMs)
-      || DEFAULT_HEARTBEAT_INTERVAL_MS,
-    heartbeatTargetOpenId: firstString(
-      overrides.heartbeatTargetOpenId,
-      envHeartbeatTargetOpenId,
-      stored.heartbeatTargetOpenId,
-    ),
-    heartbeatSessionKey:
-      firstString(
-        overrides.heartbeatSessionKey,
-        envHeartbeatSessionKey,
-        stored.heartbeatSessionKey,
-        DEFAULT_HEARTBEAT_SESSION_KEY,
-      ),
     pairingPolicy:
       isValidPairingPolicy(overrides.pairingPolicy)
       || envPairingPolicy

@@ -134,7 +134,7 @@ npm start -- gateway config clear
 `gateway config set` 会把网关参数持久化到 `~/.lainclaw/gateway.json`：
 - 顶层 `default` 为全局默认配置；
 - `channels.<name>` 为某个频道的覆盖配置（当前运行时未显式指定频道时，默认使用 `default`）。
-`provider` 与 `app-id/app-secret`、工具/配对/心跳配置都写在网关级配置内。后续 `gateway start` 可省略重复参数；`config show` 用于核对，`config clear` 用于重置。
+`provider` 与 `app-id/app-secret`、工具/配对配置都写在网关级配置内。后续 `gateway start` 可省略重复参数；`config show` 用于核对，`config clear` 用于重置。
 
 如果你需要手动按频道持久化（当前只支持 `feishu` 运行时启动）：
 
@@ -172,13 +172,6 @@ npm start -- gateway start --provider <provider> --with-tools --app-id <AppID> -
 lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
 ```
 
-也可同时启动心跳：
-
-```bash
-lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
-  --heartbeat-enabled --heartbeat-target-open-id <openId> --heartbeat-interval-ms 3600000
-```
-
 参数会优先来自命令行，未传入时会从环境变量回退，最后从配置作用域文件（默认 `~/.lainclaw/gateway.json`）读取上次配置（如存在）。
 
 - `LAINCLAW_FEISHU_APP_ID` / `FEISHU_APP_ID`
@@ -188,10 +181,6 @@ lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
 - `LAINCLAW_GATEWAY_PROFILE_ID`
 - `LAINCLAW_GATEWAY_WITH_TOOLS`：`true|false`
 - `LAINCLAW_GATEWAY_MEMORY`：`true|false`
-- `LAINCLAW_FEISHU_HEARTBEAT_ENABLED` / `FEISHU_HEARTBEAT_ENABLED`：`true|false`
-- `LAINCLAW_FEISHU_HEARTBEAT_INTERVAL_MS` / `FEISHU_HEARTBEAT_INTERVAL_MS`
-- `LAINCLAW_FEISHU_HEARTBEAT_TARGET_OPEN_ID` / `FEISHU_HEARTBEAT_TARGET_OPEN_ID`
-- `LAINCLAW_FEISHU_HEARTBEAT_SESSION_KEY` / `FEISHU_HEARTBEAT_SESSION_KEY`
 - `LAINCLAW_FEISHU_PAIRING_POLICY` / `FEISHU_PAIRING_POLICY`：`open|allowlist|pairing|disabled`（默认 `open`）
 - `LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS` / `FEISHU_PAIRING_PENDING_TTL_MS`：待审批请求 TTL（毫秒）
 - `LAINCLAW_FEISHU_PAIRING_PENDING_MAX` / `FEISHU_PAIRING_PENDING_MAX`：待审批最大未处理条数
@@ -226,27 +215,6 @@ lainclaw pairing list [--channel feishu] [--json]
 lainclaw pairing approve [--channel feishu] <code> [--account <accountId>]
 lainclaw pairing revoke [--channel feishu] <openIdOrUserId> [--account <accountId>]
 ```
-
-## 心跳（Heartbeat）规则命令
-
-```bash
-lainclaw heartbeat init [--template <path>] [--force]
-lainclaw heartbeat add "提醒我：每天中午检查邮件"
-lainclaw heartbeat list
-lainclaw heartbeat enable <ruleId>
-lainclaw heartbeat disable <ruleId>
-lainclaw heartbeat run
-lainclaw heartbeat remove <ruleId>
-```
-
-说明：
-
-- `init`：首次使用时手动初始化 `~/.lainclaw/HEARTBEAT.md`，默认会从源码目录下的 `template/HEARTBEAT.md` 拷贝；`--force` 可强制覆盖已有文件。  
-- `add`：写入自然语言规则（按模型语义判断是否触发）  
-- `list`：查看持久化规则  
-- `run`：手动触发一次执行（不启动网关）  
-- `enable / disable`：单独控制规则开关  
-- `remove`：删除规则
 
 ### 启动日志说明（你可以按这个判断是否成功）
 

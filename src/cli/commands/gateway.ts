@@ -2,8 +2,6 @@ import { Command, Option } from 'commander';
 import {
   parsePositiveInt,
   addModelOptions,
-  buildBooleanValueOption,
-  buildNoBooleanOption,
 } from '../shared/options.js';
 import { setExitCode } from '../shared/exitCode.js';
 import { normalizeGatewayChannels, resolveGatewayChannel } from '../../gateway/commands/channelRegistry.js';
@@ -30,10 +28,6 @@ type GatewayCommonOptions = {
   profile?: string;
   withTools?: boolean;
   memory?: boolean;
-  heartbeatEnabled?: boolean;
-  heartbeatIntervalMs?: string;
-  heartbeatTargetOpenId?: string;
-  heartbeatSessionKey?: string;
   pairingPolicy?: string;
   pairingAllowFrom?: string[];
   pairingPendingTtlMs?: string;
@@ -56,10 +50,6 @@ type GatewayConfigOptions = {
   appSecret?: string;
   withTools?: boolean;
   memory?: boolean;
-  heartbeatEnabled?: boolean;
-  heartbeatIntervalMs?: string;
-  heartbeatTargetOpenId?: string;
-  heartbeatSessionKey?: string;
   pairingPolicy?: string;
   pairingAllowFrom?: string[];
   pairingPendingTtlMs?: string;
@@ -77,10 +67,6 @@ type GatewayStatusStopOptions = {
 const FEISHU_ONLY_OPTIONS: Array<[keyof GatewayCommonOptions & keyof GatewayConfigOptions, string]> = [
   ['appId', 'app-id'],
   ['appSecret', 'app-secret'],
-  ['heartbeatEnabled', 'heartbeat-enabled'],
-  ['heartbeatIntervalMs', 'heartbeat-interval-ms'],
-  ['heartbeatTargetOpenId', 'heartbeat-target-open-id'],
-  ['heartbeatSessionKey', 'heartbeat-session-key'],
   ['pairingPolicy', 'pairing-policy'],
   ['pairingAllowFrom', 'pairing-allow-from'],
   ['pairingPendingTtlMs', 'pairing-pending-ttl-ms'],
@@ -146,7 +132,6 @@ function parseGatewayRuntimeConfigFromOptions(
 function parseFeishuGatewayConfigFromOptions(
   options: GatewayCommonOptions | GatewayConfigOptions,
 ): GatewayStartOverrides {
-  const heartbeatIntervalMs = normalizePositiveIntValue(normalizeText(options.heartbeatIntervalMs), 'heartbeat-interval-ms');
   const pairingPendingTtlMs = normalizePositiveIntValue(normalizeText(options.pairingPendingTtlMs), 'pairing-pending-ttl-ms');
   const pairingPendingMax = normalizePositiveIntValue(normalizeText(options.pairingPendingMax), 'pairing-pending-max');
   const requestTimeoutMs = normalizePositiveIntValue(normalizeText(options.requestTimeoutMs), 'request-timeout-ms');
@@ -155,14 +140,6 @@ function parseFeishuGatewayConfigFromOptions(
     ...(parseOptionalString(options.appId) !== undefined ? { appId: parseOptionalString(options.appId)! } : {}),
     ...(parseOptionalString(options.appSecret) !== undefined ? { appSecret: parseOptionalString(options.appSecret)! } : {}),
     ...(requestTimeoutMs ? { requestTimeoutMs } : {}),
-    ...(typeof options.heartbeatEnabled === 'boolean' ? { heartbeatEnabled: options.heartbeatEnabled } : {}),
-    ...(heartbeatIntervalMs ? { heartbeatIntervalMs } : {}),
-    ...(parseOptionalString(options.heartbeatTargetOpenId) !== undefined
-      ? { heartbeatTargetOpenId: parseOptionalString(options.heartbeatTargetOpenId)! }
-      : {}),
-    ...(parseOptionalString(options.heartbeatSessionKey) !== undefined
-      ? { heartbeatSessionKey: parseOptionalString(options.heartbeatSessionKey)! }
-      : {}),
     ...(normalizePairingPolicy(options.pairingPolicy)
       ? { pairingPolicy: normalizePairingPolicy(options.pairingPolicy) as FeishuChannelConfig['pairingPolicy'] }
       : {}),
@@ -363,9 +340,6 @@ function addModelRuntimeOptions(command: Command, includeMemory: boolean): void 
       }
       : {}),
   });
-  command
-    .addOption(buildBooleanValueOption('heartbeat-enabled', 'Enable/disable heartbeat behavior.'))
-    .addOption(buildNoBooleanOption('heartbeat-enabled', 'Disable heartbeat behavior.'));
 }
 
 function buildGatewayStartOptions(command: Command): void {
@@ -376,15 +350,12 @@ function buildGatewayStartOptions(command: Command): void {
     .addOption(new Option('--service-child', 'Run gateway process as child service.'))
     .addOption(new Option('--debug', 'Enable local debug output.'))
     .addOption(new Option('--daemon', 'Run gateway service in daemon mode.'))
-    .addOption(new Option('--heartbeat-target-open-id <openId>', 'Heartbeat target open-id.'))
-    .addOption(new Option('--heartbeat-session-key <key>', 'Heartbeat session key.'))
     .addOption(new Option('--pairing-policy <open|allowlist|pairing|disabled>', 'Pairing policy.'))
     .addOption(new Option('--pairing-allow-from <ids>', 'Pairing allowlist.'))
     .addOption(new Option('--pairing-pending-ttl-ms <ms>', 'Pairing pending TTL in ms.'))
     .addOption(new Option('--pairing-pending-max <n>', 'Pairing pending max count.'))
     .addOption(new Option('--app-id <id>', 'Feishu app id.'))
     .addOption(new Option('--app-secret <secret>', 'Feishu app secret.'))
-    .addOption(new Option('--heartbeat-interval-ms <ms>', 'Heartbeat interval in ms.'))
     .addOption(new Option('--request-timeout-ms <ms>', 'Feishu API request timeout ms.'));
   addModelRuntimeOptions(command, true);
 }
@@ -396,9 +367,6 @@ function buildGatewayConfigOptions(command: Command): void {
     .addOption(new Option('--app-secret <secret>', 'Persist feishu app secret.'));
   addModelRuntimeOptions(command, true);
   command
-    .addOption(new Option('--heartbeat-interval-ms <ms>', 'Persist heartbeat interval ms.'))
-    .addOption(new Option('--heartbeat-target-open-id <openId>', 'Persist heartbeat target.'))
-    .addOption(new Option('--heartbeat-session-key <key>', 'Persist heartbeat session key.'))
     .addOption(new Option('--pairing-policy <open|allowlist|pairing|disabled>', 'Persist pairing policy.'))
     .addOption(new Option('--pairing-allow-from <ids>', 'Persist pairing allowlist.'))
     .addOption(new Option('--pairing-pending-ttl-ms <ms>', 'Persist pairing pending ttl.'))

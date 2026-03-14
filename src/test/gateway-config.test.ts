@@ -43,6 +43,15 @@ async function withEnv<T>(overrides: Record<string, string | undefined>, fn: () 
   }
 }
 
+async function runCliIsolated(argv: string[]): Promise<number> {
+  const previousExitCode = process.exitCode;
+  try {
+    return await runCli(argv);
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+}
+
 test("gateway config persists runtimeConfig and channelConfig in separate nested scopes", async () => {
   await withTempHome(async (home) => {
     await persistGatewayRuntimeConfig({
@@ -54,7 +63,6 @@ test("gateway config persists runtimeConfig and channelConfig in separate nested
       appId: "app-id",
       appSecret: "app-secret",
       requestTimeoutMs: 5000,
-      heartbeatEnabled: true,
     }, "feishu");
 
     const raw = JSON.parse(await fs.readFile(resolveGatewayConfigPath(home), "utf-8")) as Record<string, unknown>;
@@ -71,7 +79,6 @@ test("gateway config persists runtimeConfig and channelConfig in separate nested
           appId: "app-id",
           appSecret: "app-secret",
           requestTimeoutMs: 5000,
-          heartbeatEnabled: true,
         },
       },
     });
@@ -96,13 +103,11 @@ test("gateway config persists runtimeConfig and channelConfig in separate nested
         appId: "app-id",
         appSecret: "app-secret",
         requestTimeoutMs: 5000,
-        heartbeatEnabled: true,
       },
       sources: {
         appId: "channel",
         appSecret: "channel",
         requestTimeoutMs: "channel",
-        heartbeatEnabled: "channel",
       },
     });
   });
@@ -141,14 +146,6 @@ test("legacy flat gateway config no longer participates in runtime or channel re
       FEISHU_APP_SECRET: undefined,
       LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS: undefined,
       FEISHU_REQUEST_TIMEOUT_MS: undefined,
-      LAINCLAW_FEISHU_HEARTBEAT_ENABLED: undefined,
-      FEISHU_HEARTBEAT_ENABLED: undefined,
-      LAINCLAW_FEISHU_HEARTBEAT_INTERVAL_MS: undefined,
-      FEISHU_HEARTBEAT_INTERVAL_MS: undefined,
-      LAINCLAW_FEISHU_HEARTBEAT_TARGET_OPEN_ID: undefined,
-      FEISHU_HEARTBEAT_TARGET_OPEN_ID: undefined,
-      LAINCLAW_FEISHU_HEARTBEAT_SESSION_KEY: undefined,
-      FEISHU_HEARTBEAT_SESSION_KEY: undefined,
       LAINCLAW_FEISHU_PAIRING_POLICY: undefined,
       FEISHU_PAIRING_POLICY: undefined,
       LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS: undefined,
@@ -193,11 +190,25 @@ test("gateway runtime config resolves from gateway-scoped env vars", async () =>
 test("gateway config parser rejects mixing channelConfig and runtimeConfig scopes", async () => {
   await withTempHome(async () => {
     const [defaultScopedChannelConfig, channelScopedRuntimeConfig] = await Promise.all([
-      runCli(["gateway", "config", "set", "--app-id", "app-id"]),
-      runCli(["gateway", "config", "set", "--channel", "feishu", "--with-tools", "false"]),
+      runCliIsolated(["gateway", "config", "set", "--app-id", "app-id"]),
+      runCliIsolated(["gateway", "config", "set", "--channel", "feishu", "--with-tools", "false"]),
     ]);
 
     assert.equal(defaultScopedChannelConfig, 1);
     assert.equal(channelScopedRuntimeConfig, 1);
   });
+});
+
+test("heartbeat command is no longer available", async () => {
+  assert.equal(await runCliIsolated(["heartbeat", "list"]), 1);
+});
+
+test("gateway rejects removed heartbeat flags", async () => {
+  const [startCode, configCode] = await Promise.all([
+    runCliIsolated(["gateway", "start", "--heartbeat-enabled"]),
+    runCliIsolated(["gateway", "config", "set", "--channel", "feishu", "--heartbeat-interval-ms", "1000"]),
+  ]);
+
+  assert.equal(startCode, 1);
+  assert.equal(configCode, 1);
 });
