@@ -1,6 +1,6 @@
 import {
   type Channel,
-  type ChannelOutboundTextCapability,
+  type ChannelSendText,
   type ChannelRunContext,
   type InboundHandler,
   type SidecarHandle,
@@ -30,20 +30,18 @@ export interface ResolvedGatewayChannelBinding {
 function bindChannelOutboundText(
   channel: Channel,
   config: unknown,
-): ChannelOutboundTextCapability | undefined {
+): ChannelSendText | undefined {
   if (!channel.sendText) {
     return undefined;
   }
-  return {
-    sendText: (replyTo, text, options) => channel.sendText?.(
-      replyTo,
-      text,
-      {
-        ...(options ?? {}),
-        config: options?.config ?? config,
-      },
-    ) ?? Promise.resolve(),
-  };
+  return (replyTo, text, options) => channel.sendText?.(
+    replyTo,
+    text,
+    {
+      ...(options ?? {}),
+      config: options?.config ?? config,
+    },
+  ) ?? Promise.resolve();
 }
 
 async function resolveFeishuBinding(
@@ -62,7 +60,7 @@ async function resolveFeishuBinding(
   };
   const outbound = bindChannelOutboundText(channel, channelConfig);
   if (!outbound) {
-    throw new Error('Feishu channel is missing sendText capability');
+    throw new Error('Feishu channel is missing sendText');
   }
 
   return {

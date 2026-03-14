@@ -6,7 +6,7 @@ import {
   runLangfuseOperationSafely,
   startObservation,
 } from '../../observability/langfuse.js';
-import type { ChannelOutboundTextCapability } from '../contracts.js';
+import type { ChannelSendText } from '../contracts.js';
 
 const DEFAULT_SLOW_ACK_TEXT = '已收到，正在处理。完成后我会继续把结果发给你。';
 
@@ -35,7 +35,7 @@ export interface FeishuTurnControllerOptions {
   sessionKey: string;
   replyTo: string;
   slowAckDelayMs: number;
-  outbound: ChannelOutboundTextCapability;
+  outbound: ChannelSendText;
   debug?: boolean;
   slowAckText?: string;
 }
@@ -101,7 +101,7 @@ class DefaultFeishuTurnController implements FeishuTurnController {
     this.terminalSendInFlight = true;
     this.clearSlowAckTimer();
     try {
-      await this.options.outbound.sendText(this.options.replyTo, text);
+      await this.options.outbound(this.options.replyTo, text);
       this.settled = true;
       this.state = 'completed';
       this.emitDebugObservation('feishu.turn.completed');
@@ -118,7 +118,7 @@ class DefaultFeishuTurnController implements FeishuTurnController {
     this.terminalSendInFlight = true;
     this.clearSlowAckTimer();
     try {
-      await this.options.outbound.sendText(this.options.replyTo, text);
+      await this.options.outbound(this.options.replyTo, text);
       this.settled = true;
       this.state = 'failed';
       this.emitDebugObservation('feishu.turn.failed');
@@ -145,7 +145,7 @@ class DefaultFeishuTurnController implements FeishuTurnController {
     }
 
     try {
-      await this.options.outbound.sendText(this.options.replyTo, this.slowAckText);
+      await this.options.outbound(this.options.replyTo, this.slowAckText);
       this.ackSent = true;
       this.state = 'ack_sent';
       this.emitDebugObservation('feishu.turn.slow_ack_sent');

@@ -44,28 +44,26 @@ export interface ChannelSendTextOptions {
   meta?: Record<string, unknown>;
 }
 
-export interface ChannelOutboundTextCapability {
-  sendText: (replyTo: string, text: string, options?: ChannelSendTextOptions) => Promise<void>;
-}
+export type ChannelSendText = (
+  replyTo: string,
+  text: string,
+  options?: ChannelSendTextOptions,
+) => Promise<void>;
 
 export interface ChannelPreflightInput {
   config?: unknown;
   context?: ChannelRunContext;
 }
 
-export interface ChannelRunBinding {
-  onInbound: InboundHandler;
-}
-
 export interface ChannelRunInput {
   config?: unknown;
   context?: ChannelRunContext;
-  binding: ChannelRunBinding;
+  onInbound: InboundHandler;
 }
 
 export interface Channel {
   id: ChannelId;
   preflight?: (input: ChannelPreflightInput) => Promise<unknown>;
   run: (input: ChannelRunInput) => Promise<void>;
-  sendText?: ChannelOutboundTextCapability["sendText"];
+  sendText?: ChannelSendText;
 }

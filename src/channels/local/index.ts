@@ -11,7 +11,7 @@ export const localChannel: Channel = {
     return {};
   },
   run: async (input: ChannelRunInput): Promise<void> => {
-    await runLocalTransport((inbound) => input.binding.onInbound(inbound));
+    await runLocalTransport(input.onInbound);
   },
 };
 

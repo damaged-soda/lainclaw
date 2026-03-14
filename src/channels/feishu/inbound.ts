@@ -1,7 +1,7 @@
 import type {
   InboundMessage,
   MessageInboundMessage,
-  ChannelOutboundTextCapability,
+  ChannelSendText,
 } from '../contracts.js';
 import type { RuntimeAgentEventSink } from '../../shared/types.js';
 import {
@@ -22,7 +22,7 @@ export interface FeishuInboundTurnResult {
 
 export interface RunFeishuInboundOptions {
   inbound: InboundMessage;
-  outbound: ChannelOutboundTextCapability;
+  outbound: ChannelSendText;
   handleTurn: (request: FeishuInboundTurnRequest) => Promise<FeishuInboundTurnResult | void>;
   onFailureHint?: (rawMessage: string) => string;
   slowAckDelayMs?: number;

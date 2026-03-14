@@ -64,7 +64,7 @@ export const feishuChannel: Channel = {
     const config = await toChannelConfig(input.config, input.context);
     await runFeishuTransport({
       config,
-      onInbound: (inbound) => input.binding.onInbound(inbound),
+      onInbound: input.onInbound,
     });
   },
 };

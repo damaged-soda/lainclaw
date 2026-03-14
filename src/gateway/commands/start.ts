@@ -280,9 +280,7 @@ async function runChannelRuntime(
       await runtime.run({
         config: binding.channelConfig,
         context,
-        binding: {
-          onInbound: binding.inboundHandler,
-        },
+        onInbound: binding.inboundHandler,
       });
     } finally {
       if (sidecarStop) {

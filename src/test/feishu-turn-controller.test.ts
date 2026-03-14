@@ -38,10 +38,8 @@ test('runFeishuInbound fast path only sends the final message', async () => {
 
   await runFeishuInbound({
     inbound: createInbound('hello'),
-    outbound: {
-      sendText: async (_replyTo, text) => {
-        sent.push(text);
-      },
+    outbound: async (_replyTo, text) => {
+      sent.push(text);
     },
     slowAckDelayMs: 20,
     handleTurn: async () => {
@@ -59,10 +57,8 @@ test('runFeishuInbound slow path sends one ack before the final reply', async ()
 
   await runFeishuInbound({
     inbound: createInbound('hello'),
-    outbound: {
-      sendText: async (_replyTo, text) => {
-        sent.push(text);
-      },
+    outbound: async (_replyTo, text) => {
+      sent.push(text);
     },
     slowAckDelayMs: 20,
     handleTurn: async (request) => {
@@ -81,10 +77,8 @@ test('runFeishuInbound error after slow ack sends ack then failure', async () =>
 
   await runFeishuInbound({
     inbound: createInbound('hello'),
-    outbound: {
-      sendText: async (_replyTo, text) => {
-        sent.push(text);
-      },
+    outbound: async (_replyTo, text) => {
+      sent.push(text);
     },
     slowAckDelayMs: 20,
     handleTurn: async (request) => {
@@ -105,13 +99,11 @@ test('runFeishuInbound final reply send failure still rejects after delivering f
   await assert.rejects(
     runFeishuInbound({
       inbound: createInbound('hello'),
-      outbound: {
-        sendText: async (_replyTo, text) => {
-          if (text === 'final reply') {
-            throw new Error('feishu send failed');
-          }
-          sent.push(text);
-        },
+      outbound: async (_replyTo, text) => {
+        if (text === 'final reply') {
+          throw new Error('feishu send failed');
+        }
+        sent.push(text);
       },
       slowAckDelayMs: 20,
       handleTurn: async () => {
@@ -130,10 +122,8 @@ test('runFeishuInbound can reply directly without starting a streamed agent turn
 
   await runFeishuInbound({
     inbound: createInbound('hello'),
-    outbound: {
-      sendText: async (_replyTo, text) => {
-        sent.push(text);
-      },
+    outbound: async (_replyTo, text) => {
+      sent.push(text);
     },
     slowAckDelayMs: 10,
     handleTurn: async () => {
