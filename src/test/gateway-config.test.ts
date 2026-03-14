@@ -146,14 +146,6 @@ test("legacy flat gateway config no longer participates in runtime or channel re
       FEISHU_APP_SECRET: undefined,
       LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS: undefined,
       FEISHU_REQUEST_TIMEOUT_MS: undefined,
-      LAINCLAW_FEISHU_PAIRING_POLICY: undefined,
-      FEISHU_PAIRING_POLICY: undefined,
-      LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS: undefined,
-      FEISHU_PAIRING_PENDING_TTL_MS: undefined,
-      LAINCLAW_FEISHU_PAIRING_PENDING_MAX: undefined,
-      FEISHU_PAIRING_PENDING_MAX: undefined,
-      LAINCLAW_FEISHU_PAIRING_ALLOW_FROM: undefined,
-      FEISHU_PAIRING_ALLOW_FROM: undefined,
     }, async () => {
       const runtime = await resolveGatewayRuntimeConfig(undefined);
       assert.equal(runtime.provider, undefined);
@@ -207,6 +199,16 @@ test("gateway rejects removed heartbeat flags", async () => {
   const [startCode, configCode] = await Promise.all([
     runCliIsolated(["gateway", "start", "--heartbeat-enabled"]),
     runCliIsolated(["gateway", "config", "set", "--channel", "feishu", "--heartbeat-interval-ms", "1000"]),
+  ]);
+
+  assert.equal(startCode, 1);
+  assert.equal(configCode, 1);
+});
+
+test("gateway rejects removed pairing config flags", async () => {
+  const [startCode, configCode] = await Promise.all([
+    runCliIsolated(["gateway", "start", "--pairing-policy", "pairing"]),
+    runCliIsolated(["gateway", "config", "set", "--channel", "feishu", "--pairing-allow-from", "user-1"]),
   ]);
 
   assert.equal(startCode, 1);

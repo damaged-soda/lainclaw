@@ -104,34 +104,6 @@ test("handleInbound keeps local-style final text responses unchanged", async () 
   assert.equal(outbound.text, "final reply");
 });
 
-test("handleInbound still short-circuits denied access without running the agent", async () => {
-  let runAgentCalled = false;
-
-  const outbound = await handleInbound(createInbound("hello"), {
-    runtime: {
-      provider: "stub",
-      profileId: "default",
-      withTools: true,
-    },
-    policyConfig: {
-      pairingPolicy: "disabled",
-    },
-    runAgentFn: async () => {
-      runAgentCalled = true;
-      return {
-        requestId: "req-1",
-        sessionKey: "user-1:conv-1",
-        sessionId: "session-1",
-        text: "should not happen",
-      };
-    },
-  });
-
-  assert.equal(runAgentCalled, false);
-  assert.ok(outbound);
-  assert.equal(outbound.text, "当前策略不允许当前用户发起会话，请联系管理员配置后重试。");
-});
-
 test("runInboundAgentTurn keeps direct onAgentEvent passthrough", async () => {
   const inbound = createInbound("hello");
   assert.equal(inbound.kind, "message");

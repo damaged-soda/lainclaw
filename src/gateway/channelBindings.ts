@@ -10,7 +10,12 @@ import {
 } from '../channels/feishu/config.js';
 import { makeFeishuRequestFailureHint } from '../channels/feishu/failureHints.js';
 import { runFeishuInbound } from '../channels/feishu/inbound.js';
-import { handleInbound, runInboundPipeline } from './handlers/handleInbound.js';
+import {
+  buildFeishuPairingReply,
+  isFeishuPaired,
+  issueFeishuPairingCode,
+} from '../channels/feishu/pairing.js';
+import { handleInbound } from './handlers/handleInbound.js';
 import type { GatewayChannel, GatewayStartOverrides } from './commands/contracts.js';
 import {
   resolveGatewayRuntimeConfig,
@@ -70,9 +75,23 @@ async function resolveFeishuBinding(
         onFailureHint: makeFeishuRequestFailureHint,
         debug: context?.debug === true,
         handleTurn: async ({ inbound: message, onAgentEvent }) => {
-          const outboundMessage = await runInboundPipeline(message, {
+          const actorId = message.actorId.trim();
+          if (!actorId) {
+            return {
+              text: '当前消息缺少用户标识，无法完成 pairing。',
+            };
+          }
+
+          const paired = await isFeishuPaired(actorId);
+          if (!paired) {
+            const { code } = await issueFeishuPairingCode(actorId);
+            return {
+              text: buildFeishuPairingReply(actorId, code),
+            };
+          }
+
+          const outboundMessage = await handleInbound(message, {
             runtime,
-            policyConfig: channelConfig,
             onAgentEvent,
           });
           return outboundMessage ? { text: outboundMessage.text } : undefined;
@@ -97,7 +116,6 @@ async function resolveLocalBinding(
     runtimeConfig,
     inboundHandler: (inbound) => handleInbound(inbound, {
       runtime,
-      policyConfig: overrides?.channelConfig,
     }),
   };
 }

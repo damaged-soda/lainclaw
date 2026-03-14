@@ -1,9 +1,4 @@
 import {
-  DEFAULT_PAIRING_PENDING_MAX,
-  DEFAULT_PAIRING_PENDING_TTL_MS,
-  type PairingPolicy,
-} from "../../pairing/contracts.js";
-import {
   isDefaultGatewayChannel,
   loadGatewayConfigFile,
   normalizeGatewayChannel,
@@ -11,43 +6,15 @@ import {
 } from "../../gateway/configFile.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
-const DEFAULT_PAIRING_POLICY = "open" as PairingPolicy;
 
 function resolveText(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
-}
-
-function resolveBoolean(raw: unknown): boolean | undefined {
-  if (typeof raw === "boolean") {
-    return raw;
-  }
-  if (typeof raw !== "string") {
-    return undefined;
-  }
-  const normalized = raw.trim().toLowerCase();
-  if (["1", "true", "on", "yes"].includes(normalized)) {
-    return true;
-  }
-  if (["0", "false", "off", "no"].includes(normalized)) {
-    return false;
-  }
-  return undefined;
 }
 
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
     const normalized = resolveText(value);
     if (normalized) {
-      return normalized;
-    }
-  }
-  return undefined;
-}
-
-function firstBoolean(...values: unknown[]): boolean | undefined {
-  for (const value of values) {
-    const normalized = resolveBoolean(value);
-    if (typeof normalized === "boolean") {
       return normalized;
     }
   }
@@ -69,83 +36,16 @@ function firstNumber(...values: unknown[]): number | undefined {
   return undefined;
 }
 
-function isValidPairingPolicy(raw: unknown): PairingPolicy | undefined {
-  const normalized = resolveText(raw).toLowerCase();
-  if (["open", "allowlist", "pairing", "disabled"].includes(normalized)) {
-    return normalized as PairingPolicy;
-  }
-  return undefined;
-}
-
-function parseStringListRaw(raw: string | undefined): string[] | undefined {
-  if (typeof raw !== "string") {
-    return undefined;
-  }
-  return raw
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
-
-function normalizeAllowFrom(raw: string[] | undefined): string[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return raw
-    .map((entry) => resolveText(String(entry)).toLowerCase())
-    .filter((entry) => entry.length > 0);
-}
-
-function normalizeAllowFromRaw(raw: unknown): string[] {
-  if (typeof raw === "string") {
-    return parseStringListRaw(raw) ?? [];
-  }
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return normalizeAllowFrom(raw);
-}
-
-function normalizeStringList(raw: unknown): string[] | undefined {
-  if (Array.isArray(raw)) {
-    return raw
-      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
-      .filter((entry) => entry.length > 0);
-  }
-  if (typeof raw === "string") {
-    return parseStringListRaw(raw);
-  }
-  return undefined;
-}
-
-function firstStringList(...values: unknown[]): string[] | undefined {
-  for (const value of values) {
-    const normalized = normalizeStringList(value);
-    if (normalized !== undefined) {
-      return normalized;
-    }
-  }
-  return undefined;
-}
-
 export interface FeishuChannelConfig {
   appId?: string;
   appSecret?: string;
   requestTimeoutMs: number;
-  pairingPolicy?: PairingPolicy;
-  pairingPendingTtlMs?: number;
-  pairingPendingMax?: number;
-  pairingAllowFrom?: string[];
 }
 
 export interface FeishuChannelConfigSources {
   appId?: "channel";
   appSecret?: "channel";
   requestTimeoutMs?: "channel";
-  pairingPolicy?: "channel";
-  pairingPendingTtlMs?: "channel";
-  pairingPendingMax?: "channel";
-  pairingAllowFrom?: "channel";
 }
 
 function normalizeStoredFeishuChannelConfig(raw: unknown): Partial<FeishuChannelConfig> {
@@ -160,25 +60,11 @@ function normalizeStoredFeishuChannelConfig(raw: unknown): Partial<FeishuChannel
     typeof candidate.requestTimeoutMs === "number" && Number.isFinite(candidate.requestTimeoutMs)
       ? candidate.requestTimeoutMs
       : undefined;
-  const pairingPolicy = isValidPairingPolicy(candidate.pairingPolicy);
-  const pairingPendingTtlMs =
-    typeof candidate.pairingPendingTtlMs === "number" && Number.isFinite(candidate.pairingPendingTtlMs)
-      ? candidate.pairingPendingTtlMs
-      : undefined;
-  const pairingPendingMax =
-    typeof candidate.pairingPendingMax === "number" && Number.isFinite(candidate.pairingPendingMax)
-      ? candidate.pairingPendingMax
-      : undefined;
-  const pairingAllowFrom = normalizeAllowFromRaw(candidate.pairingAllowFrom);
 
   return {
     ...(appId ? { appId } : {}),
     ...(appSecret ? { appSecret } : {}),
     ...(typeof requestTimeoutMs === "number" && requestTimeoutMs > 0 ? { requestTimeoutMs } : {}),
-    ...(pairingPolicy ? { pairingPolicy } : {}),
-    ...(typeof pairingPendingTtlMs === "number" && pairingPendingTtlMs > 0 ? { pairingPendingTtlMs } : {}),
-    ...(typeof pairingPendingMax === "number" && pairingPendingMax > 0 ? { pairingPendingMax } : {}),
-    ...(pairingAllowFrom.length > 0 ? { pairingAllowFrom } : {}),
   };
 }
 
@@ -189,19 +75,7 @@ function buildChannelSources(
     ...(typeof channelConfig.appId === "string" ? { appId: "channel" as const } : {}),
     ...(typeof channelConfig.appSecret === "string" ? { appSecret: "channel" as const } : {}),
     ...(typeof channelConfig.requestTimeoutMs === "number" ? { requestTimeoutMs: "channel" as const } : {}),
-    ...(typeof channelConfig.pairingPolicy === "string" ? { pairingPolicy: "channel" as const } : {}),
-    ...(typeof channelConfig.pairingPendingTtlMs === "number"
-      ? { pairingPendingTtlMs: "channel" as const }
-      : {}),
-    ...(typeof channelConfig.pairingPendingMax === "number" ? { pairingPendingMax: "channel" as const } : {}),
-    ...(Array.isArray(channelConfig.pairingAllowFrom) ? { pairingAllowFrom: "channel" as const } : {}),
   };
-}
-
-function filterPersistableChannelConfig(
-  updates: Partial<FeishuChannelConfig>,
-): Partial<FeishuChannelConfig> {
-  return normalizeStoredFeishuChannelConfig(updates);
 }
 
 function cleanupEmptyChannelScope(store: {
@@ -237,7 +111,7 @@ export async function persistFeishuChannelConfig(
     throw new Error("channel config requires a concrete gateway channel");
   }
 
-  const filtered = filterPersistableChannelConfig(updates);
+  const filtered = normalizeStoredFeishuChannelConfig(updates);
   if (Object.keys(filtered).length === 0) {
     return;
   }
@@ -285,18 +159,6 @@ export async function resolveFeishuChannelConfig(
   const envRequestTimeoutMs = resolveText(
     process.env.LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS || process.env.FEISHU_REQUEST_TIMEOUT_MS,
   );
-  const envPairingPolicy = isValidPairingPolicy(
-    process.env.LAINCLAW_FEISHU_PAIRING_POLICY || process.env.FEISHU_PAIRING_POLICY,
-  );
-  const envPairingPendingTtlMs = resolveText(
-    process.env.LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS || process.env.FEISHU_PAIRING_PENDING_TTL_MS,
-  );
-  const envPairingPendingMax = resolveText(
-    process.env.LAINCLAW_FEISHU_PAIRING_PENDING_MAX || process.env.FEISHU_PAIRING_PENDING_MAX,
-  );
-  const envPairingAllowFrom = parseStringListRaw(
-    process.env.LAINCLAW_FEISHU_PAIRING_ALLOW_FROM || process.env.FEISHU_PAIRING_ALLOW_FROM,
-  );
 
   return {
     appId: firstString(overrides.appId, envAppId, stored.appId),
@@ -304,23 +166,5 @@ export async function resolveFeishuChannelConfig(
     requestTimeoutMs:
       firstNumber(overrides.requestTimeoutMs, envRequestTimeoutMs, stored.requestTimeoutMs)
       || DEFAULT_REQUEST_TIMEOUT_MS,
-    pairingPolicy:
-      isValidPairingPolicy(overrides.pairingPolicy)
-      || envPairingPolicy
-      || isValidPairingPolicy(stored.pairingPolicy)
-      || DEFAULT_PAIRING_POLICY,
-    pairingPendingTtlMs:
-      firstNumber(
-        overrides.pairingPendingTtlMs,
-        envPairingPendingTtlMs,
-        stored.pairingPendingTtlMs,
-      ) || DEFAULT_PAIRING_PENDING_TTL_MS,
-    pairingPendingMax:
-      firstNumber(
-        overrides.pairingPendingMax,
-        envPairingPendingMax,
-        stored.pairingPendingMax,
-      ) || DEFAULT_PAIRING_PENDING_MAX,
-    pairingAllowFrom: firstStringList(overrides.pairingAllowFrom, envPairingAllowFrom, stored.pairingAllowFrom),
   };
 }

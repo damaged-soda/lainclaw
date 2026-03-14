@@ -28,10 +28,6 @@ type GatewayCommonOptions = {
   profile?: string;
   withTools?: boolean;
   memory?: boolean;
-  pairingPolicy?: string;
-  pairingAllowFrom?: string[];
-  pairingPendingTtlMs?: string;
-  pairingPendingMax?: string;
   appId?: string;
   appSecret?: string;
   requestTimeoutMs?: string;
@@ -50,10 +46,6 @@ type GatewayConfigOptions = {
   appSecret?: string;
   withTools?: boolean;
   memory?: boolean;
-  pairingPolicy?: string;
-  pairingAllowFrom?: string[];
-  pairingPendingTtlMs?: string;
-  pairingPendingMax?: string;
   requestTimeoutMs?: string;
 };
 
@@ -67,10 +59,6 @@ type GatewayStatusStopOptions = {
 const FEISHU_ONLY_OPTIONS: Array<[keyof GatewayCommonOptions & keyof GatewayConfigOptions, string]> = [
   ['appId', 'app-id'],
   ['appSecret', 'app-secret'],
-  ['pairingPolicy', 'pairing-policy'],
-  ['pairingAllowFrom', 'pairing-allow-from'],
-  ['pairingPendingTtlMs', 'pairing-pending-ttl-ms'],
-  ['pairingPendingMax', 'pairing-pending-max'],
   ['requestTimeoutMs', 'request-timeout-ms'],
 ];
 
@@ -96,25 +84,6 @@ function normalizePositiveIntValue(raw: string | undefined, label: string): numb
   return parsePositiveInt(raw.trim(), `--${label}`);
 }
 
-function normalizePairingPolicy(raw: unknown): FeishuChannelConfig['pairingPolicy'] | undefined {
-  if (typeof raw !== 'string') {
-    return undefined;
-  }
-  const normalized = normalizeText(raw)?.toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-  if (
-    normalized === 'open'
-    || normalized === 'allowlist'
-    || normalized === 'pairing'
-    || normalized === 'disabled'
-  ) {
-    return normalized;
-  }
-  return undefined;
-}
-
 function parseGatewayRuntimeConfigFromOptions(
   options: GatewayCommonOptions | GatewayConfigOptions,
 ): GatewayRuntimeConfig {
@@ -132,20 +101,12 @@ function parseGatewayRuntimeConfigFromOptions(
 function parseFeishuGatewayConfigFromOptions(
   options: GatewayCommonOptions | GatewayConfigOptions,
 ): GatewayStartOverrides {
-  const pairingPendingTtlMs = normalizePositiveIntValue(normalizeText(options.pairingPendingTtlMs), 'pairing-pending-ttl-ms');
-  const pairingPendingMax = normalizePositiveIntValue(normalizeText(options.pairingPendingMax), 'pairing-pending-max');
   const requestTimeoutMs = normalizePositiveIntValue(normalizeText(options.requestTimeoutMs), 'request-timeout-ms');
 
   const channelConfig = {
     ...(parseOptionalString(options.appId) !== undefined ? { appId: parseOptionalString(options.appId)! } : {}),
     ...(parseOptionalString(options.appSecret) !== undefined ? { appSecret: parseOptionalString(options.appSecret)! } : {}),
     ...(requestTimeoutMs ? { requestTimeoutMs } : {}),
-    ...(normalizePairingPolicy(options.pairingPolicy)
-      ? { pairingPolicy: normalizePairingPolicy(options.pairingPolicy) as FeishuChannelConfig['pairingPolicy'] }
-      : {}),
-    ...(Array.isArray(options.pairingAllowFrom) && options.pairingAllowFrom.length > 0 ? { pairingAllowFrom: options.pairingAllowFrom } : {}),
-    ...(pairingPendingTtlMs ? { pairingPendingTtlMs } : {}),
-    ...(pairingPendingMax ? { pairingPendingMax } : {}),
   };
   const runtimeConfig = parseGatewayRuntimeConfigFromOptions(options);
 
@@ -350,10 +311,6 @@ function buildGatewayStartOptions(command: Command): void {
     .addOption(new Option('--service-child', 'Run gateway process as child service.'))
     .addOption(new Option('--debug', 'Enable local debug output.'))
     .addOption(new Option('--daemon', 'Run gateway service in daemon mode.'))
-    .addOption(new Option('--pairing-policy <open|allowlist|pairing|disabled>', 'Pairing policy.'))
-    .addOption(new Option('--pairing-allow-from <ids>', 'Pairing allowlist.'))
-    .addOption(new Option('--pairing-pending-ttl-ms <ms>', 'Pairing pending TTL in ms.'))
-    .addOption(new Option('--pairing-pending-max <n>', 'Pairing pending max count.'))
     .addOption(new Option('--app-id <id>', 'Feishu app id.'))
     .addOption(new Option('--app-secret <secret>', 'Feishu app secret.'))
     .addOption(new Option('--request-timeout-ms <ms>', 'Feishu API request timeout ms.'));
@@ -367,10 +324,6 @@ function buildGatewayConfigOptions(command: Command): void {
     .addOption(new Option('--app-secret <secret>', 'Persist feishu app secret.'));
   addModelRuntimeOptions(command, true);
   command
-    .addOption(new Option('--pairing-policy <open|allowlist|pairing|disabled>', 'Persist pairing policy.'))
-    .addOption(new Option('--pairing-allow-from <ids>', 'Persist pairing allowlist.'))
-    .addOption(new Option('--pairing-pending-ttl-ms <ms>', 'Persist pairing pending ttl.'))
-    .addOption(new Option('--pairing-pending-max <n>', 'Persist pairing pending max.'))
     .addOption(new Option('--request-timeout-ms <ms>', 'Persist Feishu API request timeout ms.'));
 }
 

@@ -1,36 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { test } from "node:test";
 import { runCli } from "../cli/cli.js";
-import { resolvePairingStorePath } from "../pairing/storeFile.js";
 import {
-  approveChannelPairingCode,
-  listChannelPairingRequests,
-  readChannelAllowFromStore,
-  removeChannelAllowFromStoreEntry,
-  upsertChannelPairingRequest,
-} from "../pairing/pairing-store.js";
-
-type TestEnv = NodeJS.ProcessEnv & { HOME: string };
-
-async function withTempHome<T>(fn: (env: TestEnv) => Promise<T>): Promise<T> {
-  const home = await fs.mkdtemp(path.join(os.tmpdir(), "lainclaw-pairing-"));
-  const env: TestEnv = { ...process.env, HOME: home };
-
-  try {
-    return await fn(env);
-  } finally {
-    await fs.rm(home, { recursive: true, force: true });
-  }
-}
-
-async function delay(ms: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
+  approveFeishuPairingCode,
+  buildFeishuPairingReply,
+  isFeishuPaired,
+  issueFeishuPairingCode,
+  resolveFeishuPairingStatePath,
+} from "../channels/feishu/pairing.js";
+import { withTempHome } from "./helpers.js";
 
 async function runCliIsolated(argv: string[]): Promise<number> {
   const previousExitCode = process.exitCode;
@@ -41,179 +20,57 @@ async function runCliIsolated(argv: string[]): Promise<number> {
   }
 }
 
-test("pairing store isolates requests by account id", async () => {
-  await withTempHome(async (env) => {
-    await upsertChannelPairingRequest({
-      channel: "feishu",
-      id: "openA",
-      accountId: "acc-a",
-      env,
-    });
-    await upsertChannelPairingRequest({
-      channel: "feishu",
-      id: "openB",
-      accountId: "acc-b",
-      env,
-    });
-
-    const requestsA = await listChannelPairingRequests("feishu", env, "acc-a");
-    const requestsB = await listChannelPairingRequests("feishu", env, "acc-b");
-
-    assert.equal(requestsA.length, 1);
-    assert.equal(requestsB.length, 1);
-    assert.equal(requestsA[0]?.id, "openA");
-    assert.equal(requestsB[0]?.id, "openB");
-  });
-});
-
-test("pairing approval is account-scoped and adds allow-from entry", async () => {
-  await withTempHome(async (env) => {
-    const pending = await upsertChannelPairingRequest({
-      channel: "feishu",
-      id: "openC",
-      accountId: "acc-c",
-      env,
-    });
-
-    const mismatch = await approveChannelPairingCode({
-      channel: "feishu",
-      code: pending.code,
-      accountId: "acc-d",
-      env,
-    });
-    assert.equal(mismatch, null);
-
-    const pendingAfterMismatch = await listChannelPairingRequests("feishu", env, "acc-c");
-    assert.equal(pendingAfterMismatch.length, 1);
-
-    const approved = await approveChannelPairingCode({
-      channel: "feishu",
-      code: pending.code,
-      accountId: "acc-c",
-      env,
-    });
-    assert.ok(approved);
-    assert.equal(approved?.id, "openC");
-
-    const allowFrom = await readChannelAllowFromStore("feishu", env, "acc-c");
-    assert.equal(allowFrom.length, 1);
-    assert.equal(allowFrom[0], "openc");
-
-    const pendingAfterApproved = await listChannelPairingRequests("feishu", env, "acc-c");
-    assert.equal(pendingAfterApproved.length, 0);
-  });
-});
-
-test("pairing queue capacity is enforced before adding new request", async () => {
-  await withTempHome(async (env) => {
-    const first = await upsertChannelPairingRequest({
-      channel: "feishu",
-      id: "openD",
-      accountId: "acc-e",
-      limits: {
-        maxPending: 1,
-      },
-      env,
-    });
+test("pairing issues a stable code until approval", async () => {
+  await withTempHome(async () => {
+    const first = await issueFeishuPairingCode("user-1");
     assert.equal(first.created, true);
     assert.match(first.code, /^[A-Z0-9]{8}$/);
 
-    const second = await upsertChannelPairingRequest({
-      channel: "feishu",
-      id: "openE",
-      accountId: "acc-e",
-      limits: {
-        maxPending: 1,
-      },
-      env,
-    });
-    assert.equal(second.code, "");
+    const second = await issueFeishuPairingCode("user-1");
     assert.equal(second.created, false);
+    assert.equal(second.code, first.code);
+    assert.equal(await isFeishuPaired("user-1"), false);
   });
 });
 
-test("expired pairing requests are pruned and revoked entries can be removed", async () => {
-  await withTempHome(async (env) => {
-    const ttlMs = 25;
-    const pending = await upsertChannelPairingRequest({
-      channel: "feishu",
-      id: "openF",
-      accountId: "acc-f",
-      limits: {
-        ttlMs,
-      },
-      env,
-    });
+test("pairing approval marks openId as paired and clears pending request", async () => {
+  await withTempHome(async (home) => {
+    const pending = await issueFeishuPairingCode("user-2");
 
-    const immediate = await listChannelPairingRequests("feishu", env, "acc-f", {
-      ttlMs,
-    });
-    assert.equal(immediate.length, 1);
-    assert.equal(immediate[0]?.id, "openF");
+    const approvedOpenId = await approveFeishuPairingCode(pending.code);
+    assert.equal(approvedOpenId, "user-2");
+    assert.equal(await isFeishuPaired("user-2"), true);
+    assert.equal(await approveFeishuPairingCode(pending.code), null);
 
-    await delay(ttlMs * 5);
-    const afterTTL = await listChannelPairingRequests("feishu", env, "acc-f", {
-      ttlMs,
-    });
-    assert.equal(afterTTL.length, 0);
-
-    const approved = await approveChannelPairingCode({
-      channel: "feishu",
-      code: pending.code,
-      accountId: "acc-f",
-      env,
-    });
-    assert.equal(approved, null);
-
-    const revoked = await removeChannelAllowFromStoreEntry({
-      channel: "feishu",
-      entry: "openF",
-      accountId: "acc-f",
-      env,
-    });
-    assert.equal(revoked.changed, false);
-    assert.equal(revoked.allowFrom.length, 0);
+    const state = JSON.parse(await fs.readFile(resolveFeishuPairingStatePath(home), "utf-8")) as {
+      approvedOpenIds?: string[];
+      pending?: Array<unknown>;
+    };
+    assert.deepEqual(state.approvedOpenIds ?? [], ["user-2"]);
+    assert.deepEqual(state.pending ?? [], []);
   });
 });
 
-test("legacy pairing state inside gateway config is ignored after the cleanup phase", async () => {
-  await withTempHome(async (env) => {
-    const gatewayPath = path.join(env.HOME, ".lainclaw", "gateway.json");
-    await fs.mkdir(path.dirname(gatewayPath), { recursive: true });
-    await fs.writeFile(gatewayPath, JSON.stringify({
-      version: 1,
-      pairing: {
-        version: 1,
-        channels: {
-          feishu: {
-            requests: [
-              {
-                id: "openG",
-                code: "ABCDEFGH",
-                createdAt: "2026-03-15T00:00:00.000Z",
-                lastSeenAt: "2026-03-15T00:00:00.000Z",
-                meta: {
-                  accountId: "acc-g",
-                },
-              },
-            ],
-            allowFrom: ["legacy-admin"],
-          },
-        },
-      },
-    }, null, 2), "utf-8");
+test("pairing approve command executes end to end", async () => {
+  await withTempHome(async () => {
+    const pending = await issueFeishuPairingCode("user-3");
 
-    const requests = await listChannelPairingRequests("feishu", env, "acc-g");
-    assert.equal(requests.length, 0);
-
-    const allowFrom = await readChannelAllowFromStore("feishu", env);
-    assert.deepEqual(allowFrom, []);
-
-    await assert.rejects(
-      fs.readFile(resolvePairingStorePath(env.HOME), "utf-8"),
-      (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT",
-    );
+    const code = await runCliIsolated(["pairing", "approve", pending.code]);
+    assert.equal(code, 0);
+    assert.equal(await isFeishuPaired("user-3"), true);
   });
+});
+
+test("pairing reply only exposes the minimal approve command", () => {
+  const reply = buildFeishuPairingReply("user-4", "ABCDEFGH");
+  assert.match(reply, /lainclaw pairing approve ABCDEFGH/);
+  assert.doesNotMatch(reply, /--channel/);
+});
+
+test("removed pairing subcommands and flags are rejected", async () => {
+  assert.equal(await runCliIsolated(["pairing", "list"]), 1);
+  assert.equal(await runCliIsolated(["pairing", "revoke", "user-1"]), 1);
+  assert.equal(await runCliIsolated(["pairing", "approve", "--channel", "feishu", "ABCDEFGH"]), 1);
 });
 
 test("model command parser rejects removed tool max steps flag", () => {

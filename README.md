@@ -181,40 +181,22 @@ lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> --request-timeo
 - `LAINCLAW_GATEWAY_PROFILE_ID`
 - `LAINCLAW_GATEWAY_WITH_TOOLS`：`true|false`
 - `LAINCLAW_GATEWAY_MEMORY`：`true|false`
-- `LAINCLAW_FEISHU_PAIRING_POLICY` / `FEISHU_PAIRING_POLICY`：`open|allowlist|pairing|disabled`（默认 `open`）
-- `LAINCLAW_FEISHU_PAIRING_PENDING_TTL_MS` / `FEISHU_PAIRING_PENDING_TTL_MS`：待审批请求 TTL（毫秒）
-- `LAINCLAW_FEISHU_PAIRING_PENDING_MAX` / `FEISHU_PAIRING_PENDING_MAX`：待审批最大未处理条数
-- `LAINCLAW_FEISHU_PAIRING_ALLOW_FROM` / `FEISHU_PAIRING_ALLOW_FROM`：默认配对放行列表（逗号分隔，`*` 表示全放行）
 - `LAINCLAW_CODEX_PREFIX_RESPONSE`：全局调试开关，值为 `true/1/yes/on` 时在响应文本前缀附加 `[<provider>:<profileId>]`；默认关闭时不带前缀。
 
 ### 配对鉴权（Pairing）使用说明
 
-飞书网关支持四种策略：
+飞书网关现在只保留最小 pairing 闭环：
 
-- `open`（默认）：不拦截 DM。
-- `allowlist`：仅放行 `pairingAllowFrom` 白名单（`*` 表示全放行）。
-- `pairing`：未命中白名单则进入待审批流程，用户收到配对码后可由管理员批准。
-- `disabled`：拒绝所有 DM。
+1. 未配对用户发送消息时，不进入 agent，而是收到一条可直接执行的审批命令。
+2. 管理员在运行网关的机器上执行该命令后，该用户后续消息直接放行。
 
-网关启动示例：
+示例消息中的命令形态如下：
 
 ```bash
-lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
-  --pairing-policy pairing \
-  --pairing-allow-from ou_admin_001,ou_admin_002 \
-  --pairing-pending-ttl-ms 5400000 \
-  --pairing-pending-max 5
-
-lainclaw gateway start --pairing-policy allowlist --pairing-allow-from "ou_admin_001,ou_admin_002"
+lainclaw pairing approve ABCDEFGH
 ```
 
-配对管理命令：
-
-```bash
-lainclaw pairing list [--channel feishu] [--json]
-lainclaw pairing approve [--channel feishu] <code> [--account <accountId>]
-lainclaw pairing revoke [--channel feishu] <openIdOrUserId> [--account <accountId>]
-```
+不再提供策略切换、白名单、TTL、待审批队列上限、`list`、`revoke` 等额外能力。
 
 ### 启动日志说明（你可以按这个判断是否成功）
 
