@@ -152,6 +152,7 @@ export interface CoreRunAgentOptions {
   withTools: boolean;
   cwd?: string;
   debug?: boolean;
+  onAgentEvent?: RuntimeAgentEventSink;
 }
 
 export interface CoreRuntimeInput {

@@ -2,7 +2,7 @@ import type { CoreToolsAdapter } from "./adapters/tools.js";
 import type { CoreSessionAdapter } from "./adapters/session.js";
 import type { CoreRuntimeAdapter } from "./adapters/runtime.js";
 import type { CoreEventSink, CoreSessionHistoryMessage } from "./contracts.js";
-import type { RuntimeContinueReason, RuntimeRunMode } from "../shared/types.js";
+import type { RuntimeAgentEventSink, RuntimeContinueReason, RuntimeRunMode } from "../shared/types.js";
 
 export type RunCtx = {
   requestId: string;
@@ -16,6 +16,7 @@ export type RunCtx = {
   memoryEnabled?: boolean;
   cwd?: string;
   debug?: boolean;
+  onAgentEvent?: RuntimeAgentEventSink;
   emitEvent: CoreEventSink;
   sessionAdapter: CoreSessionAdapter;
   toolsAdapter: CoreToolsAdapter;

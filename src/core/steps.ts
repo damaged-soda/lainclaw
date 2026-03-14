@@ -247,6 +247,14 @@ async function runRuntimeForTurn(
               agentEvent,
             },
           });
+          if (!ctx.onAgentEvent) {
+            return;
+          }
+          try {
+            await ctx.onAgentEvent(agentEvent);
+          } catch {
+            // External event sinks are observational only.
+          }
         },
       }),
   );

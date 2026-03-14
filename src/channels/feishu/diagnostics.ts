@@ -60,12 +60,12 @@ export function maskConfigValue(raw: string | undefined): string | undefined {
 function parseHeartbeatSummaryTarget(rawMessage: string): string {
   const normalized = rawMessage || "";
   if (normalized.includes("agent timeout")) {
-    return "模型处理超时，请稍后重试；若持续超时请检查网络或加长 timeout 配置。";
+    return "处理时间较长或执行异常中断，请稍后重试。";
   }
   if (isAuthError(normalized)) {
     return "未检测到可用认证配置，请先执行 `lainclaw auth login openai-codex` 并检查登录信息。";
   }
-  return "模型调用失败，请联系管理员查看服务日志；或检查 provider/profile 配置后重试。";
+  return "处理时间较长或执行异常中断，请稍后重试。";
 }
 
 function parseHeartbeatDecisionMessage(rawMessage: string): string {

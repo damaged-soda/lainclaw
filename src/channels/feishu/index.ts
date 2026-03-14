@@ -3,12 +3,10 @@ import { validateFeishuGatewayCredentials } from './credentials.js';
 import { startFeishuHeartbeatSidecar } from './sidecars/heartbeat.js';
 import { resolveFeishuGatewayConfig, type FeishuGatewayConfig } from './config.js';
 import { runFeishuTransport } from './transport.js';
-import { handleInbound } from '../../gateway/handlers/handleInbound.js';
+import { runFeishuInbound } from './inbound.js';
 import { makeFeishuFailureHint } from './diagnostics.js';
 import { type Channel, type ChannelRunContext, type SidecarHandle } from '../contracts.js';
 import { sendFeishuTextMessage } from './outbound.js';
-
-const DEFAULT_AGENT_TIMEOUT_MS = 10000;
 
 interface FeishuRuntimeOptions {
   provider?: string;
@@ -41,15 +39,24 @@ function buildRunInboundRuntime(config: FeishuGatewayConfig, context?: ChannelRu
 }
 
 async function runCoreInbound(
-  inbound: Parameters<typeof handleInbound>[0],
+  inbound: Parameters<typeof runFeishuInbound>[0]['inbound'],
   config: FeishuGatewayConfig,
   context?: ChannelRunContext,
-): ReturnType<typeof handleInbound> {
-  return handleInbound(inbound, {
+): ReturnType<typeof runFeishuInbound> {
+  return runFeishuInbound({
+    inbound,
     runtime: buildRunInboundRuntime(config, context),
+    outbound: {
+      sendText: async (replyTo, text) => {
+        await sendFeishuTextMessage(config, {
+          openId: replyTo,
+          text,
+        });
+      },
+    },
     policyConfig: config,
-    timeoutMs: config.requestTimeoutMs || DEFAULT_AGENT_TIMEOUT_MS,
     onFailureHint: makeFeishuFailureHint,
+    debug: context?.debug === true,
   });
 }
 
@@ -98,7 +105,7 @@ export const feishuChannel: Channel = {
   run: async (onInbound, overrides?: unknown, context?: ChannelRunContext): Promise<void> => {
     const config = await toRuntimeConfig(overrides, context);
 
-    const runInbound = async (inbound: Parameters<typeof handleInbound>[0]) => {
+    const runInbound = async (inbound: Parameters<typeof runFeishuInbound>[0]['inbound']) => {
       if (onInbound) {
         const overridden = await onInbound(inbound);
         if (overridden) {

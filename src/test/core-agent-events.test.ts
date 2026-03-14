@@ -6,6 +6,7 @@ import type { CoreTraceEvent } from "../core/contracts.js";
 import { createRuntimeAdapter } from "../runtime/adapter.js";
 import { createSessionAdapter } from "../sessions/adapter.js";
 import { createToolsAdapter } from "../tools/adapter.js";
+import type { RuntimeAgentEvent } from "../shared/types.js";
 import { withTempHome } from "./helpers.js";
 
 function makeAssistantMessage(text: string): Message {
@@ -37,6 +38,7 @@ function makeAssistantMessage(text: string): Message {
 test("core and runtime adapter can observe raw AgentEvent envelopes", async () => {
   await withTempHome(async () => {
     const emitted: CoreTraceEvent[] = [];
+    const forwarded: RuntimeAgentEvent[] = [];
     const assistantMessage = makeAssistantMessage("runtime reply");
     const coordinator = createCoreCoordinator({
       sessionAdapter: createSessionAdapter(),
@@ -93,6 +95,9 @@ test("core and runtime adapter can observe raw AgentEvent envelopes", async () =
       sessionKey: "core-runtime-event-session",
       withTools: false,
       memory: false,
+      onAgentEvent: async (event) => {
+        forwarded.push(event);
+      },
     });
 
     const runtimeEvents = emitted
@@ -101,5 +106,6 @@ test("core and runtime adapter can observe raw AgentEvent envelopes", async () =
 
     assert.equal(result.text, "runtime reply");
     assert.deepEqual(runtimeEvents, ["message_start", "agent_end"]);
+    assert.deepEqual(forwarded.map((event) => event.event.type), ["message_start", "agent_end"]);
   });
 });

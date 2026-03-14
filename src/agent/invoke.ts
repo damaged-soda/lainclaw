@@ -6,6 +6,7 @@ import {
   runWithLangfuseFallback,
   startActiveObservation,
 } from "../observability/langfuse.js";
+import type { RuntimeAgentEventSink } from "../shared/types.js";
 
 type NormalizedCoreResult = Awaited<ReturnType<typeof coreCoordinator.runAgent>>;
 
@@ -33,6 +34,7 @@ interface RunAgentRequest {
   channelId?: string;
   sessionKey?: string;
   runtime?: RunAgentRuntimeContext;
+  onAgentEvent?: RuntimeAgentEventSink;
 }
 
 interface NormalizedRunAgentInput {
@@ -69,6 +71,7 @@ async function runAgentCore(input: string, request: RunAgentRequest): Promise<Ru
       ...(typeof invocation.memory === "boolean" ? { memory: invocation.memory } : {}),
       ...(typeof invocation.cwd === "string" ? { cwd: invocation.cwd } : {}),
       ...(typeof invocation.debug === "boolean" ? { debug: invocation.debug } : {}),
+      ...(request.onAgentEvent ? { onAgentEvent: request.onAgentEvent } : {}),
     });
     return toRunAgentResult(result);
   };

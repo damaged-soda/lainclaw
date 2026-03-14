@@ -74,6 +74,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         newSession,
         cwd,
         debug,
+        onAgentEvent,
       } = options;
 
       const ctx: RunCtx = {
@@ -88,6 +89,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         memoryEnabled,
         cwd: typeof cwd === "string" ? cwd : undefined,
         debug: debug === true,
+        onAgentEvent,
         emitEvent,
         sessionAdapter,
         toolsAdapter,
