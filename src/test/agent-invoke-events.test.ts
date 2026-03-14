@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runAgent } from '../agent/invoke.js';
-import { coreCoordinator } from '../app/coreCoordinator.js';
+import { agentCoordinator } from '../agent/coordinator.js';
 import type { RuntimeAgentEvent } from '../shared/types.js';
 
 test('runAgent forwards onAgentEvent to the core coordinator request', async () => {
-  const originalRunAgent = coreCoordinator.runAgent;
+  const originalRunAgent = agentCoordinator.runAgent;
   const observed: RuntimeAgentEvent[] = [];
 
-  coreCoordinator.runAgent = async (_input, options) => {
+  agentCoordinator.runAgent = async (_input, options) => {
     await options.onAgentEvent?.({
       requestId: 'req-1',
       sessionKey: options.sessionKey,
@@ -48,6 +48,6 @@ test('runAgent forwards onAgentEvent to the core coordinator request', async () 
     assert.deepEqual(observed.map((event) => event.event.type), ['agent_start']);
     assert.equal(observed[0]?.sessionKey, 'session-key');
   } finally {
-    coreCoordinator.runAgent = originalRunAgent;
+    agentCoordinator.runAgent = originalRunAgent;
   }
 });

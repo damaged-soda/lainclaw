@@ -3,7 +3,7 @@ import type {
   CoreSessionRecord,
 } from "../contracts.js";
 import type { ProviderResult, ProviderRunInput } from "../../providers/registry.js";
-import type { AgentStateStore } from "../../runtime/agentStateStore.js";
+import type { AgentStateStore } from "../../sessions/agentSnapshotStore.js";
 import type { RuntimeContinueReason, RuntimeRunMode } from "../../shared/types.js";
 
 export interface CoreTurnDependencies {

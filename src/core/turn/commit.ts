@@ -1,7 +1,7 @@
 import {
   agentStateStore,
   normalizePersistedMessages,
-} from "../../runtime/agentStateStore.js";
+} from "../../sessions/agentSnapshotStore.js";
 import type {
   CommitTurnInput,
   CommitTurnResult,

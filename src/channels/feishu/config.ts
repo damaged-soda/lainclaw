@@ -2,7 +2,7 @@ import {
   DEFAULT_PAIRING_PENDING_MAX,
   DEFAULT_PAIRING_PENDING_TTL_MS,
   type PairingPolicy,
-} from "../../pairing/pairing-store.js";
+} from "../../pairing/contracts.js";
 import {
   isDefaultGatewayChannel,
   loadGatewayConfigFile,

@@ -1,16 +1,14 @@
 import {
   appendSessionMessage,
-  appendSessionMemory,
-  getAllSessionTranscriptMessages,
   getOrCreateSession,
   getRecentSessionTranscriptMessages,
   getSessionMemoryPath,
   loadSessionMemorySnippet,
   recordSessionRoute,
-  updateSessionRecord,
   type SessionLoadOptions,
   type SessionLoadResult,
 } from "./sessionStore.js";
+import { sessionMemoryCompactor, type SessionMemoryCompactor } from "./memoryCompactor.js";
 import { ValidationError } from "../shared/types.js";
 import type {
   CoreSessionLoadInput,
@@ -79,7 +77,12 @@ async function appendRuntimeMessage(
   });
 }
 
-export function createSessionAdapter(): CoreSessionPort {
+export interface CreateSessionAdapterOptions {
+  memoryCompactor?: SessionMemoryCompactor;
+}
+
+export function createSessionAdapter(options: CreateSessionAdapterOptions = {}): CoreSessionPort {
+  const memoryCompactor = options.memoryCompactor ?? sessionMemoryCompactor;
   return {
     resolveSession: async (input: CoreSessionLoadInput): Promise<CoreSessionRecord> => {
       return runWithSessionFailure(async () => {
@@ -123,33 +126,7 @@ export function createSessionAdapter(): CoreSessionPort {
       );
     },
     compactIfNeeded: async (input: CoreSessionSnapshotCompact): Promise<boolean> => {
-      return runWithSessionFailure(async () => {
-        if (!input.memoryEnabled) {
-          return false;
-        }
-
-        const allMessages = await getAllSessionTranscriptMessages(input.sessionId);
-        if (allMessages.length <= 24) {
-          return false;
-        }
-
-        const summaryLines = allMessages
-          .filter((message) => message.role === "user" || message.role === "assistant")
-          .slice(-16)
-          .map((message) => message.content)
-          .filter((line) => line.length > 0)
-          .map((line, index) => `${index + 1}. ${line}`);
-
-        if (summaryLines.length < 6) {
-          return false;
-        }
-
-        const summary = `## Memory Summary\n${summaryLines.map((line) => `- ${line}`).join("\n")}`;
-        await appendSessionMemory(input.sessionKey, input.sessionId, summary);
-        const cutoff = Math.max(allMessages.length - 12, 0);
-        await updateSessionRecord(input.sessionKey, { compactedMessageCount: cutoff });
-        return true;
-      });
+      return runWithSessionFailure(async () => memoryCompactor.compactIfNeeded(input));
     },
     resolveSessionMemoryPath: (sessionKey: string): string => {
       return getSessionMemoryPath(sessionKey);

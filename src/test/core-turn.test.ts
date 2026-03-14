@@ -11,7 +11,7 @@ import {
 } from "../core/turn/index.js";
 import type { ProviderResult } from "../providers/registry.js";
 import { createSessionAdapter } from "../sessions/adapter.js";
-import { createAgentStateStore } from "../runtime/agentStateStore.js";
+import { createAgentStateStore } from "../sessions/agentSnapshotStore.js";
 import { withTempHome } from "./helpers.js";
 
 function makeUsageZero() {

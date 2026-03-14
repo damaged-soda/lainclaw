@@ -18,7 +18,6 @@ export interface GatewayConfigFile {
   version: 1;
   default?: GatewayDefaultConfigScope;
   channels?: Record<string, GatewayChannelConfigScope>;
-  pairing?: Record<string, unknown>;
 }
 
 function isRecord(raw: unknown): raw is Record<string, unknown> {
@@ -76,13 +75,10 @@ export function normalizeGatewayConfigFile(raw: unknown): GatewayConfigFile {
     }
   }
 
-  const pairing = isRecord(raw) && isRecord(raw.pairing) ? { ...raw.pairing } : undefined;
-
   return {
     version: CURRENT_VERSION,
     ...(defaultScope ? { default: defaultScope } : {}),
     ...(Object.keys(channels).length > 0 ? { channels } : {}),
-    ...(pairing ? { pairing } : {}),
   };
 }
 
@@ -102,7 +98,6 @@ function hasPersistedConfig(store: GatewayConfigFile): boolean {
   return !!(
     store.default
     || (store.channels && Object.keys(store.channels).length > 0)
-    || store.pairing
   );
 }
 

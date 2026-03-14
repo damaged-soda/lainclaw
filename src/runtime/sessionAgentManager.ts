@@ -2,7 +2,7 @@ import { Agent, type AgentEvent, type AgentMessage, type AgentTool } from "@mari
 import type { Message, Model } from "@mariozechner/pi-ai";
 import { writeDebugLogIfEnabled } from "../shared/debug.js";
 import type { RequestContext } from "../shared/types.js";
-import { normalizePersistedMessages } from "./agentStateStore.js";
+import { normalizePersistedMessages } from "../sessions/agentSnapshotStore.js";
 import { transformContextMessages } from "./context.js";
 
 export interface SessionManagedAgent {

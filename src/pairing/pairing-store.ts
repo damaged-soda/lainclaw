@@ -1,238 +1,76 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
 import {
-  normalizeGatewayConfigFile as normalizePersistedGatewayConfigFile,
-  resolveGatewayConfigPath,
-  type GatewayConfigFile as PersistedGatewayConfigFile,
-} from "../gateway/configFile.js";
+  DEFAULT_PAIRING_PENDING_MAX,
+  DEFAULT_PAIRING_PENDING_TTL_MS,
+  type PairingChannel,
+  type PairingRequest,
+  type PairingStoreLimits,
+} from "./contracts.js";
+import {
+  hasPairingChannelData,
+  loadPairingStoreFile,
+  normalizePairingChannel,
+  normalizePairingChannelState,
+  resolvePairingStorePath,
+  savePairingStoreFile,
+  type PairingChannelState,
+} from "./storeFile.js";
 
-export const DEFAULT_PAIRING_PENDING_TTL_MS = 60 * 60 * 1000;
-export const DEFAULT_PAIRING_PENDING_MAX = 3;
+export {
+  DEFAULT_PAIRING_PENDING_MAX,
+  DEFAULT_PAIRING_PENDING_TTL_MS,
+  type PairingChannel,
+  type PairingPolicy,
+  type PairingRequest,
+  type PairingStoreLimits,
+} from "./contracts.js";
 
 const PAIRING_CODE_LENGTH = 8;
 const PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const CURRENT_VERSION = 1 as const;
-
-export type PairingChannel = string;
-export type PairingPolicy = "open" | "allowlist" | "pairing" | "disabled";
-
-export type PairingStoreLimits = {
-  ttlMs?: number;
-  maxPending?: number;
-};
-
-export interface PairingRequest {
-  id: string;
-  code: string;
-  createdAt: string;
-  lastSeenAt: string;
-  meta?: Record<string, string>;
-}
-
-interface GatewayPairingChannelState {
-  requests?: PairingRequest[];
-  allowFrom?: string[];
-  accountAllowFrom?: Record<string, string[]>;
-}
-
-interface GatewayPairingState {
-  version: 1;
-  channels?: Record<string, GatewayPairingChannelState>;
-}
-
-type GatewayConfigFile = Omit<PersistedGatewayConfigFile, "pairing"> & {
-  pairing?: GatewayPairingState;
-};
-
-function safeChannelKey(channel: PairingChannel): string {
-  const raw = String(channel).trim().toLowerCase();
-  if (!raw) {
-    throw new Error("invalid pairing channel");
-  }
-  const safe = raw.replace(/[\\/:*?\"<>|]/g, "_").replace(/\.\./g, "_");
-  if (!safe || safe === "_") {
-    throw new Error("invalid pairing channel");
-  }
-  return safe;
-}
 
 const storeLocks = new Map<string, Promise<void>>();
-
-const DEFAULT_GATEWAY_CONFIG_FILE: GatewayConfigFile = {
-  version: CURRENT_VERSION,
-  pairing: {
-    version: CURRENT_VERSION,
-    channels: {},
-  },
-};
-
-function hasPairingChannelData(state: GatewayPairingChannelState): boolean {
-  return (
-    (state.requests?.length ?? 0) > 0
-    || (state.allowFrom?.length ?? 0) > 0
-    || Object.keys(state.accountAllowFrom ?? {}).length > 0
-  );
-}
-
-function isRecord(raw: unknown): raw is Record<string, unknown> {
-  return !!raw && typeof raw === "object" && !Array.isArray(raw);
-}
-
-async function withStoreLock<T>(filePath: string, fallback: unknown, fn: () => Promise<T>): Promise<T> {
-  await ensureJsonFile(filePath, fallback);
-  const previous = storeLocks.get(filePath) || Promise.resolve();
-  let release: () => void = () => {};
-  const releaseGate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const nextTail = previous.then(() => releaseGate);
-  storeLocks.set(filePath, nextTail);
-
-  try {
-    await previous;
-    return await fn();
-  } finally {
-    release();
-    if (storeLocks.get(filePath) === nextTail) {
-      storeLocks.delete(filePath);
-    }
-  }
-}
-
-async function readJsonFile<T>(filePath: string, fallback: T): Promise<{ value: T }> {
-  try {
-    const raw = await fs.readFile(filePath, "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    return { value: parsed as T };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { value: fallback };
-    }
-    return { value: fallback };
-  }
-}
 
 function trimText(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
-function normalizeGatewayPairingState(raw: unknown): GatewayPairingState {
-  if (!isRecord(raw)) {
-    return {
-      version: CURRENT_VERSION,
-      channels: {},
-    };
-  }
-  const candidate = raw as Partial<GatewayPairingState>;
-  if (!Number.isInteger(candidate.version) || candidate.version !== CURRENT_VERSION) {
-    return {
-      version: CURRENT_VERSION,
-      channels: {},
-    };
-  }
-  const channelsSource = isRecord(candidate.channels) ? candidate.channels : {};
-  const normalizedChannels: Record<string, GatewayPairingChannelState> = {};
-  for (const [rawChannel, rawScope] of Object.entries(channelsSource)) {
-    const normalizedScope = normalizeGatewayPairingChannelState(rawScope);
-    if (hasPairingChannelData(normalizedScope)) {
-      normalizedChannels[rawChannel] = normalizedScope;
-    }
-  }
-  return {
-    version: CURRENT_VERSION,
-    channels: normalizedChannels,
-  };
-}
-
-function normalizeGatewayConfigFile(raw: unknown): GatewayConfigFile {
-  const parsed = normalizePersistedGatewayConfigFile(raw);
-  return {
-    ...parsed,
-    pairing: normalizeGatewayPairingState(parsed.pairing),
-  };
-}
-
-async function readGatewayConfigFile(filePath: string): Promise<GatewayConfigFile> {
-  const parsed = await readJsonFile(filePath, DEFAULT_GATEWAY_CONFIG_FILE);
-  return normalizeGatewayConfigFile(parsed.value);
-}
-
-async function writeGatewayConfigFile(filePath: string, value: GatewayConfigFile): Promise<void> {
-  const normalized = normalizeGatewayConfigFile(value);
-  await writeJsonFile(filePath, normalized);
-}
-
-function normalizePairingRequestList(raw: unknown): PairingRequest[] {
-  const candidate = isRecord(raw) ? raw.requests : raw;
-  const requests = Array.isArray(candidate) ? candidate : [];
-  const normalized: PairingRequest[] = [];
-
-  for (const candidate of requests) {
-    if (!candidate || typeof candidate !== "object") {
-      continue;
-    }
-    const asRecord = candidate as unknown as Record<string, unknown>;
-    const id = trimText(asRecord.id);
-    const code = trimText(asRecord.code);
-    const createdAt = trimText(asRecord.createdAt);
-    const lastSeenAt = trimText(asRecord.lastSeenAt);
-    if (!id || !code || !createdAt || !lastSeenAt) {
-      continue;
-    }
-
-    const metaCandidate = asRecord.meta;
-    const metaEntries =
-      metaCandidate && typeof metaCandidate === "object"
-        ? Object.entries(metaCandidate as Record<string, unknown>)
-        : [];
-    const meta = Object.fromEntries(
-      metaEntries
-        .map(([k, v]) => [k, trimText(v)] as const)
-        .filter(([_, v]) => Boolean(v)),
-    );
-
-    normalized.push({
-      id,
-      code,
-      createdAt,
-      lastSeenAt,
-      ...(Object.keys(meta).length > 0 ? { meta } : {}),
-    });
-  }
-
-  return normalized;
-}
-
-function normalizeGatewayPairingChannelState(raw: unknown): GatewayPairingChannelState {
-  if (!isRecord(raw)) {
-    return { requests: [] };
-  }
-  const candidate = raw as Partial<GatewayPairingChannelState>;
-  const requests = normalizePairingRequestList(candidate.requests);
-  const allowFrom = normalizeAndDedup(Array.isArray(candidate.allowFrom) ? candidate.allowFrom : []);
-  const rawAccountMap = isRecord(candidate.accountAllowFrom) ? candidate.accountAllowFrom : {};
-  const accountAllowFrom: Record<string, string[]> = {};
-  for (const [accountId, rawEntries] of Object.entries(rawAccountMap)) {
-    const normalizedAccountId = normalizePairingAccountId(accountId);
-    if (!normalizedAccountId) {
-      continue;
-    }
-    const normalizedEntries = normalizeAndDedup(Array.isArray(rawEntries) ? rawEntries : []);
-    if (normalizedEntries.length > 0) {
-      accountAllowFrom[normalizedAccountId] = normalizedEntries;
-    }
-  }
-
-  return {
-    ...(requests.length > 0 ? { requests } : { requests: [] }),
-    ...(allowFrom.length > 0 ? { allowFrom } : {}),
-    ...(Object.keys(accountAllowFrom).length > 0 ? { accountAllowFrom } : {}),
-  };
-}
-
 function normalizePairingAccountId(accountId?: string): string {
   return trimText(accountId).toLowerCase();
+}
+
+function normalizeAndDedup(entries: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of entries) {
+    const normalized = trimText(entry);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+async function withStoreLock<T>(homeDir: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const filePath = resolvePairingStorePath(homeDir);
+  const previous = storeLocks.get(filePath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const entry = previous.catch(() => undefined).then(() => current);
+  storeLocks.set(filePath, entry);
+  await previous.catch(() => undefined);
+
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (storeLocks.get(filePath) === entry) {
+      storeLocks.delete(filePath);
+    }
+  }
 }
 
 function resolvePendingLimits(params: PairingStoreLimits | undefined): { ttlMs: number; maxPending: number } {
@@ -243,70 +81,6 @@ function resolvePendingLimits(params: PairingStoreLimits | undefined): { ttlMs: 
     ? Math.floor((params as PairingStoreLimits).maxPending as number)
     : DEFAULT_PAIRING_PENDING_MAX;
   return { ttlMs, maxPending };
-}
-
-async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const tmpPath = `${filePath}.tmp-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, "0")}`;
-  await fs.writeFile(tmpPath, JSON.stringify(value, null, 2), { encoding: "utf-8", mode: 0o600 });
-  await fs.rename(tmpPath, filePath);
-}
-
-async function ensureJsonFile(filePath: string, fallback: unknown): Promise<void> {
-  try {
-    await fs.access(filePath);
-  } catch {
-    await writeJsonFile(filePath, fallback);
-  }
-}
-
-async function readPairingChannelState(
-  filePath: string,
-  channel: PairingChannel,
-): Promise<GatewayPairingChannelState> {
-  const gateway = await readGatewayConfigFile(filePath);
-  const pairing = normalizeGatewayPairingState(gateway.pairing);
-  const channelState = pairing.channels?.[safeChannelKey(channel)];
-  return normalizeGatewayPairingChannelState(channelState);
-}
-
-async function writePairingChannelState(
-  filePath: string,
-  channel: PairingChannel,
-  state: GatewayPairingChannelState,
-): Promise<void> {
-  const gateway = await readGatewayConfigFile(filePath);
-  const pairing = normalizeGatewayPairingState(gateway.pairing);
-  const channels: Record<string, GatewayPairingChannelState> = { ...(pairing.channels ?? {}) };
-  const safeChannel = safeChannelKey(channel);
-  const normalizedAccountAllowFrom: Record<string, string[]> = {};
-  for (const [accountId, rawEntries] of Object.entries(state.accountAllowFrom ?? {})) {
-    const normalizedAccountId = normalizePairingAccountId(accountId);
-    if (!normalizedAccountId) {
-      continue;
-    }
-    const normalizedEntries = normalizeAndDedup(Array.isArray(rawEntries) ? rawEntries : []);
-    if (normalizedEntries.length > 0) {
-      normalizedAccountAllowFrom[normalizedAccountId] = normalizedEntries;
-    }
-  }
-  const nextState = {
-    requests: normalizePairingRequestList(state.requests),
-    ...(state.allowFrom && normalizeAndDedup(state.allowFrom).length > 0 ? { allowFrom: normalizeAndDedup(state.allowFrom) } : {}),
-    ...(Object.keys(normalizedAccountAllowFrom).length > 0 ? { accountAllowFrom: normalizedAccountAllowFrom } : {}),
-  };
-  if (hasPairingChannelData(nextState)) {
-    channels[safeChannel] = nextState;
-  } else {
-    delete channels[safeChannel];
-  }
-  await writeGatewayConfigFile(filePath, {
-    ...gateway,
-    pairing: {
-      version: CURRENT_VERSION,
-      ...(Object.keys(channels).length > 0 ? { channels } : {}),
-    },
-  });
 }
 
 function parseTimestamp(raw: string): number {
@@ -345,7 +119,7 @@ function pruneExcessRequests(requests: PairingRequest[], maxPending: number) {
 
 function randomCode(): string {
   let out = "";
-  for (let i = 0; i < PAIRING_CODE_LENGTH; i++) {
+  for (let i = 0; i < PAIRING_CODE_LENGTH; i += 1) {
     const idx = crypto.randomInt(0, PAIRING_CODE_ALPHABET.length);
     out += PAIRING_CODE_ALPHABET[idx];
   }
@@ -377,45 +151,63 @@ function requestMatchesAccountId(entry: PairingRequest, normalizedAccountId: str
   return (entry.meta?.accountId ?? "").trim().toLowerCase() === normalizedAccountId;
 }
 
-function normalizeAndDedup(entries: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const entry of entries) {
-    const normalized = trimText(entry);
-    if (!normalized || seen.has(normalized)) {
-      continue;
-    }
-    seen.add(normalized);
-    out.push(normalized);
+async function readPairingChannelState(
+  homeDir: string | undefined,
+  channel: PairingChannel,
+): Promise<PairingChannelState> {
+  const store = await loadPairingStoreFile(homeDir);
+  return normalizePairingChannelState(store.channels?.[normalizePairingChannel(channel)]);
+}
+
+async function writePairingChannelState(
+  homeDir: string | undefined,
+  channel: PairingChannel,
+  state: PairingChannelState,
+): Promise<void> {
+  const store = await loadPairingStoreFile(homeDir);
+  const normalizedChannel = normalizePairingChannel(channel);
+  const channels = { ...(store.channels ?? {}) };
+  const nextState = normalizePairingChannelState(state);
+
+  if (hasPairingChannelData(nextState)) {
+    channels[normalizedChannel] = nextState;
+  } else {
+    delete channels[normalizedChannel];
   }
-  return out;
+
+  await savePairingStoreFile({
+    version: 1,
+    ...(Object.keys(channels).length > 0 ? { channels } : {}),
+  }, homeDir);
 }
 
 async function readAllowFromState(
-  filePath: string,
+  homeDir: string | undefined,
   channel: PairingChannel,
   accountId?: string,
 ): Promise<string[]> {
-  const pairing = await readPairingChannelState(filePath, channel);
+  const pairing = await readPairingChannelState(homeDir, channel);
   if (!accountId) {
     return normalizeAndDedup(pairing.allowFrom ?? []);
   }
+
   const normalizedAccountId = normalizePairingAccountId(accountId);
   if (!normalizedAccountId) {
     return [];
   }
+
   return normalizeAndDedup(pairing.accountAllowFrom?.[normalizedAccountId] ?? []);
 }
 
 async function writeAllowFromState(
-  filePath: string,
+  homeDir: string | undefined,
   channel: PairingChannel,
   nextAllowFrom: string[],
   accountId?: string,
 ): Promise<void> {
   const normalizedAccountId = accountId ? normalizePairingAccountId(accountId) || undefined : undefined;
-  const pairing = await readPairingChannelState(filePath, channel);
-  const nextState: GatewayPairingChannelState = {
+  const pairing = await readPairingChannelState(homeDir, channel);
+  const nextState: PairingChannelState = {
     ...pairing,
     ...(accountId ? {} : { allowFrom: normalizeAndDedup(nextAllowFrom) }),
   };
@@ -428,14 +220,16 @@ async function writeAllowFromState(
       accountAllowFrom[normalizedAccountId] = normalizeAndDedup(nextAllowFrom);
     } else {
       delete accountAllowFrom[normalizedAccountId];
-      if (Object.keys(accountAllowFrom).length === 0) {
-        delete nextState.accountAllowFrom;
-      }
     }
-    nextState.accountAllowFrom = Object.keys(accountAllowFrom).length > 0 ? accountAllowFrom : {};
+
+    if (Object.keys(accountAllowFrom).length > 0) {
+      nextState.accountAllowFrom = accountAllowFrom;
+    } else {
+      delete nextState.accountAllowFrom;
+    }
   }
 
-  await writePairingChannelState(filePath, channel, nextState);
+  await writePairingChannelState(homeDir, channel, nextState);
 }
 
 async function updateAllowFromStoreEntry(
@@ -448,22 +242,25 @@ async function updateAllowFromStoreEntry(
   },
 ): Promise<{ changed: boolean; allowFrom: string[] }> {
   const env = params.env ?? process.env;
-  const filePath = resolveGatewayConfigPath(env.HOME);
+  const homeDir = env.HOME;
   const normalizedAccountId = params.accountId
     ? normalizePairingAccountId(params.accountId) || undefined
     : undefined;
-  return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
-    const current = normalizeAndDedup(await readAllowFromState(filePath, params.channel, normalizedAccountId));
+
+  return withStoreLock(homeDir, async () => {
+    const current = normalizeAndDedup(await readAllowFromState(homeDir, params.channel, normalizedAccountId));
     const normalized = normalizeAllowFromEntry(params.entry);
     if (!normalized) {
       return { changed: false, allowFrom: current };
     }
+
     const next = params.apply(current, normalized);
     if (!next) {
       return { changed: false, allowFrom: current };
     }
+
     const uniqueNext = normalizeAndDedup(next);
-    await writeAllowFromState(filePath, params.channel, uniqueNext, normalizedAccountId);
+    await writeAllowFromState(homeDir, params.channel, uniqueNext, normalizedAccountId);
     return { changed: true, allowFrom: uniqueNext };
   });
 }
@@ -473,14 +270,14 @@ export async function readChannelAllowFromStore(
   env: NodeJS.ProcessEnv = process.env,
   accountId?: string,
 ): Promise<string[]> {
-  const filePath = resolveGatewayConfigPath(env.HOME);
+  const homeDir = env.HOME;
   const normalizedAccountId = normalizePairingAccountId(accountId);
   if (!normalizedAccountId) {
-    return readAllowFromState(filePath, channel);
+    return readAllowFromState(homeDir, channel);
   }
 
-  const scopedEntries = await readAllowFromState(filePath, channel, normalizedAccountId);
-  const legacyEntries = await readAllowFromState(filePath, channel);
+  const scopedEntries = await readAllowFromState(homeDir, channel, normalizedAccountId);
+  const legacyEntries = await readAllowFromState(homeDir, channel);
   return normalizeAndDedup([...scopedEntries, ...legacyEntries]);
 }
 
@@ -525,17 +322,18 @@ export async function listChannelPairingRequests(
   accountId?: string,
   limits?: PairingStoreLimits,
 ): Promise<PairingRequest[]> {
-  const filePath = resolveGatewayConfigPath(env.HOME);
+  const homeDir = env.HOME;
   const { ttlMs, maxPending } = resolvePendingLimits(limits);
-  return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
+
+  return withStoreLock(homeDir, async () => {
     const nowMs = Date.now();
-    const currentState = await readPairingChannelState(filePath, channel);
+    const currentState = await readPairingChannelState(homeDir, channel);
     const reqs = currentState.requests ?? [];
     const { requests: prunedExpired, removed: expiredRemoved } = pruneExpiredRequests(reqs, nowMs, ttlMs);
     const { requests: pruned, removed: cappedRemoved } = pruneExcessRequests(prunedExpired, maxPending);
 
     if (expiredRemoved || cappedRemoved) {
-      await writePairingChannelState(filePath, channel, {
+      await writePairingChannelState(homeDir, channel, {
         ...currentState,
         requests: pruned,
       });
@@ -561,14 +359,15 @@ export async function upsertChannelPairingRequest(params: {
   limits?: PairingStoreLimits;
 }): Promise<{ code: string; created: boolean }> {
   const env = params.env ?? process.env;
-  const filePath = resolveGatewayConfigPath(env.HOME);
+  const homeDir = env.HOME;
   const id = trimText(params.id);
   if (!id) {
     throw new Error("invalid pairing sender id");
   }
+
   const { ttlMs, maxPending } = resolvePendingLimits(params.limits);
 
-  return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
+  return withStoreLock(homeDir, async () => {
     const now = new Date().toISOString();
     const nowMs = Date.now();
     const normalizedAccountId = normalizePairingAccountId(params.accountId);
@@ -581,7 +380,7 @@ export async function upsertChannelPairingRequest(params: {
       : {};
     const meta = normalizedAccountId ? { ...baseMeta, accountId: normalizedAccountId } : baseMeta;
 
-    const currentState = await readPairingChannelState(filePath, params.channel);
+    const currentState = await readPairingChannelState(homeDir, params.channel);
     let reqs = currentState.requests ?? [];
     const { requests: prunedExpired, removed: expiredRemoved } = pruneExpiredRequests(reqs, nowMs, ttlMs);
     reqs = prunedExpired;
@@ -606,7 +405,7 @@ export async function upsertChannelPairingRequest(params: {
           : {}),
       };
       const { requests: capped } = pruneExcessRequests(reqs, maxPending);
-      await writePairingChannelState(filePath, params.channel, {
+      await writePairingChannelState(homeDir, params.channel, {
         ...currentState,
         requests: capped,
       });
@@ -618,7 +417,7 @@ export async function upsertChannelPairingRequest(params: {
 
     if (maxPending > 0 && reqs.length >= maxPending) {
       if (expiredRemoved || cappedRemoved) {
-        await writePairingChannelState(filePath, params.channel, {
+        await writePairingChannelState(homeDir, params.channel, {
           ...currentState,
           requests: reqs,
         });
@@ -634,7 +433,7 @@ export async function upsertChannelPairingRequest(params: {
       lastSeenAt: now,
       ...(Object.keys(meta).length > 0 ? { meta } : {}),
     };
-    await writePairingChannelState(filePath, params.channel, {
+    await writePairingChannelState(homeDir, params.channel, {
       ...currentState,
       requests: [...reqs, next],
     });
@@ -650,17 +449,17 @@ export async function approveChannelPairingCode(params: {
   limits?: PairingStoreLimits;
 }): Promise<{ id: string; entry?: PairingRequest } | null> {
   const env = params.env ?? process.env;
+  const homeDir = env.HOME;
   const code = normalizePairingCode(params.code);
   if (!code) {
     return null;
   }
 
-  const filePath = resolveGatewayConfigPath(env.HOME);
   const { ttlMs } = resolvePendingLimits(params.limits);
 
-  return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
+  return withStoreLock(homeDir, async () => {
     const nowMs = Date.now();
-    const currentState = await readPairingChannelState(filePath, params.channel);
+    const currentState = await readPairingChannelState(homeDir, params.channel);
     const reqs = currentState.requests ?? [];
     const { requests: pruned, removed } = pruneExpiredRequests(reqs, nowMs, ttlMs);
     const normalizedAccountId = normalizePairingAccountId(params.accountId);
@@ -670,7 +469,7 @@ export async function approveChannelPairingCode(params: {
     );
     if (idx < 0) {
       if (removed) {
-        await writePairingChannelState(filePath, params.channel, {
+        await writePairingChannelState(homeDir, params.channel, {
           ...currentState,
           requests: pruned,
         });
@@ -682,14 +481,16 @@ export async function approveChannelPairingCode(params: {
     if (!entry) {
       return null;
     }
+
     pruned.splice(idx, 1);
     const accountId = normalizePairingAccountId(params.accountId)
       || (entry.meta?.accountId ? entry.meta.accountId : undefined);
-    const nextState: GatewayPairingChannelState = {
+    const nextState: PairingChannelState = {
       ...currentState,
       requests: pruned,
     };
     const normalizedEntry = normalizeAllowFromEntry(entry.id);
+
     if (accountId && normalizedEntry) {
       const normalizedScopedAccountId = normalizePairingAccountId(accountId);
       const allowFromByAccount = {
@@ -709,8 +510,7 @@ export async function approveChannelPairingCode(params: {
       nextState.allowFrom = normalizeAndDedup([...(currentState.allowFrom ?? []), normalizedEntry]);
     }
 
-    await writePairingChannelState(filePath, params.channel, nextState);
-
+    await writePairingChannelState(homeDir, params.channel, nextState);
     return { id: entry.id, entry };
   });
 }

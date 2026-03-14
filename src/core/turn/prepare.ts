@@ -6,7 +6,7 @@ import {
   agentStateStore,
   normalizePersistedMessages,
   type AgentStateSnapshot,
-} from "../../runtime/agentStateStore.js";
+} from "../../sessions/agentSnapshotStore.js";
 import type { CoreTurnDependencies, PreparedTurn, PrepareTurnInput } from "./contracts.js";
 import { resolveCoreTurnRunMode } from "./runMode.js";
 

@@ -1,4 +1,4 @@
-import { coreCoordinator } from "../app/coreCoordinator.js";
+import { agentCoordinator } from "./coordinator.js";
 import {
   buildLangfuseTags,
   isLangfuseTracingReady,
@@ -8,7 +8,7 @@ import {
 } from "../observability/langfuse.js";
 import type { RuntimeAgentEventSink } from "../shared/types.js";
 
-type NormalizedCoreResult = Awaited<ReturnType<typeof coreCoordinator.runAgent>>;
+type NormalizedCoreResult = Awaited<ReturnType<typeof agentCoordinator.runAgent>>;
 
 interface RunAgentOutput {
   requestId: string;
@@ -62,7 +62,7 @@ function toRunAgentResult(result: NormalizedCoreResult): RunAgentOutput {
 async function runAgentCore(input: string, request: RunAgentRequest): Promise<RunAgentOutput> {
   const invocation = resolveRunAgentInput(request);
   const execute = async (): Promise<RunAgentOutput> => {
-    const result = await coreCoordinator.runAgent(input, {
+    const result = await agentCoordinator.runAgent(input, {
       provider: invocation.provider,
       profileId: invocation.profileId,
       sessionKey: invocation.sessionKey,

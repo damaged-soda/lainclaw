@@ -1,7 +1,7 @@
 import { Command, Option } from 'commander';
 import { runCommand } from '../shared/result.js';
 import { ValidationError } from '../../shared/types.js';
-import { runAgent } from '../../gateway/index.js';
+import { runAgent } from '../../agent/invoke.js';
 import { setExitCode } from '../shared/exitCode.js';
 import { addModelOptions } from '../shared/options.js';
 

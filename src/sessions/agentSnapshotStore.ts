@@ -3,12 +3,12 @@ import path from "node:path";
 import type { Message } from "@mariozechner/pi-ai";
 import { resolveAuthDirectory } from "../auth/configStore.js";
 
-const AGENT_STATE_DIR_NAME = "agent-state";
-const AGENT_STATE_FILE_EXTENSION = ".json";
-const AGENT_STATE_VERSION = 2 as const;
+const AGENT_SNAPSHOT_DIR_NAME = "agent-state";
+const AGENT_SNAPSHOT_FILE_EXTENSION = ".json";
+const AGENT_SNAPSHOT_VERSION = 2 as const;
 
 export interface AgentStateSnapshot {
-  version: typeof AGENT_STATE_VERSION;
+  version: typeof AGENT_SNAPSHOT_VERSION;
   sessionKey: string;
   sessionId: string;
   provider: string;
@@ -38,14 +38,14 @@ function sanitizeSessionKey(sessionKey: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-function resolveAgentStateDirectory(): string {
-  return path.join(resolveAuthDirectory(), AGENT_STATE_DIR_NAME);
+function resolveAgentSnapshotDirectory(): string {
+  return path.join(resolveAuthDirectory(), AGENT_SNAPSHOT_DIR_NAME);
 }
 
 export function resolveAgentStateSnapshotPath(sessionKey: string): string {
   const safeSessionKey = sanitizeSessionKey(sessionKey);
-  const fileName = `${safeSessionKey || "session"}${AGENT_STATE_FILE_EXTENSION}`;
-  return path.join(resolveAgentStateDirectory(), fileName);
+  const fileName = `${safeSessionKey || "session"}${AGENT_SNAPSHOT_FILE_EXTENSION}`;
+  return path.join(resolveAgentSnapshotDirectory(), fileName);
 }
 
 function isPersistedMessage(value: unknown): value is Message {
@@ -55,9 +55,9 @@ function isPersistedMessage(value: unknown): value is Message {
 
   const candidate = value as { role?: unknown };
   return (
-    candidate.role === "user" ||
-    candidate.role === "assistant" ||
-    candidate.role === "toolResult"
+    candidate.role === "user"
+    || candidate.role === "assistant"
+    || candidate.role === "toolResult"
   );
 }
 
@@ -75,19 +75,19 @@ function sanitizeAgentStateSnapshot(raw: unknown): AgentStateSnapshot | undefine
 
   const candidate = raw as Partial<AgentStateSnapshot>;
   if (
-    candidate.version !== AGENT_STATE_VERSION ||
-    !isNonEmptyString(candidate.sessionKey) ||
-    !isNonEmptyString(candidate.sessionId) ||
-    !isNonEmptyString(candidate.provider) ||
-    !isNonEmptyString(candidate.profileId) ||
-    !isNonEmptyString(candidate.systemPrompt) ||
-    !isNonEmptyString(candidate.updatedAt)
+    candidate.version !== AGENT_SNAPSHOT_VERSION
+    || !isNonEmptyString(candidate.sessionKey)
+    || !isNonEmptyString(candidate.sessionId)
+    || !isNonEmptyString(candidate.provider)
+    || !isNonEmptyString(candidate.profileId)
+    || !isNonEmptyString(candidate.systemPrompt)
+    || !isNonEmptyString(candidate.updatedAt)
   ) {
     return undefined;
   }
 
   return {
-    version: AGENT_STATE_VERSION,
+    version: AGENT_SNAPSHOT_VERSION,
     sessionKey: candidate.sessionKey,
     sessionId: candidate.sessionId,
     provider: candidate.provider,
@@ -115,7 +115,7 @@ export function createAgentStateStore(): AgentStateStore {
     async save(snapshot: AgentStateSnapshot): Promise<void> {
       const snapshotPath = resolveAgentStateSnapshotPath(snapshot.sessionKey);
       const tmpPath = `${snapshotPath}.tmp`;
-      await fs.mkdir(resolveAgentStateDirectory(), { recursive: true });
+      await fs.mkdir(resolveAgentSnapshotDirectory(), { recursive: true });
       await fs.writeFile(tmpPath, JSON.stringify(snapshot, null, 2), "utf-8");
       await fs.rename(tmpPath, snapshotPath);
     },

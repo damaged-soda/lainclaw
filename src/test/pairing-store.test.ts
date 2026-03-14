@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { runCli } from "../cli/cli.js";
+import { resolvePairingStorePath } from "../pairing/storeFile.js";
 import {
   approveChannelPairingCode,
   listChannelPairingRequests,
@@ -172,6 +173,46 @@ test("expired pairing requests are pruned and revoked entries can be removed", a
     });
     assert.equal(revoked.changed, false);
     assert.equal(revoked.allowFrom.length, 0);
+  });
+});
+
+test("legacy pairing state inside gateway config is ignored after the cleanup phase", async () => {
+  await withTempHome(async (env) => {
+    const gatewayPath = path.join(env.HOME, ".lainclaw", "gateway.json");
+    await fs.mkdir(path.dirname(gatewayPath), { recursive: true });
+    await fs.writeFile(gatewayPath, JSON.stringify({
+      version: 1,
+      pairing: {
+        version: 1,
+        channels: {
+          feishu: {
+            requests: [
+              {
+                id: "openG",
+                code: "ABCDEFGH",
+                createdAt: "2026-03-15T00:00:00.000Z",
+                lastSeenAt: "2026-03-15T00:00:00.000Z",
+                meta: {
+                  accountId: "acc-g",
+                },
+              },
+            ],
+            allowFrom: ["legacy-admin"],
+          },
+        },
+      },
+    }, null, 2), "utf-8");
+
+    const requests = await listChannelPairingRequests("feishu", env, "acc-g");
+    assert.equal(requests.length, 0);
+
+    const allowFrom = await readChannelAllowFromStore("feishu", env);
+    assert.deepEqual(allowFrom, []);
+
+    await assert.rejects(
+      fs.readFile(resolvePairingStorePath(env.HOME), "utf-8"),
+      (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT",
+    );
   });
 });
 

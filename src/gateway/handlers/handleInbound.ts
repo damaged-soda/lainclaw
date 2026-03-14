@@ -3,7 +3,7 @@ import {
   type OutboundMessage,
 } from '../../channels/contracts.js';
 import { evaluateAccessPolicy } from './policy/accessPolicy.js';
-import { runAgent } from '../index.js';
+import { runAgent } from '../../agent/invoke.js';
 import {
   buildInboundFailureText,
   runInboundAgentTurn,

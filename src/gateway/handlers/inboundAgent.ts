@@ -1,5 +1,5 @@
 import type { MessageInboundMessage } from "../../channels/contracts.js";
-import { runAgent } from "../index.js";
+import { runAgent } from "../../agent/invoke.js";
 import type { RuntimeAgentEventSink } from "../../shared/types.js";
 import type { GatewayAgentRuntimeContext } from "../runtimeConfig.js";
 
