@@ -2,15 +2,12 @@ import {
   type InboundMessage,
   type OutboundMessage,
 } from '../../channels/contracts.js';
-import type { RuntimeAgentEventSink } from '../../shared/types.js';
 import { evaluateAccessPolicy } from './policy/accessPolicy.js';
 import { runAgent } from '../index.js';
 import {
   buildInboundFailureText,
   runInboundAgentTurn,
 } from './inboundAgent.js';
-
-type AgentMessage = InboundMessage;
 
 interface AgentRuntimeContext {
   provider?: string;
@@ -27,17 +24,16 @@ interface HandleInboundOptions {
   policyConfig?: unknown;
   onFailureHint?: (rawMessage: string) => string;
   runAgentFn?: typeof runAgent;
-  onAgentEvent?: RuntimeAgentEventSink;
 }
 
 export async function handleInbound(
   inbound: InboundMessage,
   options: HandleInboundOptions,
 ): Promise<OutboundMessage | void> {
-  const message = inbound as AgentMessage;
-  if (message.kind !== 'message') {
+  if (inbound.kind !== 'message') {
     return;
   }
+  const message = inbound;
 
   const input = message.text.trim();
   if (!input) {
@@ -69,7 +65,6 @@ export async function handleInbound(
       inbound: message,
       runtime: options.runtime,
       runAgentFn: options.runAgentFn,
-      ...(options.onAgentEvent ? { onAgentEvent: options.onAgentEvent } : {}),
     });
 
     return {

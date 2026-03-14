@@ -146,12 +146,15 @@ npm start -- gateway config set --channel feishu --app-id <AppID> --app-secret <
 
 可选参数：
 
-- `--request-timeout-ms <ms>`：飞书 API 请求超时（默认 10000）
+- `--request-timeout-ms <ms>`：Feishu API request timeout（默认 10000）
 - `--provider <provider>`：模型提供商，按 runtime 配置路由到对应适配器
 - `--profile <profileId>`：使用指定登录 Profile，若不提供可使用当前 active profile
 - `--with-tools` / `--no-with-tools`：是否允许模型发起 tool-call；开启时默认所有内置工具都可用
 - `--memory` / `--no-memory`：是否启用会话记忆摘要合并（默认关闭）
-示例（10秒超时）：
+
+`request-timeout-ms` 只控制 Feishu API 请求（例如获取 access token、发送消息），不控制 agent 执行时长。
+
+示例（Feishu API 请求 10 秒超时）：
 
 ```bash
 npm start -- gateway start --app-id <AppID> --app-secret <AppSecret> --request-timeout-ms 10000
@@ -189,7 +192,7 @@ rm ~/.lainclaw/<channel>-gateway.json
 
 - `LAINCLAW_FEISHU_APP_ID` / `FEISHU_APP_ID`
 - `LAINCLAW_FEISHU_APP_SECRET` / `FEISHU_APP_SECRET`
-- `LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS` / `FEISHU_REQUEST_TIMEOUT_MS`
+- `LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS` / `FEISHU_REQUEST_TIMEOUT_MS`：Feishu API request timeout ms
 - `LAINCLAW_FEISHU_PROVIDER` / `FEISHU_PROVIDER`：运行时 provider 标识（默认不回退）
 - `LAINCLAW_FEISHU_PROFILE_ID` / `FEISHU_PROFILE_ID`
 - `LAINCLAW_FEISHU_WITH_TOOLS` / `FEISHU_WITH_TOOLS`：`true|false`

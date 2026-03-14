@@ -1,10 +1,10 @@
 import { inspectHeartbeatTargetOpenId } from './diagnostics.js';
+import { makeFeishuRequestFailureHint } from './failureHints.js';
 import { validateFeishuGatewayCredentials } from './credentials.js';
 import { startFeishuHeartbeatSidecar } from './sidecars/heartbeat.js';
 import { resolveFeishuGatewayConfig, type FeishuGatewayConfig } from './config.js';
 import { runFeishuTransport } from './transport.js';
 import { runFeishuInbound } from './inbound.js';
-import { makeFeishuFailureHint } from './diagnostics.js';
 import { type Channel, type ChannelRunContext, type SidecarHandle } from '../contracts.js';
 import { sendFeishuTextMessage } from './outbound.js';
 
@@ -55,7 +55,7 @@ async function runCoreInbound(
       },
     },
     policyConfig: config,
-    onFailureHint: makeFeishuFailureHint,
+    onFailureHint: makeFeishuRequestFailureHint,
     debug: context?.debug === true,
   });
 }
@@ -129,7 +129,7 @@ export const feishuChannel: Channel = {
       ?? (await toRuntimeConfig(overrides, context));
     return startFeishuHeartbeatSidecar({
       config,
-      onFailureHint: makeFeishuFailureHint,
+      onFailureHint: makeFeishuRequestFailureHint,
       outbound: {
         sendText: (replyTo, text) => feishuChannel.sendText(replyTo, text, { runtimeConfig: config }),
       },

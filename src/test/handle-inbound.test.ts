@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { handleInbound, resolveBuiltinInboundCommand } from "../gateway/handlers/handleInbound.js";
+import { runInboundAgentTurn } from "../gateway/handlers/inboundAgent.js";
 import type { InboundMessage } from "../channels/contracts.js";
+import type { RuntimeAgentEvent } from "../shared/types.js";
 
 function createInbound(text: string): InboundMessage {
   return {
@@ -12,6 +14,20 @@ function createInbound(text: string): InboundMessage {
     conversationId: "conv-1",
     replyTo: "reply-1",
     text,
+  };
+}
+
+function createAgentEvent(type: RuntimeAgentEvent["event"]["type"]): RuntimeAgentEvent {
+  return {
+    requestId: "req-1",
+    sessionKey: "user-1:conv-1",
+    sessionId: "session-1",
+    route: "adapter.stub",
+    provider: "stub",
+    profileId: "default",
+    event: {
+      type,
+    } as RuntimeAgentEvent["event"],
   };
 }
 
@@ -114,4 +130,35 @@ test("handleInbound still short-circuits denied access without running the agent
   assert.equal(runAgentCalled, false);
   assert.ok(outbound);
   assert.equal(outbound.text, "当前策略不允许当前用户发起会话，请联系管理员配置后重试。");
+});
+
+test("runInboundAgentTurn keeps direct onAgentEvent passthrough", async () => {
+  const inbound = createInbound("hello");
+  assert.equal(inbound.kind, "message");
+
+  const events: RuntimeAgentEvent[] = [];
+
+  await runInboundAgentTurn({
+    inbound,
+    runtime: {
+      provider: "stub",
+      profileId: "default",
+      withTools: true,
+    },
+    onAgentEvent: async (event) => {
+      events.push(event);
+    },
+    runAgentFn: async (request) => {
+      await request.onAgentEvent?.(createAgentEvent("agent_start"));
+      return {
+        requestId: "req-1",
+        sessionKey: "user-1:conv-1",
+        sessionId: "session-1",
+        text: "final reply",
+      };
+    },
+  });
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.event.type, "agent_start");
 });

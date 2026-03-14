@@ -58,6 +58,8 @@ class DefaultFeishuTurnController implements FeishuTurnController {
 
   private settled = false;
 
+  private terminalSendInFlight = false;
+
   private slowAckTimer: ReturnType<typeof setTimeout> | undefined;
 
   private debugParentSpanContext: SpanContext | undefined;
@@ -78,7 +80,7 @@ class DefaultFeishuTurnController implements FeishuTurnController {
   }
 
   async onAgentEvent(event: RuntimeAgentEvent): Promise<void> {
-    if (this.settled) {
+    if (this.settled || this.terminalSendInFlight) {
       return;
     }
 
@@ -92,27 +94,37 @@ class DefaultFeishuTurnController implements FeishuTurnController {
   }
 
   async complete(text: string): Promise<void> {
-    if (this.settled) {
+    if (this.settled || this.terminalSendInFlight) {
       return;
     }
 
+    this.terminalSendInFlight = true;
     this.clearSlowAckTimer();
-    this.settled = true;
-    this.state = 'completed';
-    this.emitDebugObservation('feishu.turn.completed');
-    await this.options.outbound.sendText(this.options.replyTo, text);
+    try {
+      await this.options.outbound.sendText(this.options.replyTo, text);
+      this.settled = true;
+      this.state = 'completed';
+      this.emitDebugObservation('feishu.turn.completed');
+    } finally {
+      this.terminalSendInFlight = false;
+    }
   }
 
   async fail(text: string): Promise<void> {
-    if (this.settled) {
+    if (this.settled || this.terminalSendInFlight) {
       return;
     }
 
+    this.terminalSendInFlight = true;
     this.clearSlowAckTimer();
-    this.settled = true;
-    this.state = 'failed';
-    this.emitDebugObservation('feishu.turn.failed');
-    await this.options.outbound.sendText(this.options.replyTo, text);
+    try {
+      await this.options.outbound.sendText(this.options.replyTo, text);
+      this.settled = true;
+      this.state = 'failed';
+      this.emitDebugObservation('feishu.turn.failed');
+    } finally {
+      this.terminalSendInFlight = false;
+    }
   }
 
   dispose(): void {
@@ -128,7 +140,7 @@ class DefaultFeishuTurnController implements FeishuTurnController {
   }
 
   private async sendSlowAck(): Promise<void> {
-    if (this.settled || this.ackSent) {
+    if (this.settled || this.ackSent || this.terminalSendInFlight) {
       return;
     }
 

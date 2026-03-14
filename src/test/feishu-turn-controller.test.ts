@@ -124,6 +124,41 @@ test('runFeishuInbound error after slow ack sends ack then failure', async () =>
   assert.equal(sent[1], '[Lainclaw] boom（requestId: req-1）');
 });
 
+test('runFeishuInbound final reply send failure still rejects after delivering fallback failure text', async () => {
+  const sent: string[] = [];
+
+  await assert.rejects(
+    runFeishuInbound({
+      inbound: createInbound('hello'),
+      runtime: {
+        provider: 'stub',
+        profileId: 'default',
+        withTools: false,
+      },
+      outbound: {
+        sendText: async (_replyTo, text) => {
+          if (text === 'final reply') {
+            throw new Error('feishu send failed');
+          }
+          sent.push(text);
+        },
+      },
+      slowAckDelayMs: 20,
+      runAgentFn: async () => {
+        return {
+          requestId: 'req-1',
+          sessionKey: 'ou_user-1:dm:ou_user-1',
+          sessionId: 'session-1',
+          text: 'final reply',
+        };
+      },
+    }),
+    /failed to send Feishu final reply: feishu send failed/,
+  );
+
+  assert.deepEqual(sent, ['[Lainclaw] feishu send failed（requestId: req-1）']);
+});
+
 test('runFeishuInbound access deny replies directly without starting the agent turn', async () => {
   const sent: string[] = [];
   let runAgentCalled = false;

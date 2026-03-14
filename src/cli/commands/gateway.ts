@@ -381,7 +381,7 @@ function buildGatewayStartOptions(command: Command): void {
     .addOption(new Option('--app-id <id>', 'Feishu app id.'))
     .addOption(new Option('--app-secret <secret>', 'Feishu app secret.'))
     .addOption(new Option('--heartbeat-interval-ms <ms>', 'Heartbeat interval in ms.'))
-    .addOption(new Option('--request-timeout-ms <ms>', 'Request timeout ms.'));
+    .addOption(new Option('--request-timeout-ms <ms>', 'Feishu API request timeout ms.'));
   addModelRuntimeOptions(command, true);
 }
 
@@ -399,7 +399,7 @@ function buildGatewayConfigOptions(command: Command): void {
     .addOption(new Option('--pairing-allow-from <ids>', 'Persist pairing allowlist.'))
     .addOption(new Option('--pairing-pending-ttl-ms <ms>', 'Persist pairing pending ttl.'))
     .addOption(new Option('--pairing-pending-max <n>', 'Persist pairing pending max.'))
-    .addOption(new Option('--request-timeout-ms <ms>', 'Persist request timeout ms.'));
+    .addOption(new Option('--request-timeout-ms <ms>', 'Persist Feishu API request timeout ms.'));
 }
 
 function buildGatewayStatusStopOptions(command: Command): void {

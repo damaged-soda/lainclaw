@@ -1,4 +1,8 @@
-import type { InboundMessage, ChannelOutboundTextCapability } from '../contracts.js';
+import type {
+  InboundMessage,
+  MessageInboundMessage,
+  ChannelOutboundTextCapability,
+} from '../contracts.js';
 import { runAgent } from '../../gateway/index.js';
 import { evaluateAccessPolicy } from '../../gateway/handlers/policy/accessPolicy.js';
 import {
@@ -6,7 +10,10 @@ import {
   resolveSessionKey,
   runInboundAgentTurn,
 } from '../../gateway/handlers/inboundAgent.js';
-import { createFeishuTurnController } from './turnController.js';
+import {
+  createFeishuTurnController,
+  type FeishuTurnController,
+} from './turnController.js';
 
 const DEFAULT_FEISHU_SLOW_ACK_DELAY_MS = 3000;
 
@@ -27,6 +34,31 @@ export interface RunFeishuInboundOptions {
   runAgentFn?: typeof runAgent;
   slowAckDelayMs?: number;
   debug?: boolean;
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function wrapDeliveryError(message: string, cause: unknown): Error {
+  return new Error(message, {
+    cause: cause instanceof Error ? cause : new Error(describeError(cause)),
+  });
+}
+
+async function sendFailureReply(
+  controller: FeishuTurnController,
+  inbound: MessageInboundMessage,
+  error: unknown,
+  onFailureHint: ((rawMessage: string) => string) | undefined,
+  failureContext: string,
+): Promise<void> {
+  const rawMessage = describeError(error);
+  try {
+    await controller.fail(buildInboundFailureText(inbound, rawMessage, onFailureHint));
+  } catch (sendError) {
+    throw wrapDeliveryError(`${failureContext}: ${rawMessage}`, sendError);
+  }
 }
 
 export async function runFeishuInbound(options: RunFeishuInboundOptions): Promise<void> {
@@ -63,16 +95,37 @@ export async function runFeishuInbound(options: RunFeishuInboundOptions): Promis
   });
 
   try {
-    const result = await runInboundAgentTurn({
-      inbound,
-      runtime: options.runtime,
-      runAgentFn: options.runAgentFn,
-      onAgentEvent: async (event) => controller.onAgentEvent(event),
-    });
-    await controller.complete(result.text);
-  } catch (error) {
-    const rawMessage = error instanceof Error ? error.message : String(error);
-    await controller.fail(buildInboundFailureText(inbound, rawMessage, options.onFailureHint));
+    let result: Awaited<ReturnType<typeof runInboundAgentTurn>>;
+    try {
+      result = await runInboundAgentTurn({
+        inbound,
+        runtime: options.runtime,
+        runAgentFn: options.runAgentFn,
+        onAgentEvent: async (event) => controller.onAgentEvent(event),
+      });
+    } catch (error) {
+      await sendFailureReply(
+        controller,
+        inbound,
+        error,
+        options.onFailureHint,
+        'agent turn failed and Feishu failure reply could not be delivered',
+      );
+      return;
+    }
+
+    try {
+      await controller.complete(result.text);
+    } catch (error) {
+      await sendFailureReply(
+        controller,
+        inbound,
+        error,
+        options.onFailureHint,
+        'failed to send Feishu fallback reply after final reply send failure',
+      );
+      throw wrapDeliveryError(`failed to send Feishu final reply: ${describeError(error)}`, error);
+    }
   } finally {
     controller.dispose();
   }
