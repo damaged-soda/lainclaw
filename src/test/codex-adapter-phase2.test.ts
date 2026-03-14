@@ -4,7 +4,6 @@ import type { AgentEvent, AgentTool } from "@mariozechner/pi-agent-core";
 import { getModel, type Message, type Model, type StopReason, type ToolResultMessage } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext } from "../auth/authManager.js";
 import { createRunCodexAdapter } from "../providers/codexAdapter.js";
-import { createAgentStateStore } from "../runtime/agentStateStore.js";
 import {
   createSessionAgentManager,
   type SessionAgentFactoryInput,
@@ -162,6 +161,14 @@ function makeRequestContext(overrides: Partial<RequestContext>): RequestContext 
     profileId: "default",
     runMode: "prompt",
     ...overrides,
+  };
+}
+
+function makePreparedState() {
+  return {
+    source: "new" as const,
+    initialMessages: [] as Message[],
+    initialSystemPrompt: "system",
   };
 }
 
@@ -403,9 +410,7 @@ function buildFailingToolConversation(message: Message, runtimeToolName: string)
 test("codex adapter uses AgentEvent order and event-derived tool state for successful tool turns", async () => {
   await withTempHome(async () => {
     const observedEvents: string[] = [];
-    const stateStore = createAgentStateStore();
     const manager = createSessionAgentManager({
-      stateStore,
       agentFactory: (input) => new ScriptedEventAgent(input, (message) =>
         buildSuccessfulToolConversation(message, "write_file")),
     });
@@ -424,7 +429,6 @@ test("codex adapter uses AgentEvent order and event-derived tool state for succe
     });
 
     const result = await runCodexAdapter({
-      route: "adapter.openai-codex",
       withTools: true,
       toolSpecs: [
         {
@@ -443,6 +447,7 @@ test("codex adapter uses AgentEvent order and event-derived tool state for succe
       onAgentEvent: async (runtimeAgentEvent) => {
         observedEvents.push(runtimeAgentEvent.event.type);
       },
+      preparedState: makePreparedState(),
       requestContext: {
         ...makeRequestContext({
           requestId: "req-event-success",
@@ -452,8 +457,6 @@ test("codex adapter uses AgentEvent order and event-derived tool state for succe
         }),
       },
     });
-
-    const snapshot = await stateStore.load("event-success-session");
 
     assert.deepEqual(observedEvents, [
       "agent_start",
@@ -488,15 +491,13 @@ test("codex adapter uses AgentEvent order and event-derived tool state for succe
     assert.equal(result.toolResults?.[0]?.result.ok, true);
     assert.equal(result.toolResults?.[0]?.result.content, "Wrote output.txt");
     assert.equal(result.toolResults?.[0]?.result.meta?.durationMs, 12);
-    assert.equal(snapshot?.messages.length, 4);
+    assert.equal(result.sessionState?.messages.length, 4);
   });
 });
 
 test("codex adapter accumulates tool failures from AgentEvent without relying on final response parsing", async () => {
   await withTempHome(async () => {
-    const stateStore = createAgentStateStore();
     const manager = createSessionAgentManager({
-      stateStore,
       agentFactory: (input) => new ScriptedEventAgent(input, (message) =>
         buildFailingToolConversation(message, "shell_exec")),
     });
@@ -515,7 +516,6 @@ test("codex adapter accumulates tool failures from AgentEvent without relying on
     });
 
     const result = await runCodexAdapter({
-      route: "adapter.openai-codex",
       withTools: true,
       toolSpecs: [
         {
@@ -530,6 +530,7 @@ test("codex adapter accumulates tool failures from AgentEvent without relying on
           },
         },
       ],
+      preparedState: makePreparedState(),
       requestContext: {
         ...makeRequestContext({
           requestId: "req-event-failure",

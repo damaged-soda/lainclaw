@@ -39,14 +39,33 @@ export interface SidecarHandle {
   stop: () => Promise<void> | void;
 }
 
+export interface ChannelSendTextOptions {
+  config?: unknown;
+  meta?: Record<string, unknown>;
+}
+
 export interface ChannelOutboundTextCapability {
-  sendText: (replyTo: string, text: string, meta?: Record<string, unknown>) => Promise<void>;
+  sendText: (replyTo: string, text: string, options?: ChannelSendTextOptions) => Promise<void>;
+}
+
+export interface ChannelPreflightInput {
+  config?: unknown;
+  context?: ChannelRunContext;
+}
+
+export interface ChannelRunBinding {
+  onInbound: InboundHandler;
+}
+
+export interface ChannelRunInput {
+  config?: unknown;
+  context?: ChannelRunContext;
+  binding: ChannelRunBinding;
 }
 
 export interface Channel {
   id: ChannelId;
-  preflight: (overrides?: unknown, context?: ChannelRunContext) => Promise<unknown>;
-  run: (onInbound: InboundHandler, overrides?: unknown, context?: ChannelRunContext) => Promise<void>;
+  preflight?: (input: ChannelPreflightInput) => Promise<unknown>;
+  run: (input: ChannelRunInput) => Promise<void>;
   sendText?: ChannelOutboundTextCapability["sendText"];
-  startSidecars?: (overrides?: unknown, context?: ChannelRunContext, preflightResult?: unknown) => Promise<SidecarHandle | void>;
 }

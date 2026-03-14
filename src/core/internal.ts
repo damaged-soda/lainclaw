@@ -1,7 +1,4 @@
-import type { CoreToolsAdapter } from "./adapters/tools.js";
-import type { CoreSessionAdapter } from "./adapters/session.js";
-import type { CoreRuntimeAdapter } from "./adapters/runtime.js";
-import type { CoreEventSink, CoreSessionHistoryMessage } from "./contracts.js";
+import type { CoreEventSink, CoreRuntimePort, CoreSessionPort, CoreToolsPort } from "./contracts.js";
 import type { RuntimeAgentEventSink, RuntimeContinueReason, RuntimeRunMode } from "../shared/types.js";
 
 export type RunCtx = {
@@ -18,13 +15,7 @@ export type RunCtx = {
   debug?: boolean;
   onAgentEvent?: RuntimeAgentEventSink;
   emitEvent: CoreEventSink;
-  sessionAdapter: CoreSessionAdapter;
-  toolsAdapter: CoreToolsAdapter;
-  runtimeAdapter: CoreRuntimeAdapter;
-};
-
-export type TurnContext = {
-  memorySnippet: string;
-  bootstrapMessages: CoreSessionHistoryMessage[];
-  tools: ReturnType<CoreToolsAdapter["listTools"]>;
+  sessionAdapter: CoreSessionPort;
+  toolsAdapter: CoreToolsPort;
+  runtimeAdapter: CoreRuntimePort;
 };

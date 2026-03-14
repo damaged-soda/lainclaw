@@ -38,25 +38,15 @@ test('runFeishuInbound fast path only sends the final message', async () => {
 
   await runFeishuInbound({
     inbound: createInbound('hello'),
-    runtime: {
-      provider: 'stub',
-      profileId: 'default',
-      withTools: false,
-    },
     outbound: {
       sendText: async (_replyTo, text) => {
         sent.push(text);
       },
     },
     slowAckDelayMs: 20,
-    runAgentFn: async () => {
+    handleTurn: async () => {
       await delay(5);
-      return {
-        requestId: 'req-1',
-        sessionKey: 'ou_user-1:dm:ou_user-1',
-        sessionId: 'session-1',
-        text: 'final reply',
-      };
+      return { text: 'final reply' };
     },
   });
 
@@ -69,27 +59,17 @@ test('runFeishuInbound slow path sends one ack before the final reply', async ()
 
   await runFeishuInbound({
     inbound: createInbound('hello'),
-    runtime: {
-      provider: 'stub',
-      profileId: 'default',
-      withTools: false,
-    },
     outbound: {
       sendText: async (_replyTo, text) => {
         sent.push(text);
       },
     },
     slowAckDelayMs: 20,
-    runAgentFn: async (request) => {
+    handleTurn: async (request) => {
       await delay(5);
       await request.onAgentEvent?.(createAgentEvent('agent_start'));
       await delay(25);
-      return {
-        requestId: 'req-1',
-        sessionKey: 'ou_user-1:dm:ou_user-1',
-        sessionId: 'session-1',
-        text: 'final reply',
-      };
+      return { text: 'final reply' };
     },
   });
 
@@ -101,18 +81,13 @@ test('runFeishuInbound error after slow ack sends ack then failure', async () =>
 
   await runFeishuInbound({
     inbound: createInbound('hello'),
-    runtime: {
-      provider: 'stub',
-      profileId: 'default',
-      withTools: false,
-    },
     outbound: {
       sendText: async (_replyTo, text) => {
         sent.push(text);
       },
     },
     slowAckDelayMs: 20,
-    runAgentFn: async (request) => {
+    handleTurn: async (request) => {
       await delay(5);
       await request.onAgentEvent?.(createAgentEvent('agent_start'));
       await delay(25);
@@ -130,11 +105,6 @@ test('runFeishuInbound final reply send failure still rejects after delivering f
   await assert.rejects(
     runFeishuInbound({
       inbound: createInbound('hello'),
-      runtime: {
-        provider: 'stub',
-        profileId: 'default',
-        withTools: false,
-      },
       outbound: {
         sendText: async (_replyTo, text) => {
           if (text === 'final reply') {
@@ -144,13 +114,8 @@ test('runFeishuInbound final reply send failure still rejects after delivering f
         },
       },
       slowAckDelayMs: 20,
-      runAgentFn: async () => {
-        return {
-          requestId: 'req-1',
-          sessionKey: 'ou_user-1:dm:ou_user-1',
-          sessionId: 'session-1',
-          text: 'final reply',
-        };
+      handleTurn: async () => {
+        return { text: 'final reply' };
       },
     }),
     /failed to send Feishu final reply: feishu send failed/,
@@ -159,38 +124,27 @@ test('runFeishuInbound final reply send failure still rejects after delivering f
   assert.deepEqual(sent, ['[Lainclaw] feishu send failed（requestId: req-1）']);
 });
 
-test('runFeishuInbound access deny replies directly without starting the agent turn', async () => {
+test('runFeishuInbound can reply directly without starting a streamed agent turn', async () => {
   const sent: string[] = [];
-  let runAgentCalled = false;
+  let handleTurnCalled = false;
 
   await runFeishuInbound({
     inbound: createInbound('hello'),
-    runtime: {
-      provider: 'stub',
-      profileId: 'default',
-      withTools: false,
-    },
     outbound: {
       sendText: async (_replyTo, text) => {
         sent.push(text);
       },
     },
     slowAckDelayMs: 10,
-    policyConfig: {
-      pairingPolicy: 'disabled',
-    },
-    runAgentFn: async () => {
-      runAgentCalled = true;
+    handleTurn: async () => {
+      handleTurnCalled = true;
       return {
-        requestId: 'req-1',
-        sessionKey: 'ou_user-1:dm:ou_user-1',
-        sessionId: 'session-1',
-        text: 'final reply',
+        text: '当前策略不允许当前用户发起会话，请联系管理员配置后重试。',
       };
     },
   });
 
   await delay(20);
-  assert.equal(runAgentCalled, false);
+  assert.equal(handleTurnCalled, true);
   assert.deepEqual(sent, ['当前策略不允许当前用户发起会话，请联系管理员配置后重试。']);
 });

@@ -1,29 +1,20 @@
-import {
-  createRuntimeAdapter,
-  type CoreRuntimeAdapter,
-} from "./adapters/runtime.js";
-import {
-  createSessionAdapter,
-  type CoreSessionAdapter,
-} from "./adapters/session.js";
-import {
-  createToolsAdapter,
-  type CoreToolsAdapter,
-} from "./adapters/tools.js";
 import type {
   CoreCoordinator,
   CoreErrorCode,
   CoreEventSink,
   CoreRunAgentOptions,
+  CoreRuntimePort,
+  CoreSessionPort,
+  CoreToolsPort,
 } from "./contracts.js";
 import type { RunCtx } from "./internal.js";
 import { nowIso, toValidationError } from "./errors.js";
-import { runTurn, startNewSession } from "./steps.js";
+import { runTurn, startNewSession } from "./turn/run.js";
 
 export interface CreateCoreCoordinatorOptions {
-  sessionAdapter: CoreSessionAdapter;
-  toolsAdapter: CoreToolsAdapter;
-  runtimeAdapter: CoreRuntimeAdapter;
+  sessionAdapter: CoreSessionPort;
+  toolsAdapter: CoreToolsPort;
+  runtimeAdapter: CoreRuntimePort;
   emitEvent?: CoreEventSink;
 }
 
@@ -54,9 +45,7 @@ function createRequestId(): string {
 // === CoreCoordinator factory (public entrypoint) ===
 
 export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): CoreCoordinator {
-  const sessionAdapter = createSessionAdapter({ implementation: options.sessionAdapter });
-  const toolsAdapter = createToolsAdapter({ implementation: options.toolsAdapter });
-  const runtimeAdapter = createRuntimeAdapter({ implementation: options.runtimeAdapter });
+  const { sessionAdapter, toolsAdapter, runtimeAdapter } = options;
   const emitEvent = createEventSink(options.emitEvent ?? createDefaultEmitEvent());
 
   const coordinator: CoreCoordinator = {
@@ -118,7 +107,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
           return await startNewSession(ctx);
         }
 
-        return await runTurn(ctx, rawInput, createdAt);
+        return await runTurn(ctx, rawInput);
       } catch (error) {
         // 3) failed
         const normalized = toValidationError(error, "INTERNAL_ERROR");

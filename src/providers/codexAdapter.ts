@@ -2,8 +2,7 @@ import path from "node:path";
 import type { AgentEvent, AgentMessage } from "@mariozechner/pi-agent-core";
 import { getModel, type AssistantMessage, type Message, type Usage } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext, OPENAI_CODEX_MODEL } from "../auth/authManager.js";
-import type { ProviderRunInput } from "./registry.js";
-import type { ProviderResult } from "./stubAdapter.js";
+import type { ProviderResult, ProviderRunInput } from "./registry.js";
 import type { ToolCall, ToolExecutionLog } from "../tools/types.js";
 import { buildRuntimeToolNameMap, createToolAdapter, resolveTools } from "../tools/runtimeTools.js";
 import { executeTool } from "../tools/executor.js";
@@ -203,8 +202,10 @@ export function createRunCodexAdapter(
     if (provider !== "openai-codex") {
       throw new Error(`Unsupported provider for openai runtime: ${provider}`);
     }
+    const route = `adapter.${provider}`;
 
     const requestContext = input.requestContext;
+    const preparedState = input.preparedState;
     const requestId = requestContext.requestId;
     const toolSpecs = resolveTools(input.toolSpecs, input.withTools);
     const cwd = path.resolve(input.cwd || process.cwd());
@@ -326,15 +327,19 @@ export function createRunCodexAdapter(
     });
 
     let runErr: Error | undefined;
-    let agentSource: "memory" | "snapshot" | "new" = "new";
-    let runMode = requestContext.runMode;
-    let continueReason = requestContext.continueReason;
+    let agentSource: "memory" | "snapshot" | "transcript" | "new" = preparedState.source;
+    let sessionState: ProviderResult["sessionState"] | undefined;
     let agentEventDispatch = Promise.resolve();
 
-    await sessionAgentManager.runWithSessionAgent(
+    const agentRun = await sessionAgentManager.run(
       {
         requestContext,
         systemPrompt,
+        initialState: {
+          source: preparedState.source,
+          systemPrompt: preparedState.initialSystemPrompt ?? systemPrompt,
+          messages: preparedState.initialMessages,
+        },
         model,
         tools: agentTools,
         convertToLlm: (messages: AgentMessage[]) => convertAgentMessagesToLlm(messages),
@@ -342,13 +347,11 @@ export function createRunCodexAdapter(
         debug: requestContext.debug === true,
       },
       async (agent, context) => {
-        agentSource = context.source;
-        runMode = context.runMode;
-        continueReason = context.continueReason;
-        const promptMessage = context.runMode === "prompt"
+        agentSource = context.cache === "hit" ? "memory" : preparedState.source;
+        const promptMessage = requestContext.runMode === "prompt"
           ? makeUserContextMessage(requestContext.input)
           : undefined;
-        const requestMessages = context.runMode === "prompt" && promptMessage
+        const requestMessages = requestContext.runMode === "prompt" && promptMessage
           ? [...normalizePersistedMessages(agent.state.messages), promptMessage]
           : normalizePersistedMessages(agent.state.messages);
         const transformedMessages = await transformContextMessages({
@@ -363,12 +366,11 @@ export function createRunCodexAdapter(
           sessionId: requestContext.sessionId,
           provider,
           profileId,
-          route: input.route,
+          route,
           source: agentSource,
           requestedRunMode: requestContext.runMode,
-          runMode,
-          continueReason,
-          lastMessageRole: context.lastMessageRole,
+          runMode: requestContext.runMode,
+          continueReason: requestContext.continueReason,
         });
 
         writeDebugLogIfEnabled(requestContext.debug, "provider.codex.pi_agent_core_request", {
@@ -376,10 +378,10 @@ export function createRunCodexAdapter(
           sessionKey: requestContext.sessionKey,
           provider,
           profileId,
-          route: input.route,
+          route,
           withTools: input.withTools,
-          runMode,
-          continueReason,
+          runMode: requestContext.runMode,
+          continueReason: requestContext.continueReason,
           transformedMessageCount: transformedMessages.length,
           request: buildCodexDebugRequestSnapshot({
             systemPrompt,
@@ -391,7 +393,7 @@ export function createRunCodexAdapter(
         });
 
         const executeAgentRun = async () => {
-          if (context.runMode === "continue") {
+          if (requestContext.runMode === "continue") {
             await agent.continue();
           } else if (promptMessage) {
             await agent.prompt(promptMessage);
@@ -410,7 +412,7 @@ export function createRunCodexAdapter(
                 requestId,
                 sessionKey: requestContext.sessionKey,
                 sessionId: requestContext.sessionId,
-                route: input.route,
+                route,
                 provider,
                 profileId,
                 event,
@@ -458,13 +460,13 @@ export function createRunCodexAdapter(
                 input: generationInput,
                 metadata: {
                   requestId,
-                  route: input.route,
+                  route,
                   provider,
                   profileId,
                   source: agentSource,
                   requestedRunMode: requestContext.runMode,
-                  runMode,
-                  continueReason: continueReason ?? "none",
+                  runMode: requestContext.runMode,
+                  continueReason: requestContext.continueReason ?? "none",
                   withTools: input.withTools,
                   sessionId: requestContext.sessionId,
                   sessionKey: requestContext.sessionKey,
@@ -522,13 +524,13 @@ export function createRunCodexAdapter(
                     : {}),
                   metadata: {
                     requestId,
-                    route: input.route,
+                    route,
                     provider,
                     profileId,
                     source: agentSource,
                     requestedRunMode: requestContext.runMode,
-                    runMode,
-                    continueReason: continueReason ?? "none",
+                    runMode: requestContext.runMode,
+                    continueReason: requestContext.continueReason ?? "none",
                     withTools: input.withTools,
                     sessionId: requestContext.sessionId,
                     sessionKey: requestContext.sessionKey,
@@ -555,6 +557,8 @@ export function createRunCodexAdapter(
         }
       },
     );
+    agentSource = agentRun.cache === "hit" ? "memory" : preparedState.source;
+    sessionState = agentRun.sessionState;
 
     writeDebugLogIfEnabled(requestContext.debug, "provider.codex.agent_session_used", {
       requestId,
@@ -579,17 +583,18 @@ export function createRunCodexAdapter(
     const resolvedToolResults = eventState.toolResults;
 
     return {
-      route: input.route,
-      stage: getAdapterStage(input.route, profileId, failed),
+      route,
+      stage: getAdapterStage(route, profileId, failed),
       result: `${responsePrefix}${responseText || requestContext.input}`,
-      runMode,
-      ...(continueReason ? { continueReason } : {}),
+      runMode: requestContext.runMode,
+      ...(requestContext.continueReason ? { continueReason: requestContext.continueReason } : {}),
       toolCalls: resolvedToolCalls.length > 0 ? resolvedToolCalls : undefined,
       toolResults: resolvedToolResults.length > 0 ? resolvedToolResults : undefined,
       assistantMessage: resolvedFinalMessage,
       stopReason: failed ? "tool_error_or_runtime_error" : resolvedStopReason,
       provider,
       profileId,
+      ...(sessionState ? { sessionState } : {}),
     };
   };
 }

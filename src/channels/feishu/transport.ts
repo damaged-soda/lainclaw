@@ -6,7 +6,7 @@ import {
   type IgnoredInboundMessage,
 } from '../contracts.js';
 import { sendFeishuTextMessage } from './outbound.js';
-import type { FeishuGatewayConfig } from './config.js';
+import type { FeishuChannelConfig } from './config.js';
 
 interface FeishuWsMessage {
   message?: {
@@ -26,7 +26,7 @@ interface FeishuWsMessage {
 }
 
 interface FeishuTransportOptions {
-  config: FeishuGatewayConfig;
+  config: FeishuChannelConfig;
   onInbound: InboundHandler;
 }
 
@@ -203,7 +203,7 @@ function parseFeishuInbound(data: unknown, requestId: string): MessageInboundMes
   };
 }
 
-async function executeOutboundMessage(config: FeishuGatewayConfig, outbound: FeishuOutboundMessage): Promise<void> {
+async function executeOutboundMessage(config: FeishuChannelConfig, outbound: FeishuOutboundMessage): Promise<void> {
   await sendFeishuTextMessage(config, {
     openId: outbound.replyTo,
     text: outbound.text,

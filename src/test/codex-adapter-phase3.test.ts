@@ -1,12 +1,9 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentEvent, AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { getModel, type Message, type Model, type StopReason, type ToolResultMessage } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext } from "../auth/authManager.js";
 import { createRunCodexAdapter } from "../providers/codexAdapter.js";
-import { createAgentStateStore, type AgentStateSnapshot } from "../runtime/agentStateStore.js";
 import {
   createSessionAgentManager,
   type SessionAgentFactoryInput,
@@ -164,28 +161,21 @@ function makeRequestContext(overrides: Partial<RequestContext>): RequestContext 
   };
 }
 
-function makeSnapshot(
-  sessionKey: string,
-  sessionId: string,
-  messages: Message[],
-): AgentStateSnapshot {
+function makePreparedState(overrides?: {
+  source?: "snapshot" | "transcript" | "new";
+  initialMessages?: Message[];
+  initialSystemPrompt?: string;
+}) {
   return {
-    version: 2,
-    sessionKey,
-    sessionId,
-    provider: "openai-codex",
-    profileId: "default",
-    systemPrompt: "system",
-    messages,
-    updatedAt: "2026-03-11T00:00:00.000Z",
+    source: overrides?.source ?? "new",
+    initialMessages: overrides?.initialMessages ?? [],
+    initialSystemPrompt: overrides?.initialSystemPrompt ?? "system",
   };
 }
 
 async function createPhase3Harness() {
-  const stateStore = createAgentStateStore();
   const createdAgents: TransformAwareEventAgent[] = [];
   const manager = createSessionAgentManager({
-    stateStore,
     agentFactory: (input) => {
       const agent = new TransformAwareEventAgent(input);
       createdAgents.push(agent);
@@ -207,155 +197,57 @@ async function createPhase3Harness() {
   });
 
   return {
-    stateStore,
     createdAgents,
     runCodexAdapter,
   };
 }
 
-test("codex adapter keeps new user follow-up on prompt even when continue was requested", async () => {
+test("codex adapter consumes lifecycle-prepared continue context", async () => {
   await withTempHome(async () => {
-    const { stateStore, createdAgents, runCodexAdapter } = await createPhase3Harness();
-    await stateStore.save(makeSnapshot(
-      "phase3-follow-up",
-      "phase3-follow-up-id",
-      [
-        makeUserMessage("existing user"),
-        makeAssistantMessage("existing assistant"),
-      ],
-    ));
+    const { createdAgents, runCodexAdapter } = await createPhase3Harness();
 
     const result = await runCodexAdapter({
-      route: "adapter.openai-codex",
       withTools: false,
-      requestContext: makeRequestContext({
-        input: "new follow-up",
-        sessionKey: "phase3-follow-up",
-        sessionId: "phase3-follow-up-id",
-        runMode: "continue",
+      preparedState: makePreparedState({
+        source: "snapshot",
+        initialMessages: [
+          makeUserMessage("run tool"),
+          makeAssistantMessage("calling tool", "toolUse"),
+          makeToolResultMessage("tool-1", "write", "done") as Message,
+        ],
       }),
-    });
-
-    assert.equal(result.runMode, "prompt");
-    assert.equal(createdAgents[0]?.calls[0], "prompt");
-  });
-});
-
-test("codex adapter continues restored toolResult state without a new user message", async () => {
-  await withTempHome(async () => {
-    const { stateStore, createdAgents, runCodexAdapter } = await createPhase3Harness();
-    await stateStore.save(makeSnapshot(
-      "phase3-continue",
-      "phase3-continue-id",
-      [
-        makeUserMessage("run tool"),
-        makeAssistantMessage("calling tool", "toolUse"),
-        makeToolResultMessage("tool-1", "write", "done") as Message,
-      ],
-    ));
-
-    const result = await runCodexAdapter({
-      route: "adapter.openai-codex",
-      withTools: false,
       requestContext: makeRequestContext({
         input: "",
         sessionKey: "phase3-continue",
         sessionId: "phase3-continue-id",
         runMode: "continue",
+        continueReason: "tool_result",
       }),
     });
 
     assert.equal(result.runMode, "continue");
-    assert.equal(result.continueReason, "restore_resume");
+    assert.equal(result.continueReason, "tool_result");
     assert.equal(result.result, "continued");
     assert.equal(createdAgents[0]?.calls[0], "continue");
+    assert.equal(result.sessionState?.messages.length, 4);
   });
 });
 
-test("codex adapter rejects continue when the last message is assistant", async () => {
-  await withTempHome(async () => {
-    const { stateStore, runCodexAdapter } = await createPhase3Harness();
-    await stateStore.save(makeSnapshot(
-      "phase3-continue-fail",
-      "phase3-continue-fail-id",
-      [
-        makeUserMessage("finished task"),
-        makeAssistantMessage("done"),
-      ],
-    ));
-
-    await assert.rejects(
-      () =>
-        runCodexAdapter({
-          route: "adapter.openai-codex",
-          withTools: false,
-          requestContext: makeRequestContext({
-            input: "",
-            sessionKey: "phase3-continue-fail",
-            sessionId: "phase3-continue-fail-id",
-            runMode: "continue",
-          }),
-        }),
-      /Cannot continue from last message role: assistant/,
-    );
-  });
-});
-
-test("older snapshot versions are ignored instead of being partially cleaned", async () => {
-  await withTempHome(async () => {
-    const { stateStore, createdAgents, runCodexAdapter } = await createPhase3Harness();
-    const legacyPath = stateStore.resolvePath("phase3-legacy-snapshot");
-    await fs.mkdir(path.dirname(legacyPath), { recursive: true });
-    await fs.writeFile(legacyPath, JSON.stringify({
-      version: 1,
-      sessionKey: "phase3-legacy-snapshot",
-      sessionId: "phase3-legacy-snapshot-id",
-      provider: "openai-codex",
-      profileId: "default",
-      systemPrompt: "legacy",
-      messages: [makeUserMessage("legacy user")],
-      updatedAt: "2026-03-11T00:00:00.000Z",
-    }, null, 2), "utf-8");
-
-    await runCodexAdapter({
-      route: "adapter.openai-codex",
-      withTools: false,
-      requestContext: makeRequestContext({
-        input: "new prompt",
-        sessionKey: "phase3-legacy-snapshot",
-        sessionId: "phase3-legacy-snapshot-id",
-        bootstrapMessages: [makeUserMessage("transcript bootstrap")],
-      }),
-    });
-
-    const transformed = createdAgents[0]?.transformedContexts[0] ?? [];
-    const transformedText = transformed
-      .filter((message) => message.role === "user" && typeof message.content === "string")
-      .map((message) => message.content);
-
-    assert.ok(transformedText.includes("transcript bootstrap"));
-    assert.ok(!transformedText.includes("legacy user"));
-  });
-});
-
-test("transformContext trims long transcript fallback to the configured context window", async () => {
+test("transformContext trims long prepared transcript state to the configured context window", async () => {
   await withTempHome(async () => {
     const { createdAgents, runCodexAdapter } = await createPhase3Harness();
-    const transcriptMessages = Array.from({ length: 20 }, (_, index) => ({
-      id: `msg-${index + 1}`,
-      role: "user" as const,
-      timestamp: "2026-03-11T00:00:00.000Z",
-      content: `history-${index + 1}`,
-    }));
+    const transcriptMessages = Array.from({ length: 20 }, (_, index) => makeUserMessage(`history-${index + 1}`));
 
     const result = await runCodexAdapter({
-      route: "adapter.openai-codex",
       withTools: false,
+      preparedState: makePreparedState({
+        source: "transcript",
+        initialMessages: transcriptMessages,
+      }),
       requestContext: makeRequestContext({
         input: "latest input",
         sessionKey: "phase3-trim",
         sessionId: "phase3-trim-id",
-        bootstrapMessages: transcriptMessages.map((message) => makeUserMessage(message.content)),
       }),
     });
 
@@ -391,21 +283,19 @@ test("transformContext trims long transcript fallback to the configured context 
   });
 });
 
-test("memory is injected only through transformContext and snapshot state wins over transcript fallback", async () => {
+test("memory is injected only through transformContext and prepared snapshot state wins over transcript fallback", async () => {
   await withTempHome(async () => {
-    const { stateStore, createdAgents, runCodexAdapter } = await createPhase3Harness();
-    await stateStore.save(makeSnapshot(
-      "phase3-memory",
-      "phase3-memory-id",
-      [
-        makeUserMessage("snapshot user"),
-        makeAssistantMessage("snapshot assistant"),
-      ],
-    ));
+    const { createdAgents, runCodexAdapter } = await createPhase3Harness();
 
     await runCodexAdapter({
-      route: "adapter.openai-codex",
       withTools: false,
+      preparedState: makePreparedState({
+        source: "snapshot",
+        initialMessages: [
+          makeUserMessage("snapshot user"),
+          makeAssistantMessage("snapshot assistant"),
+        ],
+      }),
       requestContext: makeRequestContext({
         input: "follow up",
         sessionKey: "phase3-memory",
@@ -421,7 +311,10 @@ test("memory is injected only through transformContext and snapshot state wins o
       (message) => message.role === "context_memory" && typeof message.content === "string",
     );
     const persistedMemoryMessages = agent?.state.messages.filter(
-      (message) => message.role === "user" && typeof message.content === "string" && message.content.startsWith(MEMORY_CONTEXT_PREFIX),
+      (message) =>
+        message.role === "user" &&
+        typeof message.content === "string" &&
+        message.content.startsWith(MEMORY_CONTEXT_PREFIX),
     ) ?? [];
     const transformedText = transformed
       .filter((message) => message.role === "user" && typeof message.content === "string")
@@ -440,8 +333,8 @@ test("reused session agents clear stale optional context fields between turns", 
     const { createdAgents, runCodexAdapter } = await createPhase3Harness();
 
     await runCodexAdapter({
-      route: "adapter.openai-codex",
       withTools: false,
+      preparedState: makePreparedState(),
       requestContext: makeRequestContext({
         input: "first follow up",
         sessionKey: "phase3-stale-context",
@@ -451,8 +344,11 @@ test("reused session agents clear stale optional context fields between turns", 
     });
 
     await runCodexAdapter({
-      route: "adapter.openai-codex",
       withTools: false,
+      preparedState: makePreparedState({
+        source: "new",
+        initialMessages: [],
+      }),
       requestContext: makeRequestContext({
         input: "second follow up",
         sessionKey: "phase3-stale-context",

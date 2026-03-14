@@ -1,17 +1,18 @@
 import type { ChannelId } from '../../channels/contracts.js';
+import type { GatewayRuntimeConfig } from '../runtimeConfig.js';
 
 export type GatewayChannel = ChannelId;
 
 export interface GatewayStartOverrides {
-  [key: string]: unknown;
+  channelConfig?: Record<string, unknown>;
+  runtimeConfig?: GatewayRuntimeConfig;
 }
 
 export interface GatewayConfigParsedCommand {
   channel: string;
   channelProvided: boolean;
-  action: 'set' | 'show' | 'clear' | 'migrate';
-  dryRun?: boolean;
-  config: Record<string, unknown>;
+  action: 'set' | 'show' | 'clear';
+  config: GatewayStartOverrides;
 }
 
 export interface GatewayParsedCommand {

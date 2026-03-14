@@ -1,35 +1,15 @@
+import path from "node:path";
 import { ValidationError } from "../shared/types.js";
 import {
-  buildRuntimeRequestContext,
-} from "./context.js";
-import {
-  runRuntime,
-  type RuntimeResult,
-} from "./entrypoint.js";
-import {
-  type CoreContextToolSpec,
-  type CoreRuntimeInput,
-  type CoreRuntimeResult,
-  type CoreRuntimePort,
-  type CoreErrorCode,
-} from "../core/contracts.js";
+  resolveProvider,
+  type ProviderResult,
+  type ProviderRunInput,
+} from "../providers/registry.js";
+import { type CoreErrorCode, type CoreRuntimePort } from "../core/contracts.js";
 
 export interface RuntimeAdapterOptions {
-  run?: (input: CoreRuntimeInput) => Promise<CoreRuntimeResult>;
-  runRuntimeFn?: (input: {
-    requestContext: ReturnType<typeof buildRuntimeRequestContext>["requestContext"];
-    withTools: boolean;
-    cwd?: string;
-    toolSpecs?: CoreContextToolSpec[];
-    onAgentEvent?: CoreRuntimeInput["onAgentEvent"];
-  }) => Promise<RuntimeResult>;
-}
-
-function toCoreContextTools(rawTools: CoreContextToolSpec[] | undefined): CoreContextToolSpec[] {
-  if (!Array.isArray(rawTools)) {
-    return [];
-  }
-  return rawTools;
+  run?: (input: ProviderRunInput) => Promise<ProviderResult>;
+  resolveProviderFn?: typeof resolveProvider;
 }
 
 export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreRuntimePort {
@@ -39,52 +19,23 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
     };
   }
 
-  const runRuntimeFn = options.runRuntimeFn ?? runRuntime;
+  const resolveProviderFn = options.resolveProviderFn ?? resolveProvider;
 
   return {
-    run: async (input: CoreRuntimeInput): Promise<CoreRuntimeResult> => {
+    run: async (input: ProviderRunInput): Promise<ProviderResult> => {
       try {
-        const requestContext = buildRuntimeRequestContext({
-          requestId: input.requestId,
-          createdAt: input.createdAt,
-          input: input.input,
-          sessionKey: input.sessionKey,
-          sessionId: input.sessionId,
-          bootstrapMessages: input.bootstrapMessages,
-          memorySnippet: input.memorySnippet,
-          runMode: input.runMode,
-          continueReason: input.continueReason,
-          provider: input.provider,
-          profileId: input.profileId,
-          withTools: input.withTools,
-          tools: toCoreContextTools(input.tools),
-          systemPrompt: input.systemPrompt,
-          memoryEnabled: input.memoryEnabled ?? true,
-          contextMessageLimit: input.contextMessageLimit,
-          debug: input.debug === true,
+        const resolved = resolveProviderFn(input.requestContext.provider);
+        const requestContext = input.requestContext.provider === resolved.provider
+          ? input.requestContext
+          : {
+            ...input.requestContext,
+            provider: resolved.provider,
+          };
+        return await resolved.run({
+          ...input,
+          requestContext,
+          ...(typeof input.cwd === "string" ? { cwd: path.resolve(input.cwd) } : {}),
         });
-
-        const { adapter: adapterResult } = await runRuntimeFn({
-          requestContext: requestContext.requestContext,
-          withTools: input.withTools,
-          ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
-          ...(Array.isArray(input.tools) ? { toolSpecs: toCoreContextTools(input.tools) } : {}),
-          ...(input.onAgentEvent ? { onAgentEvent: input.onAgentEvent } : {}),
-        });
-
-        return {
-          route: adapterResult.route,
-          stage: adapterResult.stage,
-          result: adapterResult.result,
-          runMode: adapterResult.runMode,
-          ...(adapterResult.continueReason ? { continueReason: adapterResult.continueReason } : {}),
-          ...(adapterResult.toolCalls ? { toolCalls: adapterResult.toolCalls } : {}),
-          ...(adapterResult.toolResults ? { toolResults: adapterResult.toolResults } : {}),
-          ...(adapterResult.assistantMessage ? { assistantMessage: adapterResult.assistantMessage } : {}),
-          ...(adapterResult.stopReason ? { stopReason: adapterResult.stopReason } : {}),
-          provider: adapterResult.provider,
-          profileId: adapterResult.profileId,
-        };
       } catch (error) {
         if (error instanceof ValidationError) {
           throw error;

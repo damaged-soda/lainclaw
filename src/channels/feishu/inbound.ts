@@ -3,13 +3,7 @@ import type {
   MessageInboundMessage,
   ChannelOutboundTextCapability,
 } from '../contracts.js';
-import { runAgent } from '../../gateway/index.js';
-import { evaluateAccessPolicy } from '../../gateway/handlers/policy/accessPolicy.js';
-import {
-  buildInboundFailureText,
-  resolveSessionKey,
-  runInboundAgentTurn,
-} from '../../gateway/handlers/inboundAgent.js';
+import type { RuntimeAgentEventSink } from '../../shared/types.js';
 import {
   createFeishuTurnController,
   type FeishuTurnController,
@@ -17,21 +11,20 @@ import {
 
 const DEFAULT_FEISHU_SLOW_ACK_DELAY_MS = 3000;
 
-interface FeishuInboundRuntimeOptions {
-  provider?: string;
-  profileId?: string;
-  withTools?: boolean;
-  memory?: boolean;
-  debug?: boolean;
+export interface FeishuInboundTurnRequest {
+  inbound: MessageInboundMessage;
+  onAgentEvent?: RuntimeAgentEventSink;
+}
+
+export interface FeishuInboundTurnResult {
+  text: string;
 }
 
 export interface RunFeishuInboundOptions {
   inbound: InboundMessage;
-  runtime: FeishuInboundRuntimeOptions;
   outbound: ChannelOutboundTextCapability;
-  policyConfig?: unknown;
+  handleTurn: (request: FeishuInboundTurnRequest) => Promise<FeishuInboundTurnResult | void>;
   onFailureHint?: (rawMessage: string) => string;
-  runAgentFn?: typeof runAgent;
   slowAckDelayMs?: number;
   debug?: boolean;
 }
@@ -54,8 +47,9 @@ async function sendFailureReply(
   failureContext: string,
 ): Promise<void> {
   const rawMessage = describeError(error);
+  const hint = onFailureHint ? onFailureHint(rawMessage) : rawMessage;
   try {
-    await controller.fail(buildInboundFailureText(inbound, rawMessage, onFailureHint));
+    await controller.fail(`[Lainclaw] ${hint}（requestId: ${inbound.requestId}）`);
   } catch (sendError) {
     throw wrapDeliveryError(`${failureContext}: ${rawMessage}`, sendError);
   }
@@ -72,22 +66,9 @@ export async function runFeishuInbound(options: RunFeishuInboundOptions): Promis
     return;
   }
 
-  const decision = await evaluateAccessPolicy({
-    inbound,
-    config: options.policyConfig,
-  });
-
-  if (!decision.allowed) {
-    if (!decision.replyText) {
-      return;
-    }
-    await options.outbound.sendText(inbound.replyTo, decision.replyText);
-    return;
-  }
-
   const controller = createFeishuTurnController({
     requestId: inbound.requestId,
-    sessionKey: resolveSessionKey(inbound),
+    sessionKey: `${inbound.actorId.trim() || inbound.requestId}:${inbound.conversationId.trim() || inbound.requestId}`,
     replyTo: inbound.replyTo,
     slowAckDelayMs: options.slowAckDelayMs ?? DEFAULT_FEISHU_SLOW_ACK_DELAY_MS,
     outbound: options.outbound,
@@ -95,12 +76,10 @@ export async function runFeishuInbound(options: RunFeishuInboundOptions): Promis
   });
 
   try {
-    let result: Awaited<ReturnType<typeof runInboundAgentTurn>>;
+    let result: FeishuInboundTurnResult | void;
     try {
-      result = await runInboundAgentTurn({
+      result = await options.handleTurn({
         inbound,
-        runtime: options.runtime,
-        runAgentFn: options.runAgentFn,
         onAgentEvent: async (event) => controller.onAgentEvent(event),
       });
     } catch (error) {
@@ -111,6 +90,10 @@ export async function runFeishuInbound(options: RunFeishuInboundOptions): Promis
         options.onFailureHint,
         'agent turn failed and Feishu failure reply could not be delivered',
       );
+      return;
+    }
+
+    if (!result) {
       return;
     }
 

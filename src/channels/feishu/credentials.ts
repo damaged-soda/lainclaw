@@ -1,7 +1,7 @@
-import { resolveFeishuGatewayConfigPath } from "./config.js";
+import { resolveGatewayConfigPath } from "../../gateway/configFile.js";
 
 export function validateFeishuGatewayCredentials(config: { appId?: string; appSecret?: string }): void {
-  const configPath = resolveFeishuGatewayConfigPath("feishu");
+  const configPath = resolveGatewayConfigPath();
   if (!config.appId || !config.appSecret) {
     throw new Error(
       "Missing FEISHU_APP_ID or FEISHU_APP_SECRET for websocket mode. "
@@ -47,4 +47,3 @@ function maskCredential(value: string | undefined): string {
   }
   return `${trimmed.slice(0, 3)}***${trimmed.slice(-3)}`;
 }
-

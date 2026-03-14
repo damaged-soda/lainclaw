@@ -13,7 +13,6 @@ import {
 } from "./sessionStore.js";
 import { ValidationError } from "../shared/types.js";
 import type {
-  CoreSessionHistoryMessage,
   CoreSessionLoadInput,
   CoreSessionPort,
   CoreSessionRecord,
@@ -31,15 +30,6 @@ function toCoreSessionRecord(raw: SessionLoadResult): CoreSessionRecord {
     isNewSession: raw.isNewSession,
     memoryEnabled: raw.memoryEnabled,
     compactedMessageCount: raw.compactedMessageCount,
-  };
-}
-
-function toCoreHistoryMessage(item: SessionHistoryMessage): CoreSessionHistoryMessage {
-  return {
-    id: item.id,
-    role: item.role,
-    timestamp: item.timestamp,
-    content: item.content,
   };
 }
 
@@ -104,10 +94,9 @@ export function createSessionAdapter(): CoreSessionPort {
         return toCoreSessionRecord(snapshot);
       });
     },
-    loadTranscriptMessages: (sessionId: string): Promise<CoreSessionHistoryMessage[]> => {
+    loadTranscriptMessages: (sessionId: string): Promise<SessionHistoryMessage[]> => {
       return runWithSessionFailure(
-        async () =>
-          getRecentSessionTranscriptMessages(sessionId).then((messages) => messages.map(toCoreHistoryMessage)),
+        async () => getRecentSessionTranscriptMessages(sessionId),
       );
     },
     loadMemorySnippet: (sessionKey: string): Promise<string> => {

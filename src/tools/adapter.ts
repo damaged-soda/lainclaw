@@ -1,81 +1,17 @@
 import { executeTool as executeToolInternal } from "./executor.js";
 import { listTools as listToolsInternal } from "./registry.js";
 import { firstToolErrorFromLogs as firstToolErrorFromLogsInternal } from "./runtimeTools.js";
-import type {
-  CoreToolCall,
-  CoreToolContext,
-  CoreToolsPort,
-  CoreToolSpec,
-  CoreToolError,
-  CoreToolExecutionLog,
-} from "../core/contracts.js";
+import type { CoreToolsPort } from "../core/contracts.js";
+import type { ContextToolSpec } from "../shared/types.js";
 import { ValidationError } from "../shared/types.js";
-import type {
-  ToolCall,
-  ToolContext,
-  ToolError,
-  ToolExecutionLog,
-  ToolResult,
-  ToolSpec,
-} from "./types.js";
+import type { ToolError, ToolSpec } from "./types.js";
 
-function toCoreToolSpec(spec: ToolSpec): CoreToolSpec {
+function toContextToolSpec(spec: ToolSpec): ContextToolSpec {
   return {
     name: spec.name,
     description: spec.description,
     inputSchema: spec.inputSchema,
   };
-}
-
-function toToolCall(input: CoreToolCall): ToolCall {
-  return {
-    id: input.id,
-    name: input.name,
-    args: input.args,
-    source: input.source,
-  };
-}
-
-function toToolResult(input: ToolResult): ToolResult {
-  return {
-    ok: input.ok,
-    ...(input.content ? { content: input.content } : {}),
-    ...(input.data !== undefined ? { data: input.data } : {}),
-    ...(input.meta ? { meta: input.meta } : {}),
-    ...(input.error ? { error: input.error } : {}),
-  };
-}
-
-function toToolLog(log: ToolExecutionLog): CoreToolExecutionLog {
-  return {
-    call: {
-      id: log.call.id,
-      name: log.call.name,
-      ...(typeof log.call.args === "undefined" ? {} : { args: log.call.args }),
-      ...(typeof log.call.source === "string" ? { source: log.call.source } : {}),
-    },
-    result: {
-      ok: log.result.ok,
-      ...(log.result.content ? { content: log.result.content } : {}),
-      ...(log.result.data !== undefined ? { data: log.result.data } : {}),
-      ...(log.result.error ? { error: log.result.error } : {}),
-      ...(log.result.meta ? { meta: log.result.meta } : {}),
-    },
-  };
-}
-
-function toToolContext(context: CoreToolContext): ToolContext {
-  return {
-    requestId: context.requestId,
-    sessionId: context.sessionId,
-    sessionKey: context.sessionKey,
-    cwd: context.cwd ?? process.cwd(),
-    ...(context.signal ? { signal: context.signal } : {}),
-  };
-}
-
-function isToolError(error: ToolError | undefined): error is CoreToolError {
-  return !!error && typeof error.code === "string" && typeof error.tool === "string" && typeof error.message === "string";
 }
 
 function normalizeToolError(error: unknown): ValidationError {
@@ -90,34 +26,22 @@ function normalizeToolError(error: unknown): ValidationError {
 
 export function createToolsAdapter(): CoreToolsPort {
   return {
-    listTools: (): CoreToolSpec[] => {
+    listTools: (): ContextToolSpec[] => {
       try {
-        return listToolsInternal().map(toCoreToolSpec);
+        return listToolsInternal().map(toContextToolSpec);
       } catch (error) {
         throw normalizeToolError(error);
       }
     },
-    executeTool: async (call: CoreToolCall, context: CoreToolContext): Promise<CoreToolExecutionLog> => {
+    executeTool: async (call, context) => {
       try {
-        const executed: ToolExecutionLog = await executeToolInternal(
-          toToolCall(call),
-          toToolContext(context),
-        );
-        return toToolLog(executed);
+        return await executeToolInternal(call, context);
       } catch (error) {
         throw normalizeToolError(error);
       }
     },
-    firstToolErrorFromLogs: (logs: CoreToolExecutionLog[] | undefined): CoreToolError | undefined => {
-      const runtimeLogs: ToolExecutionLog[] = Array.isArray(logs)
-        ? logs.map((log): ToolExecutionLog => ({
-          call: toToolCall(log.call),
-          result: toToolResult(log.result),
-        }))
-        : [];
-
-      const first = firstToolErrorFromLogsInternal(runtimeLogs);
-      return isToolError(first) ? first : undefined;
+    firstToolErrorFromLogs: (logs): ToolError | undefined => {
+      return firstToolErrorFromLogsInternal(logs);
     },
   };
 }

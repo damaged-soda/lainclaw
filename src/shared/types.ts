@@ -1,5 +1,4 @@
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
-import type { ToolCall, ToolError, ToolExecutionLog } from "../tools/types.js";
 import type { Message } from "@mariozechner/pi-ai";
 
 export interface ContextToolSpec {
@@ -50,44 +49,11 @@ export interface RuntimeAgentEvent {
 
 export type RuntimeAgentEventSink = (event: RuntimeAgentEvent) => Promise<void> | void;
 
-export interface PipelineResult {
-  requestId: string;
-  createdAt: string;
-  route: string;
-  stage: string;
-  result: string;
-  toolCalls?: ToolCall[];
-  assistantMessage?: Message;
-  stopReason?: string;
-  provider: string;
-  profileId: string;
-}
-
 export interface SessionHistoryMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   timestamp: string;
   content: string;
-}
-
-export interface GatewayResult {
-  success: boolean;
-  requestId: string;
-  createdAt: string;
-  route: string;
-  stage: string;
-  result: string;
-  toolCalls?: ToolCall[];
-  toolResults?: ToolExecutionLog[];
-  toolError?: ToolError;
-  sessionContextUpdated?: boolean;
-  sessionKey: string;
-  sessionId: string;
-  provider: string;
-  profileId: string;
-  memoryEnabled: boolean;
-  memoryUpdated: boolean;
-  memoryFile?: string;
 }
 
 export class ValidationError extends Error {

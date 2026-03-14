@@ -1,21 +1,11 @@
 import type { MessageInboundMessage } from "../../channels/contracts.js";
 import { runAgent } from "../index.js";
 import type { RuntimeAgentEventSink } from "../../shared/types.js";
-
-interface AgentRuntimeContext {
-  provider?: string;
-  profileId?: string;
-  withTools?: boolean;
-  memory?: boolean;
-  debug?: boolean;
-  userId?: string;
-  newSession?: boolean;
-  cwd?: string;
-}
+import type { GatewayAgentRuntimeContext } from "../runtimeConfig.js";
 
 export interface InboundAgentTurnRequest {
   inbound: MessageInboundMessage;
-  runtime: AgentRuntimeContext;
+  runtime: GatewayAgentRuntimeContext;
   onAgentEvent?: RuntimeAgentEventSink;
   runAgentFn?: typeof runAgent;
 }

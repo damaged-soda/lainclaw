@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { type FeishuGatewayConfig } from "./config.js";
+import { type FeishuChannelConfig } from "./config.js";
 
 interface FeishuTokenResponse {
   code?: number;
@@ -91,7 +91,7 @@ function buildFeishuSendFailure(errorMessage: string, receiveId: string, attempt
 }
 
 async function sendFeishuTextMessageWithType(
-  config: FeishuGatewayConfig,
+  config: FeishuChannelConfig,
   input: {
     openId: string;
     text: string;
@@ -142,7 +142,7 @@ async function requestJson(url: string, options: RequestInit, timeoutMs: number)
 
 let tokenCache: FeishuTokenState | null = null;
 
-async function resolveAccessToken(config: FeishuGatewayConfig): Promise<string> {
+async function resolveAccessToken(config: FeishuChannelConfig): Promise<string> {
   if (!config.appId || !config.appSecret) {
     throw new Error("Missing FEISHU_APP_ID or FEISHU_APP_SECRET for access token retrieval");
   }
@@ -187,20 +187,13 @@ async function resolveAccessToken(config: FeishuGatewayConfig): Promise<string> 
   return resolvedToken;
 }
 
-export async function sendFeishuTextMessage(rawConfig: Partial<FeishuGatewayConfig>, input: {
+export async function sendFeishuTextMessage(rawConfig: Partial<FeishuChannelConfig>, input: {
   openId: string;
   text: string;
 }): Promise<void> {
-  const DEFAULT_WITH_TOOLS = true;
-  const DEFAULT_MEMORY = false;
   const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
-  const provider =
-    typeof rawConfig.provider === "string" && rawConfig.provider.trim() ? rawConfig.provider.trim() : undefined;
-  const config: FeishuGatewayConfig = {
+  const config: FeishuChannelConfig = {
     requestTimeoutMs: rawConfig.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
-    ...(provider ? { provider } : {}),
-    withTools: rawConfig.withTools ?? DEFAULT_WITH_TOOLS,
-    memory: rawConfig.memory ?? DEFAULT_MEMORY,
     heartbeatEnabled: rawConfig.heartbeatEnabled ?? DEFAULT_HEARTBEAT_ENABLED,
     heartbeatIntervalMs: rawConfig.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
     heartbeatSessionKey: typeof rawConfig.heartbeatSessionKey === "string" && rawConfig.heartbeatSessionKey.trim()

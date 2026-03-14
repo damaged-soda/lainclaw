@@ -44,7 +44,7 @@ test("core and runtime adapter can observe raw AgentEvent envelopes", async () =
       sessionAdapter: createSessionAdapter(),
       toolsAdapter: createToolsAdapter(),
       runtimeAdapter: createRuntimeAdapter({
-        runRuntimeFn: async (input) => {
+        run: async (input) => {
           await input.onAgentEvent?.({
             requestId: input.requestContext.requestId,
             sessionKey: input.requestContext.sessionKey,
@@ -71,16 +71,14 @@ test("core and runtime adapter can observe raw AgentEvent envelopes", async () =
           });
 
           return {
-            adapter: {
-              route: "adapter.stub",
-              stage: "adapter.stub.event-test",
-              result: "runtime reply",
-              runMode: "prompt",
-              assistantMessage,
-              stopReason: "stop",
-              provider: input.requestContext.provider,
-              profileId: input.requestContext.profileId,
-            },
+            route: "adapter.stub",
+            stage: "adapter.stub.event-test",
+            result: "runtime reply",
+            runMode: "prompt",
+            assistantMessage,
+            stopReason: "stop",
+            provider: input.requestContext.provider,
+            profileId: input.requestContext.profileId,
           };
         },
       }),

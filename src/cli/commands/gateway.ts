@@ -18,7 +18,8 @@ import {
   runGatewayStart,
   runGatewayStatusOrStop,
 } from '../../gateway/commands/start.js';
-import type { FeishuGatewayConfig } from '../../channels/feishu/config.js';
+import type { FeishuChannelConfig } from '../../channels/feishu/config.js';
+import type { GatewayRuntimeConfig } from '../../gateway/runtimeConfig.js';
 
 type GatewayCommonOptions = {
   channel?: string[];
@@ -64,7 +65,6 @@ type GatewayConfigOptions = {
   pairingPendingTtlMs?: string;
   pairingPendingMax?: string;
   requestTimeoutMs?: string;
-  dryRun?: boolean;
 };
 
 type GatewayStatusStopOptions = {
@@ -110,7 +110,7 @@ function normalizePositiveIntValue(raw: string | undefined, label: string): numb
   return parsePositiveInt(raw.trim(), `--${label}`);
 }
 
-function normalizePairingPolicy(raw: unknown): FeishuGatewayConfig['pairingPolicy'] | undefined {
+function normalizePairingPolicy(raw: unknown): FeishuChannelConfig['pairingPolicy'] | undefined {
   if (typeof raw !== 'string') {
     return undefined;
   }
@@ -129,21 +129,29 @@ function normalizePairingPolicy(raw: unknown): FeishuGatewayConfig['pairingPolic
   return undefined;
 }
 
-function parseFeishuGatewayConfigFromOptions(
+function parseGatewayRuntimeConfigFromOptions(
   options: GatewayCommonOptions | GatewayConfigOptions,
-): Partial<FeishuGatewayConfig> {
+): GatewayRuntimeConfig {
   const provider = parseOptionalString(options.provider);
   const profile = parseOptionalString(options.profile);
-  const heartbeatIntervalMs = normalizePositiveIntValue(normalizeText(options.heartbeatIntervalMs), 'heartbeat-interval-ms');
-  const pairingPendingTtlMs = normalizePositiveIntValue(normalizeText(options.pairingPendingTtlMs), 'pairing-pending-ttl-ms');
-  const pairingPendingMax = normalizePositiveIntValue(normalizeText(options.pairingPendingMax), 'pairing-pending-max');
-  const requestTimeoutMs = normalizePositiveIntValue(normalizeText(options.requestTimeoutMs), 'request-timeout-ms');
 
   return {
     ...(provider ? { provider } : {}),
     ...(profile ? { profileId: profile } : {}),
     ...(typeof options.withTools === 'boolean' ? { withTools: options.withTools } : {}),
     ...(typeof options.memory === 'boolean' ? { memory: options.memory } : {}),
+  };
+}
+
+function parseFeishuGatewayConfigFromOptions(
+  options: GatewayCommonOptions | GatewayConfigOptions,
+): GatewayStartOverrides {
+  const heartbeatIntervalMs = normalizePositiveIntValue(normalizeText(options.heartbeatIntervalMs), 'heartbeat-interval-ms');
+  const pairingPendingTtlMs = normalizePositiveIntValue(normalizeText(options.pairingPendingTtlMs), 'pairing-pending-ttl-ms');
+  const pairingPendingMax = normalizePositiveIntValue(normalizeText(options.pairingPendingMax), 'pairing-pending-max');
+  const requestTimeoutMs = normalizePositiveIntValue(normalizeText(options.requestTimeoutMs), 'request-timeout-ms');
+
+  const channelConfig = {
     ...(parseOptionalString(options.appId) !== undefined ? { appId: parseOptionalString(options.appId)! } : {}),
     ...(parseOptionalString(options.appSecret) !== undefined ? { appSecret: parseOptionalString(options.appSecret)! } : {}),
     ...(requestTimeoutMs ? { requestTimeoutMs } : {}),
@@ -156,11 +164,17 @@ function parseFeishuGatewayConfigFromOptions(
       ? { heartbeatSessionKey: parseOptionalString(options.heartbeatSessionKey)! }
       : {}),
     ...(normalizePairingPolicy(options.pairingPolicy)
-      ? { pairingPolicy: normalizePairingPolicy(options.pairingPolicy) as FeishuGatewayConfig['pairingPolicy'] }
+      ? { pairingPolicy: normalizePairingPolicy(options.pairingPolicy) as FeishuChannelConfig['pairingPolicy'] }
       : {}),
     ...(Array.isArray(options.pairingAllowFrom) && options.pairingAllowFrom.length > 0 ? { pairingAllowFrom: options.pairingAllowFrom } : {}),
     ...(pairingPendingTtlMs ? { pairingPendingTtlMs } : {}),
     ...(pairingPendingMax ? { pairingPendingMax } : {}),
+  };
+  const runtimeConfig = parseGatewayRuntimeConfigFromOptions(options);
+
+  return {
+    ...(Object.keys(channelConfig).length > 0 ? { channelConfig } : {}),
+    ...(Object.keys(runtimeConfig).length > 0 ? { runtimeConfig } : {}),
   };
 }
 
@@ -175,15 +189,9 @@ function parseLocalGatewayConfigFromOptions(options: GatewayCommonOptions): Gate
     }
   }
 
-  const provider = parseOptionalString(options.provider);
-  const profile = parseOptionalString(options.profile);
+  const runtimeConfig = parseGatewayRuntimeConfigFromOptions(options);
 
-  return {
-    ...(provider ? { provider } : {}),
-    ...(profile ? { profileId: profile } : {}),
-    ...(typeof options.withTools === 'boolean' ? { withTools: options.withTools } : {}),
-    ...(typeof options.memory === 'boolean' ? { memory: options.memory } : {}),
-  };
+  return Object.keys(runtimeConfig).length > 0 ? { runtimeConfig } : {};
 }
 
 function resolveGatewayChannels(
@@ -257,7 +265,7 @@ function buildGatewayStartParsedCommand(
 
   return {
     ...common,
-    ...config,
+    config,
     action,
   };
 }
@@ -289,31 +297,37 @@ function resolveGatewayConfigChannel(channelInput: string | undefined): { channe
   if (!channel) {
     throw new Error('Invalid value for --channel');
   }
+  if (channel === 'default') {
+    return {
+      channel,
+      channelProvided: true,
+    };
+  }
   return {
-    channel,
+    channel: resolveGatewayChannel(channel),
     channelProvided: true,
   };
 }
 
 function buildGatewayConfigParsedCommand(
-  command: 'set' | 'show' | 'clear' | 'migrate',
+  command: 'set' | 'show' | 'clear',
   options: GatewayConfigOptions,
 ): GatewayConfigParsedCommand {
   const { channel, channelProvided } = resolveGatewayConfigChannel(options.channel);
 
   if (command === 'set') {
     const config = parseFeishuGatewayConfigFromOptions(options);
-    if (Object.keys(config).length === 0) {
+    if (Object.keys(config.channelConfig ?? {}).length === 0 && Object.keys(config.runtimeConfig ?? {}).length === 0) {
       throw new Error('No gateway config fields provided');
     }
-    if (
-      (channel === 'default' || !channelProvided)
-      && (typeof config.appId === 'string' || typeof config.appSecret === 'string')
-    ) {
-      throw new Error('appId/appSecret must be scoped with --channel, e.g. --channel feishu');
+    if (!channelProvided && Object.keys(config.channelConfig ?? {}).length > 0) {
+      throw new Error('channelConfig fields require --channel, e.g. --channel feishu');
     }
-    if (channel !== 'default' && typeof config.provider === 'string') {
-      throw new Error('provider is a gateway-level field and cannot be set with --channel; set it at default scope');
+    if (channelProvided && Object.keys(config.runtimeConfig ?? {}).length > 0) {
+      throw new Error('runtimeConfig is gateway-level and cannot be set with --channel');
+    }
+    if (channelProvided && channel !== 'feishu' && Object.keys(config.channelConfig ?? {}).length > 0) {
+      throw new Error(`channel ${channel} does not support persisted channelConfig`);
     }
     return {
       channel,
@@ -332,17 +346,7 @@ function buildGatewayConfigParsedCommand(
     };
   }
 
-  if (!options.dryRun) {
-    throw new Error('gateway config migrate currently only supports --dry-run');
-  }
-
-  return {
-    channel,
-    channelProvided,
-    action: command,
-    dryRun: true,
-    config: {},
-  };
+  throw new Error(`Unsupported gateway config action: ${command}`);
 }
 
 function addModelRuntimeOptions(command: Command, includeMemory: boolean): void {
@@ -419,7 +423,7 @@ export function buildGatewayCommand(program: Command): Command {
       [
         'Usage:',
         '  lainclaw gateway [start|status|stop] [options]',
-        '  lainclaw gateway config <set|show|clear|migrate> [options]',
+        '  lainclaw gateway config <set|show|clear> [options]',
         '',
         'Examples:',
         '  lainclaw gateway',
@@ -432,7 +436,6 @@ export function buildGatewayCommand(program: Command): Command {
     .addHelpText('after', 'Notes:')
     .addHelpText('after', [
       '  --channel supports feishu and local',
-      '  gateway config migrate requires --dry-run',
     ].join('\n'));
 
   gateway.action((_options: never, command: Command) => {
@@ -527,16 +530,5 @@ export function buildGatewayCommand(program: Command): Command {
     const parsedOptions = { ...(command.opts<GatewayConfigOptions>()), ...options };
     setExitCode(command, await runGatewayConfigCommand(buildGatewayConfigParsedCommand('clear', parsedOptions)));
   });
-
-  const migrate = config.command('migrate').description('Migrate legacy config.');
-  migrate
-    .addOption(new Option('--channel <channel>', 'Select gateway config channel.'))
-    .addOption(new Option('--dry-run', 'Show migration draft only.'));
-  migrate.addHelpText('after', ['Examples:', '  lainclaw gateway config migrate --channel feishu --dry-run'].join('\n'));
-  migrate.action(async (options: GatewayConfigOptions, command: Command) => {
-    const parsedOptions = { ...(command.opts<GatewayConfigOptions>()), ...options };
-    setExitCode(command, await runGatewayConfigCommand(buildGatewayConfigParsedCommand('migrate', parsedOptions)));
-  });
-
   return gateway;
 }

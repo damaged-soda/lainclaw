@@ -7,7 +7,6 @@ import type { AgentEvent, AgentTool } from "@mariozechner/pi-agent-core";
 import { getModel, type Message, type Model, type StopReason, type ToolResultMessage } from "@mariozechner/pi-ai";
 import { getOpenAICodexApiContext } from "../auth/authManager.js";
 import { createRunCodexAdapter } from "../providers/codexAdapter.js";
-import { createAgentStateStore } from "../runtime/agentStateStore.js";
 import {
   createSessionAgentManager,
   type SessionAgentFactoryInput,
@@ -195,14 +194,20 @@ function makeRequestContext(overrides: Partial<RequestContext>): RequestContext 
   };
 }
 
+function makePreparedState() {
+  return {
+    source: "new" as const,
+    initialMessages: [] as Message[],
+    initialSystemPrompt: "system",
+  };
+}
+
 test("codex adapter keeps tool execution working with session-managed agents", async () => {
   await withTempHome(async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "lainclaw-codex-tool-"));
     try {
       let createdAgentCount = 0;
-      const stateStore = createAgentStateStore();
       const manager = createSessionAgentManager({
-        stateStore,
         agentFactory: (input) => {
           createdAgentCount += 1;
           return new ToolAwareFakeAgent(input);
@@ -223,7 +228,6 @@ test("codex adapter keeps tool execution working with session-managed agents", a
       });
 
       const result = await runCodexAdapter({
-        route: "adapter.openai-codex",
         withTools: true,
         cwd,
         toolSpecs: [
@@ -241,12 +245,11 @@ test("codex adapter keeps tool execution working with session-managed agents", a
             },
           },
         ],
+        preparedState: makePreparedState(),
         requestContext: {
           ...makeRequestContext({}),
         },
       });
-
-      const snapshot = await stateStore.load("tool-session");
 
       assert.equal(createdAgentCount, 1);
       assert.equal(result.provider, "openai-codex");
@@ -257,7 +260,7 @@ test("codex adapter keeps tool execution working with session-managed agents", a
       assert.equal(result.toolResults?.length, 1);
       assert.equal(result.toolResults?.[0]?.result.ok, true);
       assert.equal(await fs.readFile(path.join(cwd, "output.txt"), "utf-8"), "hello from tool");
-      assert.equal(snapshot?.messages.length, 4);
+      assert.equal(result.sessionState?.messages.length, 4);
     } finally {
       await fs.rm(cwd, { recursive: true, force: true });
     }

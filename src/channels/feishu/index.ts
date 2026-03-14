@@ -1,81 +1,39 @@
 import { inspectHeartbeatTargetOpenId } from './diagnostics.js';
-import { makeFeishuRequestFailureHint } from './failureHints.js';
 import { validateFeishuGatewayCredentials } from './credentials.js';
-import { startFeishuHeartbeatSidecar } from './sidecars/heartbeat.js';
-import { resolveFeishuGatewayConfig, type FeishuGatewayConfig } from './config.js';
+import { resolveFeishuChannelConfig, type FeishuChannelConfig } from './config.js';
 import { runFeishuTransport } from './transport.js';
-import { runFeishuInbound } from './inbound.js';
-import { type Channel, type ChannelRunContext, type SidecarHandle } from '../contracts.js';
+import {
+  type Channel,
+  type ChannelPreflightInput,
+  type ChannelRunInput,
+  type ChannelRunContext,
+  type ChannelSendTextOptions,
+} from '../contracts.js';
 import { sendFeishuTextMessage } from './outbound.js';
 
-interface FeishuRuntimeOptions {
-  provider?: string;
-  profileId?: string;
-  withTools?: boolean;
-  memory?: boolean;
-  debug?: boolean;
-}
-
-function normalizeFeishuOverrides(overrides: unknown): Partial<FeishuGatewayConfig> {
+function normalizeFeishuChannelConfigOverrides(overrides: unknown): Partial<FeishuChannelConfig> {
   if (!overrides || typeof overrides !== 'object') {
     return {};
   }
-  return overrides as Partial<FeishuGatewayConfig>;
+  return overrides as Partial<FeishuChannelConfig>;
 }
 
-async function toRuntimeConfig(overrides: unknown, context?: ChannelRunContext): Promise<FeishuGatewayConfig> {
+async function toChannelConfig(overrides: unknown, context?: ChannelRunContext): Promise<FeishuChannelConfig> {
   const channel = context?.channel ?? 'feishu';
-  return resolveFeishuGatewayConfig(normalizeFeishuOverrides(overrides), channel);
+  return resolveFeishuChannelConfig(normalizeFeishuChannelConfigOverrides(overrides), channel);
 }
 
-function buildRunInboundRuntime(config: FeishuGatewayConfig, context?: ChannelRunContext): FeishuRuntimeOptions {
-  return {
-    provider: config.provider,
-    profileId: config.profileId,
-    withTools: config.withTools,
-    memory: config.memory,
-    ...(context?.debug === true ? { debug: true } : {}),
-  };
-}
-
-async function runCoreInbound(
-  inbound: Parameters<typeof runFeishuInbound>[0]['inbound'],
-  config: FeishuGatewayConfig,
-  context?: ChannelRunContext,
-): ReturnType<typeof runFeishuInbound> {
-  return runFeishuInbound({
-    inbound,
-    runtime: buildRunInboundRuntime(config, context),
-    outbound: {
-      sendText: async (replyTo, text) => {
-        await sendFeishuTextMessage(config, {
-          openId: replyTo,
-          text,
-        });
-      },
-    },
-    policyConfig: config,
-    onFailureHint: makeFeishuRequestFailureHint,
-    debug: context?.debug === true,
-  });
-}
-
-async function resolveRuntimeConfigForSendText(
-  meta?: unknown,
-): Promise<FeishuGatewayConfig> {
-  const candidate = (meta && typeof meta === 'object' ? meta : undefined) as {
-    runtimeConfig?: unknown;
-  } | undefined;
-  if (candidate && candidate.runtimeConfig && typeof candidate.runtimeConfig === 'object') {
-    return toRuntimeConfig(candidate.runtimeConfig, { channel: 'feishu' } as ChannelRunContext);
+function resolveSendTextConfig(options?: ChannelSendTextOptions): Partial<FeishuChannelConfig> {
+  if (!options?.config || typeof options.config !== 'object') {
+    return {};
   }
-  return toRuntimeConfig({}, { channel: 'feishu' } as ChannelRunContext);
+  return options.config as Partial<FeishuChannelConfig>;
 }
 
 export const feishuChannel: Channel = {
   id: 'feishu',
-  preflight: async (overrides?: unknown, context?: ChannelRunContext): Promise<FeishuGatewayConfig> => {
-    const config = await toRuntimeConfig(overrides, context);
+  preflight: async (input?: ChannelPreflightInput): Promise<FeishuChannelConfig> => {
+    const config = await toChannelConfig(input?.config, input?.context);
     validateFeishuGatewayCredentials(config);
     if (config.heartbeatEnabled && !config.heartbeatTargetOpenId) {
       throw new Error('Missing value for heartbeat-target-open-id');
@@ -92,47 +50,21 @@ export const feishuChannel: Channel = {
     }
     return config;
   },
-  sendText: async (replyTo, text, meta): Promise<void> => {
+  sendText: async (replyTo, text, options): Promise<void> => {
     if (!replyTo || !text.trim()) {
       return;
     }
-    const config = await resolveRuntimeConfigForSendText(meta);
+    const config = await toChannelConfig(resolveSendTextConfig(options), { channel: 'feishu' } as ChannelRunContext);
     await sendFeishuTextMessage(config, {
       openId: replyTo,
       text,
     });
   },
-  run: async (onInbound, overrides?: unknown, context?: ChannelRunContext): Promise<void> => {
-    const config = await toRuntimeConfig(overrides, context);
-
-    const runInbound = async (inbound: Parameters<typeof runFeishuInbound>[0]['inbound']) => {
-      if (onInbound) {
-        const overridden = await onInbound(inbound);
-        if (overridden) {
-          return overridden;
-        }
-      }
-      return runCoreInbound(inbound, config, context);
-    };
-
+  run: async (input: ChannelRunInput): Promise<void> => {
+    const config = await toChannelConfig(input.config, input.context);
     await runFeishuTransport({
       config,
-      onInbound: (inbound) => runInbound(inbound),
-    });
-  },
-  startSidecars: async (
-    overrides?: unknown,
-    context?: ChannelRunContext,
-    preflightResult?: unknown,
-  ): Promise<SidecarHandle | void> => {
-    const config = (preflightResult as FeishuGatewayConfig | undefined)
-      ?? (await toRuntimeConfig(overrides, context));
-    return startFeishuHeartbeatSidecar({
-      config,
-      onFailureHint: makeFeishuRequestFailureHint,
-      outbound: {
-        sendText: (replyTo, text) => feishuChannel.sendText(replyTo, text, { runtimeConfig: config }),
-      },
+      onInbound: (inbound) => input.binding.onInbound(inbound),
     });
   },
 };

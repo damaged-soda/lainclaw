@@ -2,13 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { Message, Model } from "@mariozechner/pi-ai";
-import { createAgentStateStore } from "../runtime/agentStateStore.js";
 import {
   createSessionAgentManager,
   type SessionAgentFactoryInput,
   type SessionManagedAgent,
 } from "../runtime/sessionAgentManager.js";
-import { withTempHome } from "./helpers.js";
 import type { RequestContext } from "../shared/types.js";
 
 function makeUsageZero() {
@@ -93,7 +91,9 @@ class FakeSessionAgent implements SessionManagedAgent {
   }
 }
 
-function makeRequestContext(overrides: Partial<RequestContext> & Pick<RequestContext, "sessionKey" | "sessionId">): RequestContext {
+function makeRequestContext(
+  overrides: Partial<RequestContext> & Pick<RequestContext, "sessionKey" | "sessionId">,
+): RequestContext {
   return {
     requestId: "req-session-agent-manager",
     createdAt: "2026-03-11T00:00:00.000Z",
@@ -111,131 +111,135 @@ function makeRequestContext(overrides: Partial<RequestContext> & Pick<RequestCon
 }
 
 test("session agent manager reuses the same agent instance within one process", async () => {
-  await withTempHome(async () => {
-    const stateStore = createAgentStateStore();
-    const createdAgents: SessionManagedAgent[] = [];
-    const manager = createSessionAgentManager({
-      stateStore,
-      agentFactory: (input) => {
-        const agent = new FakeSessionAgent(input);
-        createdAgents.push(agent);
-        return agent;
-      },
-    });
-    const model = {} as Model<any>;
-    let firstAgent: SessionManagedAgent | undefined;
-    let secondAgent: SessionManagedAgent | undefined;
-    let firstSource = "";
-    let secondSource = "";
-
-    await manager.runWithSessionAgent(
-      {
-        requestContext: makeRequestContext({
-          sessionKey: "reuse-session",
-          sessionId: "session-1",
-          input: "first",
-          bootstrapMessages: [makeUserMessage("history")],
-        }),
-        systemPrompt: "system",
-        model,
-        tools: [],
-        convertToLlm: async (messages) => messages as Message[],
-      },
-      async (agent, context) => {
-        firstAgent = agent;
-        firstSource = context.source;
-        await agent.prompt(makeUserMessage("first"));
-      },
-    );
-
-    await manager.runWithSessionAgent(
-      {
-        requestContext: makeRequestContext({
-          sessionKey: "reuse-session",
-          sessionId: "session-1",
-          input: "second",
-          bootstrapMessages: [makeUserMessage("should-not-replay")],
-        }),
-        systemPrompt: "system",
-        model,
-        tools: [],
-        convertToLlm: async (messages) => messages as Message[],
-      },
-      async (agent, context) => {
-        secondAgent = agent;
-        secondSource = context.source;
-        assert.equal((agent.state.messages as Message[]).length, 3);
-        await agent.prompt(makeUserMessage("second"));
-      },
-    );
-
-    const snapshot = await stateStore.load("reuse-session");
-
-    assert.equal(createdAgents.length, 1);
-    assert.equal(firstSource, "new");
-    assert.equal(secondSource, "memory");
-    assert.equal(firstAgent, secondAgent);
-    assert.equal(snapshot?.messages.length, 5);
-    assert.equal(snapshot?.sessionId, "session-1");
+  const createdAgents: SessionManagedAgent[] = [];
+  const manager = createSessionAgentManager({
+    agentFactory: (input) => {
+      const agent = new FakeSessionAgent(input);
+      createdAgents.push(agent);
+      return agent;
+    },
   });
+  const model = {} as Model<any>;
+  let firstAgent: SessionManagedAgent | undefined;
+  let secondAgent: SessionManagedAgent | undefined;
+  let firstCache = "";
+  let secondCache = "";
+
+  await manager.run(
+    {
+      requestContext: makeRequestContext({
+        sessionKey: "reuse-session",
+        sessionId: "session-1",
+        input: "first",
+      }),
+      systemPrompt: "system",
+      initialState: {
+        source: "new",
+        systemPrompt: "system",
+        messages: [makeUserMessage("history")],
+      },
+      model,
+      tools: [],
+      convertToLlm: async (messages) => messages as Message[],
+    },
+    async (agent, context) => {
+      firstAgent = agent;
+      firstCache = context.cache;
+      await agent.prompt(makeUserMessage("first"));
+    },
+  );
+
+  const secondRun = await manager.run(
+    {
+      requestContext: makeRequestContext({
+        sessionKey: "reuse-session",
+        sessionId: "session-1",
+        input: "second",
+      }),
+      systemPrompt: "system",
+      initialState: {
+        source: "snapshot",
+        systemPrompt: "stale-system",
+        messages: [makeUserMessage("should-not-replay")],
+      },
+      model,
+      tools: [],
+      convertToLlm: async (messages) => messages as Message[],
+    },
+    async (agent, context) => {
+      secondAgent = agent;
+      secondCache = context.cache;
+      assert.equal((agent.state.messages as Message[]).length, 3);
+      await agent.prompt(makeUserMessage("second"));
+    },
+  );
+
+  assert.equal(createdAgents.length, 1);
+  assert.equal(firstCache, "miss");
+  assert.equal(secondCache, "hit");
+  assert.equal(firstAgent, secondAgent);
+  assert.equal(secondRun.sessionState.messages.length, 5);
+  assert.equal(secondRun.sessionState.systemPrompt, "system");
 });
 
-test("session agent manager restores persisted snapshots after restart", async () => {
-  await withTempHome(async () => {
-    const stateStore = createAgentStateStore();
-    const model = {} as Model<any>;
-    let restoredSource = "";
-
-    const manager1 = createSessionAgentManager({
-      stateStore,
-      agentFactory: (input) => new FakeSessionAgent(input),
-    });
-    await manager1.runWithSessionAgent(
-      {
-        requestContext: makeRequestContext({
-          sessionKey: "restore-session",
-          sessionId: "session-restore",
-          input: "first turn",
-        }),
-        systemPrompt: "system",
-        model,
-        tools: [],
-        convertToLlm: async (messages) => messages as Message[],
-      },
-      async (agent) => {
-        await agent.prompt(makeUserMessage("first turn"));
-      },
-    );
-
-    const manager2 = createSessionAgentManager({
-      stateStore,
-      agentFactory: (input) => new FakeSessionAgent(input),
-    });
-    await manager2.runWithSessionAgent(
-      {
-        requestContext: makeRequestContext({
-          sessionKey: "restore-session",
-          sessionId: "session-restore",
-          input: "second turn",
-          bootstrapMessages: [makeUserMessage("fallback-history")],
-        }),
-        systemPrompt: "system",
-        model,
-        tools: [],
-        convertToLlm: async (messages) => messages as Message[],
-      },
-      async (agent, context) => {
-        restoredSource = context.source;
-        assert.equal((agent.state.messages as Message[]).length, 2);
-        await agent.prompt(makeUserMessage("second turn"));
-      },
-    );
-
-    const snapshot = await stateStore.load("restore-session");
-
-    assert.equal(restoredSource, "snapshot");
-    assert.equal(snapshot?.messages.length, 4);
-    assert.equal(snapshot?.messages[0]?.role, "user");
-    assert.equal(snapshot?.messages[2]?.role, "user");
+test("session agent manager consumes caller-provided restore state on cache miss", async () => {
+  const model = {} as Model<any>;
+  const manager1 = createSessionAgentManager({
+    agentFactory: (input) => new FakeSessionAgent(input),
   });
+  const firstRun = await manager1.run(
+    {
+      requestContext: makeRequestContext({
+        sessionKey: "restore-session",
+        sessionId: "session-restore",
+        input: "first turn",
+      }),
+      systemPrompt: "system",
+      initialState: {
+        source: "new",
+        systemPrompt: "system",
+        messages: [],
+      },
+      model,
+      tools: [],
+      convertToLlm: async (messages) => messages as Message[],
+    },
+    async (agent) => {
+      await agent.prompt(makeUserMessage("first turn"));
+    },
+  );
+
+  const manager2 = createSessionAgentManager({
+    agentFactory: (input) => new FakeSessionAgent(input),
+  });
+  let restoredCache = "";
+
+  const restoredRun = await manager2.run(
+    {
+      requestContext: makeRequestContext({
+        sessionKey: "restore-session",
+        sessionId: "session-restore",
+        input: "second turn",
+      }),
+      systemPrompt: "system",
+      initialState: {
+        source: "snapshot",
+        systemPrompt: firstRun.sessionState.systemPrompt,
+        messages: firstRun.sessionState.messages,
+      },
+      model,
+      tools: [],
+      convertToLlm: async (messages) => messages as Message[],
+    },
+    async (agent, context) => {
+      restoredCache = context.cache;
+      assert.equal((agent.state.messages as Message[]).length, 2);
+      await agent.prompt(makeUserMessage("second turn"));
+    },
+  );
+
+  assert.equal(restoredCache, "miss");
+  assert.equal(restoredRun.sessionState.messages.length, 4);
+  assert.equal(restoredRun.sessionState.messages[0]?.role, "user");
+  assert.equal(restoredRun.sessionState.messages[2]?.role, "user");
 });

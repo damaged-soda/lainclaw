@@ -1,17 +1,22 @@
 import {
-  buildFeishuGatewayConfigMigrationDraft,
-  clearFeishuGatewayConfig,
-  loadCachedFeishuGatewayConfigWithSources,
-  persistFeishuGatewayConfig,
-  resolveFeishuGatewayConfigPath,
+  clearFeishuChannelConfig,
+  loadFeishuChannelConfigWithSources,
+  persistFeishuChannelConfig,
+  type FeishuChannelConfig,
 } from '../../channels/feishu/config.js';
+import { maskConfigValue } from '../../channels/feishu/diagnostics.js';
+import {
+  clearGatewayRuntimeConfig,
+  loadGatewayRuntimeConfigWithSources,
+  persistGatewayRuntimeConfig,
+} from '../../gateway/runtimeConfig.js';
+import { resolveGatewayConfigPath } from '../configFile.js';
 import {
   getGatewayServiceSnapshot,
   resolveGatewayServicePaths,
   stopGatewayService,
   resolveGatewayServiceStatus,
 } from '../../gateway/service.js';
-import { maskConfigValue } from '../../channels/feishu/diagnostics.js';
 import {
   type GatewayParsedCommand,
   type GatewayConfigParsedCommand,
@@ -22,6 +27,27 @@ import {
 import { channelsRegistry, normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
 import { runGatewayServiceRunner } from './serviceRunner.js';
 import type { ChannelRunContext, Channel } from '../../channels/contracts.js';
+import { resolveGatewayChannelBinding } from '../channelBindings.js';
+
+function formatDisplaySection(
+  values: Record<string, unknown>,
+  sources: Record<string, unknown>,
+  options?: {
+    maskedKeys?: string[];
+  },
+): Record<string, { value: unknown; source: unknown }> {
+  const maskedKeys = new Set(options?.maskedKeys ?? []);
+  const output: Record<string, { value: unknown; source: unknown }> = {};
+
+  for (const [key, value] of Object.entries(values)) {
+    output[key] = {
+      value: typeof value === 'string' && maskedKeys.has(key) ? maskConfigValue(value) : value,
+      source: sources[key],
+    };
+  }
+
+  return output;
+}
 
 export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<number> {
   const {
@@ -34,7 +60,7 @@ export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<num
     serviceChild,
     debug,
     serviceArgv,
-    ...overrides
+    config,
   } = parsed;
 
   if (action !== 'start') {
@@ -54,14 +80,14 @@ export async function runGatewayStart(parsed: GatewayParsedCommand): Promise<num
   };
 
   if (channels.length > 1) {
-    await runGatewayServiceForChannels(overrides, serviceContext, channels);
+    await runGatewayServiceForChannels(config ?? {}, serviceContext, channels);
     return 0;
   }
 
   const runtimeChannel = resolveGatewayChannel(channel);
   const runtime = channelsRegistry[runtimeChannel];
 
-  await runChannelRuntime(runtime, runtimeChannel, overrides, {
+  await runChannelRuntime(runtime, runtimeChannel, config, {
     ...serviceContext,
     channel: runtimeChannel,
   });
@@ -90,59 +116,50 @@ export async function runGatewayConfigCommand(parsed: GatewayConfigParsedCommand
     if (Object.keys(parsed.config).length === 0) {
       throw new Error('No gateway config fields provided');
     }
-    await persistFeishuGatewayConfig(
-      parsed.config as Partial<Record<string, unknown>> as Partial<Record<string, unknown>>,
-      parsed.channel,
-    );
+
+    const channelConfig = parsed.config.channelConfig as Partial<FeishuChannelConfig> | undefined;
+    const runtimeConfig = parsed.config.runtimeConfig;
+
+    if (channelConfig && Object.keys(channelConfig).length > 0) {
+      await persistFeishuChannelConfig(channelConfig, parsed.channel);
+    }
+    if (runtimeConfig && Object.keys(runtimeConfig).length > 0) {
+      await persistGatewayRuntimeConfig(runtimeConfig);
+    }
+
     console.log('gateway config updated');
     return 0;
   }
 
   if (parsed.action === 'clear') {
-    await clearFeishuGatewayConfig(parsed.channel);
+    if (parsed.channelProvided && parsed.channel !== 'default') {
+      await clearFeishuChannelConfig(parsed.channel);
+    } else {
+      await clearGatewayRuntimeConfig();
+    }
     console.log('gateway config cleared');
     return 0;
   }
 
-  if (parsed.action === 'migrate') {
-    const draft = await buildFeishuGatewayConfigMigrationDraft(
-      parsed.channelProvided ? parsed.channel : undefined,
-    );
-    console.log(JSON.stringify(draft, null, 2));
-    return 0;
-  }
+  const { runtimeConfig, sources: runtimeSources } = await loadGatewayRuntimeConfigWithSources();
+  const { channelConfig, sources: channelSources } =
+    parsed.channelProvided && parsed.channel !== 'default'
+      ? await loadFeishuChannelConfigWithSources(parsed.channel)
+      : { channelConfig: {}, sources: {} };
 
-  const { config: cached, sources } = await loadCachedFeishuGatewayConfigWithSources(parsed.channel);
-  const configPath = resolveFeishuGatewayConfigPath(parsed.channel);
-  const config = Object.fromEntries(
-    Object.entries(cached).map((entry) => {
-      const key = entry[0];
-      const value = entry[1];
-      if (typeof value === 'string' && (key === 'appId' || key === 'appSecret')) {
-        return [
-          key,
-          {
-            value: maskConfigValue(value),
-            source: sources[key as keyof typeof sources],
-          },
-        ];
-      }
-      return [
-        key,
-        {
-          value,
-          source: sources[key as keyof typeof sources],
-        },
-      ];
-    }),
-  );
-
-  const masked = {
+  console.log(JSON.stringify({
     channel: parsed.channel,
-    configPath,
-    config,
-  };
-  console.log(JSON.stringify(masked, null, 2));
+    configPath: resolveGatewayConfigPath(),
+    channelConfig: formatDisplaySection(
+      channelConfig as Record<string, unknown>,
+      channelSources as Record<string, unknown>,
+      { maskedKeys: ['appId', 'appSecret'] },
+    ),
+    runtimeConfig: formatDisplaySection(
+      runtimeConfig as Record<string, unknown>,
+      runtimeSources as Record<string, unknown>,
+    ),
+  }, null, 2));
   return 0;
 }
 
@@ -185,8 +202,13 @@ export async function runGatewayServiceForChannels(
   if (serviceContext.daemon) {
     for (const channel of normalizedChannels) {
       const runtime = channelsRegistry[channel];
+      const context = { channel } as ChannelRunContext;
+      const binding = await resolveGatewayChannelBinding(channel, runtime, overrides, context);
       if (runtime.preflight) {
-        await runtime.preflight(overrides, { channel } as ChannelRunContext);
+        await runtime.preflight({
+          config: binding.channelConfig,
+          context,
+        });
       }
     }
 
@@ -228,7 +250,7 @@ export async function printGatewayServiceStatus(
 async function runChannelRuntime(
   runtime: Channel,
   channel: GatewayChannel,
-  overrides: GatewayStartOverrides,
+  overrides: GatewayStartOverrides | undefined,
   serviceContext: GatewayServiceRunContext,
 ): Promise<void> {
   const context: ChannelRunContext = {
@@ -236,26 +258,32 @@ async function runChannelRuntime(
     ...(serviceContext.debug === true ? { debug: true } : {}),
   };
   const shouldPreflightInProcess = !serviceContext.daemon || serviceContext.serviceChild === true;
+  const binding = await resolveGatewayChannelBinding(channel, runtime, overrides, context);
 
   const runInProcess = async (): Promise<void> => {
     const preflightResult = shouldPreflightInProcess
-      ? await runtime.preflight?.(overrides, context)
+      ? await runtime.preflight?.({
+        config: binding.channelConfig,
+        context,
+      })
       : undefined;
 
     let sidecarStop: (() => Promise<void> | void) | undefined;
-    if (runtime.startSidecars) {
-      const sidecarHandle = await runtime.startSidecars(overrides, context, preflightResult);
+    if (binding.startSidecars) {
+      const sidecarHandle = await binding.startSidecars(preflightResult);
       if (sidecarHandle) {
         sidecarStop = sidecarHandle.stop;
       }
     }
 
     try {
-      await runtime.run(
-        async () => Promise.resolve(undefined),
-        overrides,
+      await runtime.run({
+        config: binding.channelConfig,
         context,
-      );
+        binding: {
+          onInbound: binding.inboundHandler,
+        },
+      });
     } finally {
       if (sidecarStop) {
         await sidecarStop();
@@ -270,7 +298,10 @@ async function runChannelRuntime(
     runInProcess,
     preflight: async () => {
       if (serviceContext.daemon && runtime.preflight) {
-        await runtime.preflight(overrides, context);
+        await runtime.preflight({
+          config: binding.channelConfig,
+          context,
+        });
       }
     },
   });

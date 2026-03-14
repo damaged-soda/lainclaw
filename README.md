@@ -181,22 +181,13 @@ lainclaw gateway start --app-id <AppID> --app-secret <AppSecret> \
 
 参数会优先来自命令行，未传入时会从环境变量回退，最后从配置作用域文件（默认 `~/.lainclaw/gateway.json`）读取上次配置（如存在）。
 
-可选命令：
-- `gateway config migrate --channel <channel> --dry-run`：仅预览将历史 `<channel>-gateway.json` 映射到 `gateway.json` 的草稿，不写入文件。
-
-确认草稿无误后，可手动清理已不再需要的历史分片文件（本项目不会自动删除）：
-
-```bash
-rm ~/.lainclaw/<channel>-gateway.json
-```
-
 - `LAINCLAW_FEISHU_APP_ID` / `FEISHU_APP_ID`
 - `LAINCLAW_FEISHU_APP_SECRET` / `FEISHU_APP_SECRET`
 - `LAINCLAW_FEISHU_REQUEST_TIMEOUT_MS` / `FEISHU_REQUEST_TIMEOUT_MS`：Feishu API request timeout ms
-- `LAINCLAW_FEISHU_PROVIDER` / `FEISHU_PROVIDER`：运行时 provider 标识（默认不回退）
-- `LAINCLAW_FEISHU_PROFILE_ID` / `FEISHU_PROFILE_ID`
-- `LAINCLAW_FEISHU_WITH_TOOLS` / `FEISHU_WITH_TOOLS`：`true|false`
-- `LAINCLAW_FEISHU_MEMORY` / `FEISHU_MEMORY`：`true|false`
+- `LAINCLAW_GATEWAY_PROVIDER`：运行时 provider 标识
+- `LAINCLAW_GATEWAY_PROFILE_ID`
+- `LAINCLAW_GATEWAY_WITH_TOOLS`：`true|false`
+- `LAINCLAW_GATEWAY_MEMORY`：`true|false`
 - `LAINCLAW_FEISHU_HEARTBEAT_ENABLED` / `FEISHU_HEARTBEAT_ENABLED`：`true|false`
 - `LAINCLAW_FEISHU_HEARTBEAT_INTERVAL_MS` / `FEISHU_HEARTBEAT_INTERVAL_MS`
 - `LAINCLAW_FEISHU_HEARTBEAT_TARGET_OPEN_ID` / `FEISHU_HEARTBEAT_TARGET_OPEN_ID`

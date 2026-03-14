@@ -8,25 +8,18 @@ import {
   buildInboundFailureText,
   runInboundAgentTurn,
 } from './inboundAgent.js';
-
-interface AgentRuntimeContext {
-  provider?: string;
-  profileId?: string;
-  withTools?: boolean;
-  memory?: boolean;
-  debug?: boolean;
-  userId?: string;
-  newSession?: boolean;
-}
+import type { RuntimeAgentEventSink } from '../../shared/types.js';
+import type { GatewayAgentRuntimeContext } from '../runtimeConfig.js';
 
 interface HandleInboundOptions {
-  runtime: AgentRuntimeContext;
+  runtime: GatewayAgentRuntimeContext;
   policyConfig?: unknown;
   onFailureHint?: (rawMessage: string) => string;
+  onAgentEvent?: RuntimeAgentEventSink;
   runAgentFn?: typeof runAgent;
 }
 
-export async function handleInbound(
+export async function runInboundPipeline(
   inbound: InboundMessage,
   options: HandleInboundOptions,
 ): Promise<OutboundMessage | void> {
@@ -60,24 +53,35 @@ export async function handleInbound(
     };
   }
 
-  try {
-    const result = await runInboundAgentTurn({
-      inbound: message,
-      runtime: options.runtime,
-      runAgentFn: options.runAgentFn,
-    });
+  const result = await runInboundAgentTurn({
+    inbound: message,
+    runtime: options.runtime,
+    ...(options.onAgentEvent ? { onAgentEvent: options.onAgentEvent } : {}),
+    runAgentFn: options.runAgentFn,
+  });
 
-    return {
-      requestId: result.requestId,
-      replyTo: result.replyTo,
-      text: result.text,
-    };
+  return {
+    requestId: result.requestId,
+    replyTo: result.replyTo,
+    text: result.text,
+  };
+}
+
+export async function handleInbound(
+  inbound: InboundMessage,
+  options: HandleInboundOptions,
+): Promise<OutboundMessage | void> {
+  try {
+    return await runInboundPipeline(inbound, options);
   } catch (error) {
+    if (inbound.kind !== 'message') {
+      return;
+    }
     const rawMessage = error instanceof Error ? error.message : String(error);
     return {
-      requestId: message.requestId,
-      replyTo: message.replyTo,
-      text: buildInboundFailureText(message, rawMessage, options.onFailureHint),
+      requestId: inbound.requestId,
+      replyTo: inbound.replyTo,
+      text: buildInboundFailureText(inbound, rawMessage, options.onFailureHint),
     };
   }
 }

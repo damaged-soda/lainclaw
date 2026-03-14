@@ -1,16 +1,46 @@
+import type { Message } from "@mariozechner/pi-ai";
 import { runCodexAdapter } from "./codexAdapter.js";
 import { runStubAdapter } from "./stubAdapter.js";
-import type { ProviderResult } from "./stubAdapter.js";
-import type { RequestContext } from "../shared/types.js";
-import type { ContextToolSpec, RuntimeAgentEventSink } from "../shared/types.js";
+import type {
+  ContextToolSpec,
+  RequestContext,
+  RuntimeAgentEventSink,
+  RuntimeContinueReason,
+  RuntimeRunMode,
+} from "../shared/types.js";
+import type { ToolCall, ToolExecutionLog } from "../tools/types.js";
+
+export interface ProviderPreparedState {
+  source: "snapshot" | "transcript" | "new";
+  initialMessages: Message[];
+  initialSystemPrompt?: string;
+}
 
 export interface ProviderRunInput {
   requestContext: RequestContext;
-  route: string;
+  preparedState: ProviderPreparedState;
   withTools: boolean;
   cwd?: string;
   toolSpecs?: ContextToolSpec[];
   onAgentEvent?: RuntimeAgentEventSink;
+}
+
+export interface ProviderResult {
+  route: string;
+  stage: string;
+  result: string;
+  runMode: RuntimeRunMode;
+  continueReason?: RuntimeContinueReason;
+  toolCalls?: ToolCall[];
+  toolResults?: ToolExecutionLog[];
+  assistantMessage?: Message;
+  stopReason?: string;
+  provider: string;
+  profileId: string;
+  sessionState?: {
+    systemPrompt: string;
+    messages: Message[];
+  };
 }
 
 export type RuntimeProvider = (input: ProviderRunInput) => Promise<ProviderResult>;

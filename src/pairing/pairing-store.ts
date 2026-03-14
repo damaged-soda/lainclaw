@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveAuthDirectory } from "../auth/configStore.js";
+import {
+  normalizeGatewayConfigFile as normalizePersistedGatewayConfigFile,
+  resolveGatewayConfigPath,
+  type GatewayConfigFile as PersistedGatewayConfigFile,
+} from "../gateway/configFile.js";
 
 export const DEFAULT_PAIRING_PENDING_TTL_MS = 60 * 60 * 1000;
 export const DEFAULT_PAIRING_PENDING_MAX = 3;
@@ -37,11 +41,9 @@ interface GatewayPairingState {
   channels?: Record<string, GatewayPairingChannelState>;
 }
 
-interface GatewayConfigFile {
-  [key: string]: unknown;
-  version?: number;
+type GatewayConfigFile = Omit<PersistedGatewayConfigFile, "pairing"> & {
   pairing?: GatewayPairingState;
-}
+};
 
 function safeChannelKey(channel: PairingChannel): string {
   const raw = String(channel).trim().toLowerCase();
@@ -54,12 +56,6 @@ function safeChannelKey(channel: PairingChannel): string {
   }
   return safe;
 }
-
-function resolveGatewayConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(resolveAuthDirectory(env.HOME), GATEWAY_CONFIG_FILE);
-}
-
-const GATEWAY_CONFIG_FILE = "gateway.json";
 
 const storeLocks = new Map<string, Promise<void>>();
 
@@ -150,14 +146,9 @@ function normalizeGatewayPairingState(raw: unknown): GatewayPairingState {
 }
 
 function normalizeGatewayConfigFile(raw: unknown): GatewayConfigFile {
-  if (!isRecord(raw)) {
-    return { ...DEFAULT_GATEWAY_CONFIG_FILE };
-  }
-  const parsed = raw as GatewayConfigFile;
-  const version = Number.isFinite(parsed.version as number) ? parsed.version : CURRENT_VERSION;
+  const parsed = normalizePersistedGatewayConfigFile(raw);
   return {
     ...parsed,
-    version,
     pairing: normalizeGatewayPairingState(parsed.pairing),
   };
 }
@@ -457,7 +448,7 @@ async function updateAllowFromStoreEntry(
   },
 ): Promise<{ changed: boolean; allowFrom: string[] }> {
   const env = params.env ?? process.env;
-  const filePath = resolveGatewayConfigPath(env);
+  const filePath = resolveGatewayConfigPath(env.HOME);
   const normalizedAccountId = params.accountId
     ? normalizePairingAccountId(params.accountId) || undefined
     : undefined;
@@ -482,7 +473,7 @@ export async function readChannelAllowFromStore(
   env: NodeJS.ProcessEnv = process.env,
   accountId?: string,
 ): Promise<string[]> {
-  const filePath = resolveGatewayConfigPath(env);
+  const filePath = resolveGatewayConfigPath(env.HOME);
   const normalizedAccountId = normalizePairingAccountId(accountId);
   if (!normalizedAccountId) {
     return readAllowFromState(filePath, channel);
@@ -534,7 +525,7 @@ export async function listChannelPairingRequests(
   accountId?: string,
   limits?: PairingStoreLimits,
 ): Promise<PairingRequest[]> {
-  const filePath = resolveGatewayConfigPath(env);
+  const filePath = resolveGatewayConfigPath(env.HOME);
   const { ttlMs, maxPending } = resolvePendingLimits(limits);
   return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {
     const nowMs = Date.now();
@@ -570,7 +561,7 @@ export async function upsertChannelPairingRequest(params: {
   limits?: PairingStoreLimits;
 }): Promise<{ code: string; created: boolean }> {
   const env = params.env ?? process.env;
-  const filePath = resolveGatewayConfigPath(env);
+  const filePath = resolveGatewayConfigPath(env.HOME);
   const id = trimText(params.id);
   if (!id) {
     throw new Error("invalid pairing sender id");
@@ -664,7 +655,7 @@ export async function approveChannelPairingCode(params: {
     return null;
   }
 
-  const filePath = resolveGatewayConfigPath(env);
+  const filePath = resolveGatewayConfigPath(env.HOME);
   const { ttlMs } = resolvePendingLimits(params.limits);
 
   return withStoreLock(filePath, DEFAULT_GATEWAY_CONFIG_FILE, async () => {

@@ -45,8 +45,8 @@ test("core coordinator keeps transcript focused on readable turn history", async
               },
             },
           ],
-          provider: input.provider,
-          profileId: input.profileId,
+          provider: input.requestContext.provider,
+          profileId: input.requestContext.profileId,
         }),
       }),
     });
