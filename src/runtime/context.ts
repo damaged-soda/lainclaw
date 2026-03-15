@@ -295,7 +295,49 @@ export function trimAgentContextMessages(
   if (messages.length <= limit) {
     return messages;
   }
-  return messages.slice(-limit);
+
+  const toolCallOriginById = new Map<string, number>();
+  for (const [index, message] of messages.entries()) {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) {
+      continue;
+    }
+
+    for (const block of message.content) {
+      if (!block || typeof block !== "object" || block.type !== "toolCall") {
+        continue;
+      }
+      if (typeof block.id === "string" && block.id.trim().length > 0) {
+        toolCallOriginById.set(block.id, index);
+      }
+    }
+  }
+
+  let startIndex = Math.max(0, messages.length - limit);
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+
+    for (let index = startIndex; index < messages.length; index += 1) {
+      const message = messages[index];
+      if (message.role !== "toolResult") {
+        continue;
+      }
+
+      const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId.trim() : "";
+      if (!toolCallId) {
+        continue;
+      }
+
+      const originIndex = toolCallOriginById.get(toolCallId);
+      if (typeof originIndex === "number" && originIndex < startIndex) {
+        startIndex = originIndex;
+        expanded = true;
+        break;
+      }
+    }
+  }
+
+  return messages.slice(startIndex);
 }
 
 export function convertAgentMessagesToLlm(messages: AgentMessage[]): Message[] {

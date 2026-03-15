@@ -133,5 +133,3 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
 
   return coordinator;
 }
-
-export const createCoordinator = createCoreCoordinator;

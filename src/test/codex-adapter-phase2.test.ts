@@ -407,6 +407,99 @@ function buildFailingToolConversation(message: Message, runtimeToolName: string)
   };
 }
 
+function buildErroredNoTextConversation(message: Message, runtimeToolName: string): ScriptedConversation {
+  const userMessage = message;
+  const toolCallId = "tool-call-no-text-error";
+  const toolArgs = {
+    command: "curl https://alpha123.uk/api/data?fresh=1",
+  };
+  const assistantToolCall = makeAssistantMessage([
+    {
+      type: "toolCall",
+      id: toolCallId,
+      name: runtimeToolName,
+      arguments: toolArgs,
+    },
+  ], "toolUse");
+  const toolResult = makeToolResultMessage(
+    toolCallId,
+    runtimeToolName,
+    "fetched api payload",
+    false,
+    8,
+    "shell exec",
+  );
+  const terminalAssistant = {
+    ...makeAssistantMessage([], "error"),
+    errorMessage: "No tool call found for function call output with call_id call-alpha123.",
+  } as Message;
+
+  return {
+    persistedMessages: [userMessage, assistantToolCall, toolResult as Message, terminalAssistant],
+    events: [
+      { type: "agent_start" },
+      { type: "turn_start" },
+      { type: "message_start", message: userMessage },
+      { type: "message_end", message: userMessage },
+      { type: "message_start", message: assistantToolCall },
+      {
+        type: "message_update",
+        message: assistantToolCall,
+        assistantMessageEvent: {
+          type: "toolcall_end",
+          contentIndex: 0,
+          toolCall: assistantToolCall.content[0] as Extract<
+            Extract<Message, { role: "assistant" }>["content"][number],
+            { type: "toolCall" }
+          >,
+          partial: assistantToolCall as Extract<Message, { role: "assistant" }>,
+        },
+      },
+      { type: "message_end", message: assistantToolCall },
+      {
+        type: "tool_execution_start",
+        toolCallId,
+        toolName: runtimeToolName,
+        args: toolArgs,
+      },
+      {
+        type: "tool_execution_end",
+        toolCallId,
+        toolName: runtimeToolName,
+        result: {
+          content: [{ type: "text", text: "fetched api payload" }],
+          details: {
+            meta: {
+              tool: "shell exec",
+              durationMs: 8,
+            },
+          },
+        },
+        isError: false,
+      },
+      { type: "message_start", message: toolResult },
+      { type: "message_end", message: toolResult },
+      {
+        type: "turn_end",
+        message: assistantToolCall,
+        toolResults: [toolResult],
+      },
+      { type: "turn_start" },
+      { type: "message_start", message: terminalAssistant },
+      { type: "message_end", message: terminalAssistant },
+      {
+        type: "turn_end",
+        message: terminalAssistant,
+        toolResults: [],
+      },
+      {
+        type: "agent_end",
+        messages: [userMessage, assistantToolCall, toolResult as Message, terminalAssistant],
+      },
+    ],
+  };
+}
+
 test("codex adapter uses AgentEvent order and event-derived tool state for successful tool turns", async () => {
   await withTempHome(async () => {
     const observedEvents: string[] = [];
@@ -553,5 +646,63 @@ test("codex adapter accumulates tool failures from AgentEvent without relying on
     assert.equal(result.toolResults?.[0]?.result.error?.tool, "shell exec");
     assert.equal(result.toolResults?.[0]?.result.error?.message, "permission denied");
     assert.equal(result.toolResults?.[0]?.result.meta?.durationMs, 3);
+  });
+});
+
+test("codex adapter does not echo user input when the model ends with stopReason=error and no text", async () => {
+  await withTempHome(async () => {
+    const manager = createSessionAgentManager({
+      agentFactory: (input) => new ScriptedEventAgent(input, (message) =>
+        buildErroredNoTextConversation(message, "shell_exec")),
+    });
+    const fakeGetApiContext: typeof getOpenAICodexApiContext = async () =>
+      ({
+        apiKey: "test-key",
+        profile: {
+          id: "default",
+        },
+      }) as Awaited<ReturnType<typeof getOpenAICodexApiContext>>;
+    const fakeGetModel: typeof getModel = () => ({} as Model<any>);
+    const runCodexAdapter = createRunCodexAdapter({
+      sessionAgentManager: manager,
+      getApiContextFn: fakeGetApiContext,
+      getModelFn: fakeGetModel,
+    });
+
+    const result = await runCodexAdapter({
+      withTools: true,
+      toolSpecs: [
+        {
+          name: "shell exec",
+          description: "Run a shell command",
+          inputSchema: {
+            type: "object",
+            required: ["command"],
+            properties: {
+              command: { type: "string" },
+            },
+          },
+        },
+      ],
+      preparedState: makePreparedState(),
+      requestContext: {
+        ...makeRequestContext({
+          requestId: "req-event-no-text-error",
+          input: "please fetch alpha123",
+          sessionKey: "event-no-text-error-session",
+          sessionId: "event-no-text-error-session-id",
+        }),
+      },
+    });
+
+    assert.equal(
+      result.result,
+      "No tool call found for function call output with call_id call-alpha123.",
+    );
+    assert.notEqual(result.result, "please fetch alpha123");
+    assert.equal(result.stopReason, "error");
+    assert.equal(result.stage, "adapter.openai-codex.default.failed");
+    assert.equal(result.toolCalls?.length, 1);
+    assert.equal(result.toolResults?.[0]?.result.ok, true);
   });
 });

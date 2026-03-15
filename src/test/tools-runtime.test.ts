@@ -5,6 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { executeTool } from "../tools/executor.js";
 import { listTools } from "../tools/registry.js";
+import { resolveBuiltinSkillsDir } from "../skills/index.js";
 
 async function withTempWorkspace<T>(fn: (cwd: string) => Promise<T>): Promise<T> {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "lainclaw-tools-test-"));
@@ -142,5 +143,29 @@ test("exec and process manage background sessions within the same session scope"
       exitCode: 0,
       exitSignal: null,
     });
+  });
+});
+
+test("read can access built-in skill files outside the current workspace", async () => {
+  await withTempWorkspace(async (cwd) => {
+    const context = createContext(cwd);
+    const builtInSkillPath = path.join(
+      resolveBuiltinSkillsDir(),
+      "alpha123-airdrop-digest",
+      "SKILL.md",
+    );
+
+    const readResult = await executeTool(
+      {
+        id: "read-skill-1",
+        name: "read",
+        args: { path: builtInSkillPath, limit: 40 },
+      },
+      context,
+    );
+
+    assert.equal(readResult.result.ok, true);
+    assert.match(readResult.result.content ?? "", /alpha123-airdrop-digest/);
+    assert.match(readResult.result.content ?? "", /今日空投/);
   });
 });

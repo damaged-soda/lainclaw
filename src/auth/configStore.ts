@@ -108,5 +108,3 @@ export async function saveAuthStore(store: AuthStore): Promise<void> {
   });
   await fs.rename(tempFile, authFile);
 }
-
-export { CURRENT_VERSION };

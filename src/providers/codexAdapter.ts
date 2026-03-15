@@ -13,7 +13,7 @@ import { isLangfuseTracingReady } from "../observability/langfuse.js";
 import { createCodexAgentEventAccumulator } from "./codex/agentEventAccumulator.js";
 import { toText } from "./codex/messageText.js";
 import { runCodexSession } from "./codex/sessionRun.js";
-import { OPENAI_CODEX_SYSTEM_PROMPT } from "./codex/systemPrompt.js";
+import { BASE_SYSTEM_PROMPT } from "../prompt/systemPrompt.js";
 import { createCodexToolRuntime } from "./codex/toolRuntime.js";
 
 function isAbortError(error: unknown): error is Error {
@@ -33,6 +33,50 @@ function shouldPrefixResponse(profileId: string, provider: string): string {
     return "";
   }
   return `[${provider}:${profileId}] `;
+}
+
+function hasText(value: string | undefined): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function resolveEmptyResponseText(input: {
+  toolErrorMessage?: string;
+  assistantErrorMessage?: string;
+  runErrorMessage?: string;
+  stopReason?: string;
+}): { text: string; source: "tool_error" | "assistant_error" | "runtime_error" | "stop_reason" | "empty_response" } {
+  if (hasText(input.toolErrorMessage)) {
+    return {
+      text: input.toolErrorMessage,
+      source: "tool_error",
+    };
+  }
+
+  if (hasText(input.assistantErrorMessage)) {
+    return {
+      text: input.assistantErrorMessage,
+      source: "assistant_error",
+    };
+  }
+
+  if (hasText(input.runErrorMessage)) {
+    return {
+      text: input.runErrorMessage,
+      source: "runtime_error",
+    };
+  }
+
+  if (hasText(input.stopReason)) {
+    return {
+      text: `Model stopped with stopReason=${input.stopReason} before returning a text response.`,
+      source: "stop_reason",
+    };
+  }
+
+  return {
+    text: "Model finished without returning a text response.",
+    source: "empty_response",
+  };
 }
 
 function normalizeProvider(raw: string): string {
@@ -95,7 +139,7 @@ export function createRunCodexAdapter(
     }
 
     const profileId = profile.id;
-    const systemPrompt = requestContext.systemPrompt ?? OPENAI_CODEX_SYSTEM_PROMPT;
+    const systemPrompt = requestContext.systemPrompt ?? BASE_SYSTEM_PROMPT;
 
     writeDebugLogIfEnabled(requestContext.debug, "provider.codex.system_prompt_attached", {
       requestId,
@@ -143,19 +187,53 @@ export function createRunCodexAdapter(
     const resolvedFinalMessage = eventState.finalMessage;
     const responsePrefix = shouldPrefixResponse(profile.id, provider);
     const responseText = toText(resolvedFinalMessage);
+    const stopReason = eventState.stopReason;
+    const adapterFailed = failed || stopReason === "error";
     const resolvedToolCalls = eventState.toolCalls;
     const resolvedToolResults = eventState.toolResults;
+    const assistantErrorMessage =
+      resolvedFinalMessage
+      && typeof resolvedFinalMessage === "object"
+      && "errorMessage" in resolvedFinalMessage
+      && hasText((resolvedFinalMessage as { errorMessage?: string }).errorMessage)
+        ? (resolvedFinalMessage as { errorMessage: string }).errorMessage
+        : undefined;
+    const fallbackResponse = hasText(responseText)
+      ? undefined
+      : resolveEmptyResponseText({
+        toolErrorMessage: primaryToolError?.message,
+        assistantErrorMessage,
+        runErrorMessage: sessionRun.runErr?.message,
+        stopReason,
+      });
+    const resolvedResponseText = hasText(responseText) ? responseText : fallbackResponse.text;
+
+    if (!hasText(responseText)) {
+      writeDebugLogIfEnabled(requestContext.debug, "provider.codex.empty_response_fallback", {
+        requestId,
+        sessionKey: requestContext.sessionKey,
+        sessionId: requestContext.sessionId,
+        provider,
+        profileId,
+        stopReason: stopReason ?? "unknown",
+        fallbackSource: fallbackResponse?.source ?? "unknown",
+        hasRunError: failed,
+        hasToolError: Boolean(primaryToolError),
+        toolCallCount: resolvedToolCalls.length,
+        toolResultCount: resolvedToolResults.length,
+      });
+    }
 
     return {
       route,
-      stage: getAdapterStage(route, profileId, failed),
-      result: `${responsePrefix}${responseText || requestContext.input}`,
+      stage: getAdapterStage(route, profileId, adapterFailed),
+      result: `${responsePrefix}${resolvedResponseText}`,
       runMode: requestContext.runMode,
       ...(requestContext.continueReason ? { continueReason: requestContext.continueReason } : {}),
       toolCalls: resolvedToolCalls.length > 0 ? resolvedToolCalls : undefined,
       toolResults: resolvedToolResults.length > 0 ? resolvedToolResults : undefined,
       assistantMessage: resolvedFinalMessage,
-      stopReason: failed ? "tool_error_or_runtime_error" : eventState.stopReason,
+      stopReason: failed ? "tool_error_or_runtime_error" : stopReason,
       provider,
       profileId,
       ...(sessionRun.sessionState ? { sessionState: sessionRun.sessionState } : {}),

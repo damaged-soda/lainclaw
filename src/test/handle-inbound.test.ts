@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { handleInbound, resolveBuiltinInboundCommand } from "../gateway/handlers/handleInbound.js";
-import { runInboundAgentTurn } from "../gateway/handlers/inboundAgent.js";
+import { handleInbound } from "../gateway/handlers/handleInbound.js";
+import { resolveBuiltinInboundCommand, runInboundAgentTurn } from "../gateway/handlers/inboundAgent.js";
 import type { InboundMessage } from "../channels/contracts.js";
 import type { RuntimeAgentEvent } from "../shared/types.js";
 

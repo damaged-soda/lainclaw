@@ -2,6 +2,7 @@ import {
   buildRuntimeRequestContext,
   contextMessagesFromHistory,
 } from "../../runtime/context.js";
+import { buildSystemPrompt } from "../../prompt/systemPrompt.js";
 import {
   agentStateStore,
   normalizePersistedMessages,
@@ -63,6 +64,12 @@ export async function prepareCoreTurn(
     source,
     initialMessages,
   });
+  const resolvedCwd = input.cwd ?? process.cwd();
+  const systemPrompt = await buildSystemPrompt({
+    cwd: resolvedCwd,
+    ...(typeof input.systemPrompt === "string" ? { basePrompt: input.systemPrompt } : {}),
+  });
+
   const runtimeContext = buildRuntimeRequestContext({
     requestId: input.requestId,
     createdAt: input.createdAt,
@@ -74,7 +81,7 @@ export async function prepareCoreTurn(
     provider: input.provider,
     profileId: input.profileId,
     withTools: input.withTools,
-    ...(typeof input.systemPrompt === "string" ? { systemPrompt: input.systemPrompt } : {}),
+    systemPrompt,
     runMode: resolvedRunMode.runMode,
     ...(resolvedRunMode.continueReason
       ? { continueReason: resolvedRunMode.continueReason }
@@ -96,7 +103,7 @@ export async function prepareCoreTurn(
         ...(initialSystemPrompt ? { initialSystemPrompt } : {}),
       },
       withTools: input.withTools,
-      ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
+      cwd: resolvedCwd,
     },
   };
 }

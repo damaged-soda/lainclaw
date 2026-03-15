@@ -14,5 +14,3 @@ export const localChannel: Channel = {
     await runLocalTransport(input.onInbound);
   },
 };
-
-export { resolveLocalGatewayPathsForTests } from './transport.js';

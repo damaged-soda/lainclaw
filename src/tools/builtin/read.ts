@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import { ToolContext, ToolSpec } from "../types.js";
 import { resolveWorkspacePath } from "../pathGuards.js";
+import { resolveSkillReadRoots } from "../../skills/index.js";
 
 const DEFAULT_LIMIT = 200;
 const DEFAULT_MAX_BYTES = 200 * 1024;
@@ -91,7 +92,8 @@ export const readTool: ToolSpec = {
         : DEFAULT_MAX_BYTES;
 
     try {
-      const targetPath = await resolveWorkspacePath(context.cwd || process.cwd(), rawPath);
+      const cwd = context.cwd || process.cwd();
+      const targetPath = await resolveWorkspacePath(cwd, rawPath, resolveSkillReadRoots(cwd));
       const stats = await fs.stat(targetPath);
       if (!stats.isFile()) {
         return {

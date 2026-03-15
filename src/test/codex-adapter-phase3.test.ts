@@ -9,7 +9,7 @@ import {
   type SessionAgentFactoryInput,
   type SessionManagedAgent,
 } from "../runtime/sessionAgentManager.js";
-import { MEMORY_CONTEXT_PREFIX } from "../runtime/context.js";
+import { MEMORY_CONTEXT_PREFIX, trimAgentContextMessages } from "../runtime/context.js";
 import { withTempHome } from "./helpers.js";
 import type { RequestContext } from "../shared/types.js";
 
@@ -50,6 +50,30 @@ function makeAssistantMessage(
     model: "gpt-codex",
     usage: makeUsageZero(),
     stopReason,
+    timestamp: Date.now(),
+  } as Message;
+}
+
+function makeAssistantToolCallMessage(
+  toolCallId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Message {
+  return {
+    role: "assistant",
+    content: [
+      {
+        type: "toolCall",
+        id: toolCallId,
+        name: toolName,
+        arguments: args,
+      },
+    ],
+    api: "openai-codex-responses",
+    provider: "openai-codex",
+    model: "gpt-codex",
+    usage: makeUsageZero(),
+    stopReason: "toolUse",
     timestamp: Date.now(),
   } as Message;
 }
@@ -281,6 +305,33 @@ test("transformContext trims long prepared transcript state to the configured co
       "latest input",
     ]);
   });
+});
+
+test("trimAgentContextMessages keeps assistant tool calls paired with retained tool results", () => {
+  const toolCallId = "call-alpha|fc_alpha";
+  const messages = [
+    makeUserMessage("alpha123"),
+    makeAssistantToolCallMessage(toolCallId, "read", {
+      path: "/tmp/alpha123-skill.md",
+    }),
+    makeToolResultMessage(toolCallId, "read", "skill body") as Message,
+    makeAssistantMessage("继续分析页面"),
+    makeUserMessage("下一步"),
+    makeAssistantMessage("继续抓取"),
+  ];
+
+  const trimmed = trimAgentContextMessages(messages, 4);
+  const toolCallIndex = trimmed.findIndex((message) =>
+    message.role === "assistant"
+    && Array.isArray(message.content)
+    && message.content.some((block) => block.type === "toolCall" && block.id === toolCallId));
+  const toolResultIndex = trimmed.findIndex((message) =>
+    message.role === "toolResult" && message.toolCallId === toolCallId);
+
+  assert.equal(toolCallIndex >= 0, true);
+  assert.equal(toolResultIndex >= 0, true);
+  assert.equal(toolCallIndex < toolResultIndex, true);
+  assert.equal(trimmed.length, 5);
 });
 
 test("memory is injected only through transformContext and prepared snapshot state wins over transcript fallback", async () => {

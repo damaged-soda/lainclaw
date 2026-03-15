@@ -1,11 +1,13 @@
 import {
   getGatewayServiceSnapshot,
+} from '../../gateway/serviceController.js';
+import { spawnGatewayServiceProcess } from '../../gateway/serviceProcess.js';
+import {
   resolveGatewayServicePaths,
-  spawnGatewayServiceProcess,
-  writeGatewayServiceState,
   type GatewayServicePaths,
   type GatewayServiceState,
-} from '../../gateway/service.js';
+} from '../../gateway/servicePaths.js';
+import { writeGatewayServiceState } from '../../gateway/serviceState.js';
 import { type GatewayChannel } from './contracts.js';
 import type { GatewayServiceRunContext } from './contracts.js';
 

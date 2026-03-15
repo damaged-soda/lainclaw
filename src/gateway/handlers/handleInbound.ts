@@ -55,5 +55,3 @@ export async function handleInbound(
     };
   }
 }
-
-export { resolveBuiltinInboundCommand } from './inboundAgent.js';

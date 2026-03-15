@@ -46,5 +46,3 @@ export function buildProgram(): Command {
 
   return program;
 }
-
-export { Command };

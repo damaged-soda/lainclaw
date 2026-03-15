@@ -10,13 +10,9 @@ import {
   loadGatewayRuntimeConfigWithSources,
   persistGatewayRuntimeConfig,
 } from '../../gateway/runtimeConfig.js';
+import { getGatewayServiceSnapshot, resolveGatewayServiceStatus, stopGatewayService } from '../../gateway/serviceController.js';
+import { resolveGatewayServicePaths } from '../../gateway/servicePaths.js';
 import { resolveGatewayConfigPath } from '../configFile.js';
-import {
-  getGatewayServiceSnapshot,
-  resolveGatewayServicePaths,
-  stopGatewayService,
-  resolveGatewayServiceStatus,
-} from '../../gateway/service.js';
 import {
   type GatewayParsedCommand,
   type GatewayConfigParsedCommand,

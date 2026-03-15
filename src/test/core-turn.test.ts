@@ -4,15 +4,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Message, ToolResultMessage } from "@mariozechner/pi-ai";
 import type { CoreSessionPort, CoreSessionRecord } from "../core/contracts.js";
-import {
-  commitCoreTurn,
-  prepareCoreTurn,
-  type PreparedTurn,
-} from "../core/turn/index.js";
+import { commitCoreTurn } from "../core/turn/commit.js";
+import type { PreparedTurn } from "../core/turn/contracts.js";
+import { prepareCoreTurn } from "../core/turn/prepare.js";
 import type { ProviderResult } from "../providers/registry.js";
 import { createSessionAdapter } from "../sessions/adapter.js";
 import { createAgentStateStore } from "../sessions/agentSnapshotStore.js";
 import { withTempHome } from "./helpers.js";
+import { resolveBuiltinSkillsDir } from "../skills/index.js";
 
 function makeUsageZero() {
   return {
@@ -184,6 +183,38 @@ test("core turn ignores invalid snapshots and falls back to transcript history",
     assert.equal(prepared.providerInput.preparedState.initialMessages.length, 2);
     assert.equal(prepared.providerInput.preparedState.initialMessages[0]?.role, "user");
     assert.equal(prepared.providerInput.requestContext.bootstrapMessages?.length ?? 0, 2);
+  });
+});
+
+test("core turn injects available skills into the system prompt", async () => {
+  await withTempHome(async () => {
+    const sessionPort = createSessionAdapter();
+    const stateStore = createAgentStateStore();
+
+    const prepared = await prepareCoreTurn(
+      {
+        requestId: "req-core-turn-skills",
+        createdAt: "2026-03-15T00:00:00.000Z",
+        input: "请用 alpha123 skill 看一下今日空投和空投预告",
+        sessionKey: "core-turn-skills",
+        provider: "openai-codex",
+        profileId: "default",
+        withTools: true,
+      },
+      {
+        sessionPort,
+        stateStore,
+      },
+    );
+
+    const systemPrompt = prepared.providerInput.requestContext.systemPrompt ?? "";
+    assert.match(systemPrompt, /## Skills/);
+    assert.match(systemPrompt, /<available_skills>/);
+    assert.match(systemPrompt, /alpha123-airdrop-digest/);
+    assert.match(
+      systemPrompt,
+      new RegExp(resolveBuiltinSkillsDir().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
   });
 });
 

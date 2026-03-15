@@ -309,20 +309,3 @@ export async function runLocalTransport(inboundHandler: InboundHandler): Promise
     console.log(`[local] shutdown complete, outbox=${outboxPath}`);
   }
 }
-
-export function resolveLocalGatewayDir(home = os.homedir()): string {
-  return resolveLocalGatewayDirectory(home);
-}
-
-export function resolveLocalGatewayPathsForTests(): {
-  homeDir: string;
-  inboxPath: string;
-  outboxPath: string;
-} {
-  const homeDir = resolveLocalGatewayDir();
-  return {
-    homeDir,
-    inboxPath: resolveInboxPath(),
-    outboxPath: resolveOutboxPath(),
-  };
-}
