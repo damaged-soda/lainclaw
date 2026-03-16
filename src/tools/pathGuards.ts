@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 function isSubpath(rootPath: string, candidatePath: string): boolean {
@@ -25,8 +26,18 @@ async function resolveExistingPath(targetPath: string): Promise<string> {
   }
 }
 
+function expandHomePath(inputPath: string): string {
+  if (inputPath === "~") {
+    return os.homedir();
+  }
+  if (inputPath.startsWith("~/")) {
+    return path.join(os.homedir(), inputPath.slice(2));
+  }
+  return inputPath;
+}
+
 export function resolvePathFromCwd(cwd: string, inputPath: string): string {
-  const value = inputPath.trim();
+  const value = expandHomePath(inputPath.trim());
   return path.isAbsolute(value) ? path.resolve(value) : path.resolve(cwd, value);
 }
 

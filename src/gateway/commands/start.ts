@@ -23,7 +23,12 @@ import {
 import { channelsRegistry, normalizeGatewayChannels, resolveGatewayChannel } from './channelRegistry.js';
 import { runGatewayServiceRunner } from './serviceRunner.js';
 import type { ChannelRunContext, Channel } from '../../channels/contracts.js';
-import { resolveGatewayChannelBinding } from '../channelBindings.js';
+import {
+  resolveGatewayChannelBinding,
+  type ResolvedGatewayChannelBinding,
+} from '../channelBindings.js';
+import { clearOutboundChannels, registerOutboundChannel } from '../../tools/outboundRegistry.js';
+import { startHeartbeatRunner } from '../heartbeatRunner.js';
 
 function formatDisplaySection(
   values: Record<string, unknown>,
@@ -195,15 +200,16 @@ export async function runGatewayServiceForChannels(
     throw new Error('At least one gateway channel is required');
   }
 
+  const resolvedChannels = await Promise.all(
+    normalizedChannels.map((channel) => resolveGatewayRuntimeChannel(channel, overrides, serviceContext)),
+  );
+
   if (serviceContext.daemon) {
-    for (const channel of normalizedChannels) {
-      const runtime = channelsRegistry[channel];
-      const context = { channel } as ChannelRunContext;
-      const binding = await resolveGatewayChannelBinding(channel, runtime, overrides, context);
-      if (runtime.preflight) {
-        await runtime.preflight({
-          config: binding.channelConfig,
-          context,
+    for (const resolved of resolvedChannels) {
+      if (resolved.runtime.preflight) {
+        await resolved.runtime.preflight({
+          config: resolved.binding.channelConfig,
+          context: resolved.context,
         });
       }
     }
@@ -215,25 +221,12 @@ export async function runGatewayServiceForChannels(
       },
       stateChannel: 'gateway',
       stateChannels: normalizedChannels,
-      runInProcess: async () => Promise.resolve(),
+      runInProcess: async () => runGatewayRuntimesWithHeartbeat(resolvedChannels, serviceContext),
     });
     return;
   }
 
-  await Promise.all(
-    normalizedChannels.map((channel) => {
-      const runtime = channelsRegistry[channel];
-      return runChannelRuntime(
-        runtime,
-        channel,
-        overrides,
-        {
-          ...serviceContext,
-          channel,
-        },
-      );
-    }),
-  );
+  await runGatewayRuntimesWithHeartbeat(resolvedChannels, serviceContext);
 }
 
 export async function printGatewayServiceStatus(
@@ -249,26 +242,10 @@ async function runChannelRuntime(
   overrides: GatewayStartOverrides | undefined,
   serviceContext: GatewayServiceRunContext,
 ): Promise<void> {
-  const context: ChannelRunContext = {
-    channel,
-    ...(serviceContext.debug === true ? { debug: true } : {}),
-  };
-  const shouldPreflightInProcess = !serviceContext.daemon || serviceContext.serviceChild === true;
-  const binding = await resolveGatewayChannelBinding(channel, runtime, overrides, context);
+  const resolved = await resolveGatewayRuntimeChannel(channel, overrides, serviceContext, runtime);
 
   const runInProcess = async (): Promise<void> => {
-    if (shouldPreflightInProcess) {
-      await runtime.preflight?.({
-        config: binding.channelConfig,
-        context,
-      });
-    }
-
-    await runtime.run({
-      config: binding.channelConfig,
-      context,
-      onInbound: binding.inboundHandler,
-    });
+    await runGatewayRuntimesWithHeartbeat([resolved], serviceContext);
   };
 
   await runGatewayServiceRunner({
@@ -277,12 +254,89 @@ async function runChannelRuntime(
     stateChannels: [channel],
     runInProcess,
     preflight: async () => {
-      if (serviceContext.daemon && runtime.preflight) {
-        await runtime.preflight({
-          config: binding.channelConfig,
-          context,
+      if (serviceContext.daemon && resolved.runtime.preflight) {
+        await resolved.runtime.preflight({
+          config: resolved.binding.channelConfig,
+          context: resolved.context,
         });
       }
     },
   });
+}
+
+interface ResolvedGatewayRuntimeChannel {
+  channel: GatewayChannel;
+  runtime: Channel;
+  binding: ResolvedGatewayChannelBinding;
+  context: ChannelRunContext;
+}
+
+async function resolveGatewayRuntimeChannel(
+  channel: GatewayChannel,
+  overrides: GatewayStartOverrides | undefined,
+  serviceContext: GatewayServiceRunContext,
+  runtime = channelsRegistry[channel],
+): Promise<ResolvedGatewayRuntimeChannel> {
+  const context: ChannelRunContext = {
+    channel,
+    ...(serviceContext.debug === true ? { debug: true } : {}),
+  };
+  const binding = await resolveGatewayChannelBinding(channel, runtime, overrides, context);
+  return {
+    channel,
+    runtime,
+    binding,
+    context,
+  };
+}
+
+function registerGatewayOutbounds(channels: ResolvedGatewayRuntimeChannel[]): void {
+  clearOutboundChannels();
+  for (const resolved of channels) {
+    if (!resolved.binding.outbound) {
+      continue;
+    }
+    registerOutboundChannel(resolved.channel, resolved.binding.outbound);
+  }
+}
+
+async function runGatewayRuntimesWithHeartbeat(
+  channels: ResolvedGatewayRuntimeChannel[],
+  serviceContext: GatewayServiceRunContext,
+): Promise<void> {
+  if (channels.length === 0) {
+    return;
+  }
+
+  const shouldPreflightInProcess = !serviceContext.daemon;
+  registerGatewayOutbounds(channels);
+  const heartbeat = startHeartbeatRunner({
+    cwd: process.cwd(),
+    runtime: {
+      ...channels[0].binding.runtimeConfig,
+      ...(serviceContext.debug === true ? { debug: true } : {}),
+    },
+  });
+
+  try {
+    await Promise.all(
+      channels.map(async (resolved) => {
+        if (shouldPreflightInProcess) {
+          await resolved.runtime.preflight?.({
+            config: resolved.binding.channelConfig,
+            context: resolved.context,
+          });
+        }
+
+        await resolved.runtime.run({
+          config: resolved.binding.channelConfig,
+          context: resolved.context,
+          onInbound: resolved.binding.inboundHandler,
+        });
+      }),
+    );
+  } finally {
+    heartbeat.stop();
+    clearOutboundChannels();
+  }
 }

@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { createHmac } from "node:crypto";
 import { type FeishuChannelConfig } from "./config.js";
 
 interface FeishuTokenResponse {
@@ -26,6 +27,7 @@ type FeishuReceiveIdType = "open_id" | "user_id" | "chat_id";
 
 const APP_ACCESS_TOKEN_ENDPOINT = "https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal";
 const SEND_MESSAGE_ENDPOINT = "https://open.feishu.cn/open-apis/im/v1/messages";
+const WEBHOOK_PATH_SEGMENT = "/open-apis/bot/v2/hook/";
 const DEFAULT_EXPIRE_BUFFER_SECONDS = 300;
 const FALLBACK_TOKEN_CACHE_SECONDS = 3600;
 const FEISHU_TEXT_MESSAGE_TYPE = "text";
@@ -138,6 +140,25 @@ async function requestJson(url: string, options: RequestInit, timeoutMs: number)
   return response.json();
 }
 
+function isFeishuWebhookUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.protocol === "https:" && parsed.pathname.includes(WEBHOOK_PATH_SEGMENT);
+  } catch {
+    return false;
+  }
+}
+
+function buildWebhookSignature(secret: string): { timestamp: string; sign: string } {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const stringToSign = `${timestamp}\n${secret}`;
+  const sign = createHmac("sha256", stringToSign).digest("base64");
+  return {
+    timestamp,
+    sign,
+  };
+}
+
 let tokenCache: FeishuTokenState | null = null;
 
 async function resolveAccessToken(config: FeishuChannelConfig): Promise<string> {
@@ -218,6 +239,58 @@ export async function sendFeishuTextMessage(rawConfig: Partial<FeishuChannelConf
   }
 
   throw new Error(buildFeishuSendFailure(lastErrorMessage, input.openId, attempts));
+}
+
+export async function sendFeishuWebhookTextMessage(input: {
+  webhookUrl: string;
+  text: string;
+  secret?: string;
+  timeoutMs?: number;
+}): Promise<void> {
+  const webhookUrl = input.webhookUrl.trim();
+  const text = input.text.trim();
+  const secret = input.secret?.trim() ?? "";
+  const timeoutMs = input.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+
+  if (!webhookUrl) {
+    throw new Error("webhookUrl is required");
+  }
+  if (!text) {
+    throw new Error("text must be a non-empty string");
+  }
+  if (!isFeishuWebhookUrl(webhookUrl)) {
+    throw new Error("invalid Feishu webhook URL");
+  }
+
+  const body: Record<string, unknown> = {
+    msg_type: FEISHU_TEXT_MESSAGE_TYPE,
+    content: {
+      text,
+    },
+  };
+  if (secret) {
+    const signature = buildWebhookSignature(secret);
+    body.timestamp = signature.timestamp;
+    body.sign = signature.sign;
+  }
+
+  const response = await requestJson(
+    webhookUrl,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+    timeoutMs,
+  );
+  const parsed = (response || null) as FeishuMessageResponse | null;
+  const code = parseFeishuCode(parsed);
+  if (code !== 0) {
+    const message = parseFeishuMessage(response);
+    throw new Error(`Feishu webhook send failed (${code || "unknown"}): ${message || "empty message"}`);
+  }
 }
 
 export function resetFeishuTokenCache(): void {

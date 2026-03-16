@@ -27,6 +27,7 @@ export interface ResolvedGatewayChannelBinding {
   channelConfig?: unknown;
   runtimeConfig: GatewayRuntimeConfig;
   inboundHandler: InboundHandler;
+  outbound?: ChannelSendText;
 }
 
 function bindChannelOutboundText(
@@ -68,6 +69,7 @@ async function resolveFeishuBinding(
   return {
     channelConfig,
     runtimeConfig,
+    outbound,
     inboundHandler: async (inbound) => {
       await runFeishuInbound({
         inbound,
@@ -103,6 +105,7 @@ async function resolveFeishuBinding(
 }
 
 async function resolveLocalBinding(
+  channel: Channel,
   overrides: GatewayStartOverrides | undefined,
   context?: ChannelRunContext,
 ): Promise<ResolvedGatewayChannelBinding> {
@@ -114,6 +117,7 @@ async function resolveLocalBinding(
   return {
     channelConfig: overrides?.channelConfig,
     runtimeConfig,
+    outbound: bindChannelOutboundText(channel, overrides?.channelConfig),
     inboundHandler: (inbound) => handleInbound(inbound, {
       runtime,
     }),
@@ -129,5 +133,5 @@ export async function resolveGatewayChannelBinding(
   if (channelId === 'feishu') {
     return resolveFeishuBinding(channel, overrides, context);
   }
-  return resolveLocalBinding(overrides, context);
+  return resolveLocalBinding(channel, overrides, context);
 }

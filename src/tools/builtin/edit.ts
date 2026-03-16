@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { ToolContext, ToolSpec } from "../types.js";
+import { resolveToolWriteRoots } from "../allowedRoots.js";
 import { resolveWorkspacePath } from "../pathGuards.js";
 
 function resolvePathArg(args: Record<string, unknown>): string {
@@ -109,7 +110,11 @@ export const editTool: ToolSpec = {
     }
 
     try {
-      const targetPath = await resolveWorkspacePath(context.cwd || process.cwd(), rawPath);
+      const targetPath = await resolveWorkspacePath(
+        context.cwd || process.cwd(),
+        rawPath,
+        resolveToolWriteRoots(),
+      );
       const original = await fs.readFile(targetPath, "utf8");
       const updated =
         args.replaceAll === true ? original.replaceAll(oldText, newText) : original.replace(oldText, newText);

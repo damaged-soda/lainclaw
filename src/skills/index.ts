@@ -191,7 +191,3 @@ export async function buildSkillsPromptForCwd(options: LoadSkillsOptions): Promi
   const skills = await loadSkills(options);
   return buildSkillsPrompt(skills);
 }
-
-export function resolveSkillReadRoots(_cwd: string): string[] {
-  return [resolveBuiltinSkillsDir()];
-}

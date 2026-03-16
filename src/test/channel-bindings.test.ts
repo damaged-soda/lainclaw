@@ -50,3 +50,19 @@ test("feishu binding intercepts unpaired actors before entering the agent pipeli
     assert.doesNotMatch(sent[0] ?? "", /--channel/);
   });
 });
+
+test("local binding resolves without outbound support", async () => {
+  const binding = await resolveGatewayChannelBinding(
+    "local",
+    {
+      id: "local",
+      run: async () => {},
+    },
+    undefined,
+    {
+      channel: "local",
+    },
+  );
+
+  assert.equal(binding.outbound, undefined);
+});

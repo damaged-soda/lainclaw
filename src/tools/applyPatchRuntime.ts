@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { resolveToolWriteRoots } from "./allowedRoots.js";
 import { resolveWorkspacePath } from "./pathGuards.js";
 
 const BEGIN_PATCH_MARKER = "*** Begin Patch";
@@ -99,7 +100,7 @@ export async function applyPatchInWorkspace(
 }
 
 async function resolvePatchPath(cwd: string, inputPath: string): Promise<string> {
-  return resolveWorkspacePath(cwd, inputPath);
+  return resolveWorkspacePath(cwd, inputPath, resolveToolWriteRoots());
 }
 
 function formatSummary(summary: ApplyPatchSummary): string {
