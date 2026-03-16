@@ -98,6 +98,8 @@ test("heartbeat runner invokes agent with the fixed heartbeat session", async ()
       assert.equal(invocation.runtime?.cwd, cwd);
       assert.equal(invocation.runtime?.memory, false);
       assert.match(invocation.input, /HEARTBEAT\.md/);
+      assert.match(invocation.input, /本次 heartbeat 当前时间（北京时间 Asia\/Shanghai）：\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/);
+      assert.match(invocation.input, /必须以这个时间为准/);
       assert.match(invocation.input, /send_message/);
       assert.match(invocation.input, /alpha123-airdrop-digest/);
       assert.match(invocation.input, new RegExp(HEARTBEAT_OK_TOKEN));

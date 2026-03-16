@@ -10,6 +10,25 @@ const HEARTBEAT_SESSION_KEY = "heartbeat";
 const HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK";
 const EMPTY_CHECKBOX_LINES = new Set(["- [ ]", "* [ ]", "- [x]", "* [x]"]);
 
+function formatTimezoneOffset(date: Date): string {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteMinutes = Math.abs(offsetMinutes);
+  const hours = Math.floor(absoluteMinutes / 60).toString().padStart(2, "0");
+  const minutes = (absoluteMinutes % 60).toString().padStart(2, "0");
+  return `${sign}${hours}:${minutes}`;
+}
+
+function formatHeartbeatTime(date: Date): string {
+  const year = date.getFullYear().toString().padStart(4, "0");
+  const month = (date.getMonth() + 1).toString().padStart(2, "0");
+  const day = date.getDate().toString().padStart(2, "0");
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  const seconds = date.getSeconds().toString().padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${formatTimezoneOffset(date)}`;
+}
+
 function normalizeIntervalMs(raw: string | undefined): number {
   if (!raw?.trim()) {
     return DEFAULT_HEARTBEAT_INTERVAL_MS;
@@ -43,9 +62,12 @@ function isHeartbeatEmpty(content: string | null): boolean {
   return true;
 }
 
-function buildHeartbeatPrompt(content: string): string {
+function buildHeartbeatPrompt(content: string, now = new Date()): string {
+  const heartbeatTime = formatHeartbeatTime(now);
   return [
     "这是一次 heartbeat 触发，不是用户主动消息。",
+    `本次 heartbeat 当前时间（北京时间 Asia/Shanghai）：${heartbeatTime}`,
+    "判断任何时间窗口时，必须以这个时间为准，不要使用历史上下文中的旧时间。",
     "严格根据下面的 HEARTBEAT.md 内容执行任务。",
     "如需主动通知外部用户，请使用 send_message 工具。",
     `如果没有需要做的事情，回复 ${HEARTBEAT_OK_TOKEN}。`,
