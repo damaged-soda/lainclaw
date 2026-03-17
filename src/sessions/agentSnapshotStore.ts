@@ -1,9 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Message } from "@mariozechner/pi-ai";
-import { resolveAuthDirectory } from "../auth/configStore.js";
+import { resolveRuntimePaths } from "../paths/index.js";
 
-const AGENT_SNAPSHOT_DIR_NAME = "agent-state";
 const AGENT_SNAPSHOT_FILE_EXTENSION = ".json";
 const AGENT_SNAPSHOT_VERSION = 2 as const;
 
@@ -39,7 +38,7 @@ function sanitizeSessionKey(sessionKey: string): string {
 }
 
 function resolveAgentSnapshotDirectory(): string {
-  return path.join(resolveAuthDirectory(), AGENT_SNAPSHOT_DIR_NAME);
+  return resolveRuntimePaths().agentState;
 }
 
 export function resolveAgentStateSnapshotPath(sessionKey: string): string {

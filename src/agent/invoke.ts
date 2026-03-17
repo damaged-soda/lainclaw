@@ -7,6 +7,7 @@ import {
   startActiveObservation,
 } from "../observability/langfuse.js";
 import type { RuntimeAgentEventSink } from "../shared/types.js";
+import { resolveRuntimePaths } from "../paths/index.js";
 
 type NormalizedCoreResult = Awaited<ReturnType<typeof agentCoordinator.runAgent>>;
 
@@ -178,6 +179,7 @@ function trimOrUndefined(raw: unknown): string | undefined {
 
 function normalizeRunAgentInput(input: RunAgentRuntimeContext, sessionKey?: unknown): NormalizedRunAgentInput {
   const userId = trimOrUndefined(input.userId);
+  const workspace = resolveRuntimePaths().workspace;
   return {
     provider: trimOrUndefined(input.provider) || "",
     profileId: trimOrUndefined(input.profileId) || "",
@@ -185,7 +187,7 @@ function normalizeRunAgentInput(input: RunAgentRuntimeContext, sessionKey?: unkn
     withTools: typeof input.withTools === "boolean" ? input.withTools : true,
     ...(typeof input.newSession === "boolean" ? { newSession: input.newSession } : {}),
     ...(typeof input.memory === "boolean" ? { memory: input.memory } : {}),
-    ...(typeof input.cwd === "string" ? { cwd: input.cwd } : {}),
+    cwd: workspace,
     ...(typeof input.debug === "boolean" ? { debug: input.debug } : {}),
     ...(userId ? { userId } : {}),
   };

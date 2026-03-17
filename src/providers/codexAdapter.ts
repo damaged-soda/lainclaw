@@ -15,6 +15,7 @@ import { toText } from "./codex/messageText.js";
 import { runCodexSession } from "./codex/sessionRun.js";
 import { BASE_SYSTEM_PROMPT } from "../prompt/systemPrompt.js";
 import { createCodexToolRuntime } from "./codex/toolRuntime.js";
+import { resolveRuntimePaths } from "../paths/index.js";
 
 function isAbortError(error: unknown): error is Error {
   return (
@@ -110,7 +111,7 @@ export function createRunCodexAdapter(
     }
     const route = `adapter.${provider}`;
     const requestId = requestContext.requestId;
-    const cwd = path.resolve(input.cwd || process.cwd());
+    const cwd = path.resolve(resolveRuntimePaths().workspace);
     const tracingEnabled = isLangfuseTracingReady();
 
     const toolRuntime = createCodexToolRuntime(

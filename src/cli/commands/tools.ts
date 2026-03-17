@@ -4,6 +4,7 @@ import { getTool, listTools } from '../../tools/registry.js';
 import type { ToolCall, ToolContext } from '../../tools/types.js';
 import { Command } from 'commander';
 import { setExitCode } from '../shared/exitCode.js';
+import { resolveRuntimePaths } from '../../paths/index.js';
 
 export type ToolsCommandInput =
   | { kind: 'list' }
@@ -61,7 +62,7 @@ export async function runToolsCommand(parsed: ToolsCommandInput): Promise<number
         requestId: `cli-${Date.now()}-${Math.floor(Math.random() * 10000).toString(16).padStart(4, '0')}`,
         sessionId: 'tools-cli',
         sessionKey: 'tools',
-        cwd: process.cwd(),
+        cwd: resolveRuntimePaths().workspace,
       };
       const execResult = await executeTool(call, context);
       console.log(JSON.stringify(execResult, null, 2));

@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import type { GatewayServicePaths } from "./servicePaths.js";
 import type { GatewayServiceTerminateOptions } from "./servicePaths.js";
+import { resolveRuntimePaths } from "../paths/index.js";
 
 const POLL_INTERVAL_MS = 200;
 const DEFAULT_GRACEFUL_TIMEOUT_MS = 5000;
@@ -59,7 +60,7 @@ export async function spawnGatewayServiceProcess(
     fd = fs.openSync(paths.logPath, "a");
     const child = spawn(process.execPath, [scriptPath, ...argv], {
       detached: true,
-      cwd: process.cwd(),
+      cwd: resolveRuntimePaths().workspace,
       env: process.env,
       stdio: ["ignore", fd, fd],
     });

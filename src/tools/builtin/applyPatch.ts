@@ -27,7 +27,7 @@ export const applyPatchTool: ToolSpec = {
     }
 
     try {
-      const result = await applyPatchInWorkspace(args.input, context.cwd || process.cwd());
+      const result = await applyPatchInWorkspace(args.input, context.cwd);
       return {
         ok: true,
         content: result.text,

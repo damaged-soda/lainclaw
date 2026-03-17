@@ -6,6 +6,7 @@ import {
   type ProviderRunInput,
 } from "../providers/registry.js";
 import { type CoreErrorCode, type CoreRuntimePort } from "../core/contracts.js";
+import { resolveRuntimePaths } from "../paths/index.js";
 
 export interface RuntimeAdapterOptions {
   run?: (input: ProviderRunInput) => Promise<ProviderResult>;
@@ -34,7 +35,7 @@ export function createRuntimeAdapter(options: RuntimeAdapterOptions = {}): CoreR
         return await resolved.run({
           ...input,
           requestContext,
-          ...(typeof input.cwd === "string" ? { cwd: path.resolve(input.cwd) } : {}),
+          cwd: path.resolve(resolveRuntimePaths().workspace),
         });
       } catch (error) {
         if (error instanceof ValidationError) {

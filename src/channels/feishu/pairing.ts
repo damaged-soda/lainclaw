@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveAuthDirectory } from "../../auth/configStore.js";
+import { resolveLainclawHome, resolvePaths, resolveRuntimePaths } from "../../paths/index.js";
 
 const FEISHU_PAIRING_FILE = "feishu-pairing.json";
 const CURRENT_FEISHU_PAIRING_VERSION = 1 as const;
@@ -128,8 +128,8 @@ function generateUniqueCode(existingCodes: Set<string>): string {
   throw new Error("failed to generate unique feishu pairing code");
 }
 
-async function withPairingLock<T>(homeDir: string | undefined, fn: () => Promise<T>): Promise<T> {
-  const filePath = resolveFeishuPairingStatePath(homeDir);
+async function withPairingLock<T>(env: NodeJS.ProcessEnv | undefined, fn: () => Promise<T>): Promise<T> {
+  const filePath = resolveFeishuPairingStatePath(env);
   const previous = pairingLocks.get(filePath) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
@@ -149,8 +149,8 @@ async function withPairingLock<T>(homeDir: string | undefined, fn: () => Promise
   }
 }
 
-async function loadFeishuPairingState(homeDir = process.env.HOME): Promise<FeishuPairingState> {
-  const filePath = resolveFeishuPairingStatePath(homeDir);
+async function loadFeishuPairingState(env: NodeJS.ProcessEnv = process.env): Promise<FeishuPairingState> {
+  const filePath = resolveFeishuPairingStatePath(env);
   try {
     const raw = JSON.parse(await fs.readFile(filePath, "utf-8")) as unknown;
     return normalizeFeishuPairingState(raw);
@@ -164,10 +164,10 @@ async function loadFeishuPairingState(homeDir = process.env.HOME): Promise<Feish
 
 async function saveFeishuPairingState(
   state: FeishuPairingState,
-  homeDir = process.env.HOME,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   const normalized = normalizeFeishuPairingState(state);
-  const filePath = resolveFeishuPairingStatePath(homeDir);
+  const filePath = resolveFeishuPairingStatePath(env);
 
   if (!hasPersistedState(normalized)) {
     try {
@@ -190,8 +190,14 @@ async function saveFeishuPairingState(
   await fs.rename(tmpPath, filePath);
 }
 
-export function resolveFeishuPairingStatePath(homeDir = process.env.HOME): string {
-  return path.join(resolveAuthDirectory(homeDir), FEISHU_PAIRING_FILE);
+export function resolveFeishuPairingStatePath(homeDirOrEnv?: string | NodeJS.ProcessEnv): string {
+  if (typeof homeDirOrEnv === "string") {
+    return resolvePaths(homeDirOrEnv).feishuPairing;
+  }
+  if (homeDirOrEnv && typeof homeDirOrEnv === "object") {
+    return resolvePaths(resolveLainclawHome(homeDirOrEnv)).feishuPairing;
+  }
+  return resolveRuntimePaths().feishuPairing;
 }
 
 export function buildFeishuPairingReply(openId: string, code: string): string {
@@ -216,7 +222,7 @@ export async function isFeishuPaired(
     return false;
   }
 
-  const state = await loadFeishuPairingState(env.HOME);
+  const state = await loadFeishuPairingState(env);
   return state.approvedOpenIds.includes(normalizedOpenId);
 }
 
@@ -229,8 +235,8 @@ export async function issueFeishuPairingCode(
     throw new Error("invalid feishu open id");
   }
 
-  return withPairingLock(env.HOME, async () => {
-    const state = await loadFeishuPairingState(env.HOME);
+  return withPairingLock(env, async () => {
+    const state = await loadFeishuPairingState(env);
     const existing = state.pending.find((entry) => entry.openId === normalizedOpenId);
     if (existing) {
       return { code: existing.code, created: false };
@@ -240,7 +246,7 @@ export async function issueFeishuPairingCode(
     await saveFeishuPairingState({
       ...state,
       pending: [...state.pending, { openId: normalizedOpenId, code }],
-    }, env.HOME);
+    }, env);
     return { code, created: true };
   });
 }
@@ -254,8 +260,8 @@ export async function approveFeishuPairingCode(
     return null;
   }
 
-  return withPairingLock(env.HOME, async () => {
-    const state = await loadFeishuPairingState(env.HOME);
+  return withPairingLock(env, async () => {
+    const state = await loadFeishuPairingState(env);
     const index = state.pending.findIndex((entry) => entry.code === normalizedCode);
     if (index < 0) {
       return null;
@@ -273,7 +279,7 @@ export async function approveFeishuPairingCode(
       ...state,
       approvedOpenIds: normalizeStringList([...state.approvedOpenIds, entry.openId]),
       pending,
-    }, env.HOME);
+    }, env);
 
     return entry.openId;
   });

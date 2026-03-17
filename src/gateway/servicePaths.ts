@@ -1,5 +1,5 @@
 import path from "node:path";
-import { resolveAuthDirectory } from "../auth/configStore.js";
+import { resolveRuntimePaths } from "../paths/index.js";
 
 export interface GatewayServiceState {
   channel: string;
@@ -39,7 +39,7 @@ export function resolveGatewayServicePaths(
   const channel = normalizeGatewayChannel(rawChannel);
   // 当前实现不按 channel 分目录，但保留归一化调用链，便于后续扩展且不影响既有路径语义。
   void channel;
-  const serviceDir = path.join(resolveAuthDirectory(), "service");
+  const serviceDir = resolveRuntimePaths().service;
 
   return {
     statePath: overrides.statePath

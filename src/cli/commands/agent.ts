@@ -4,6 +4,7 @@ import { ValidationError } from '../../shared/types.js';
 import { runAgent } from '../../agent/invoke.js';
 import { setExitCode } from '../shared/exitCode.js';
 import { addModelOptions } from '../shared/options.js';
+import { resolveRuntimePaths } from '../../paths/index.js';
 
 export interface AgentCommandInput {
   input: string;
@@ -22,6 +23,7 @@ export async function runAgentCommand(input: AgentCommandInput): Promise<number>
       throw new ValidationError('agent command requires non-empty input', 'AGENT_INPUT_REQUIRED');
     }
 
+    const workspace = resolveRuntimePaths().workspace;
     const response = await runAgent({
       input: input.input,
       channelId: 'cli',
@@ -33,6 +35,7 @@ export async function runAgentCommand(input: AgentCommandInput): Promise<number>
         memory: input.memory,
         withTools: input.withTools,
         debug: input.debug,
+        cwd: workspace,
       },
     });
 

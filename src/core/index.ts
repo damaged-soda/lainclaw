@@ -10,6 +10,7 @@ import type {
 import type { RunCtx } from "./internal.js";
 import { nowIso, toValidationError } from "./errors.js";
 import { runTurn, startNewSession } from "./turn/run.js";
+import { resolveRuntimePaths } from "../paths/index.js";
 
 export interface CreateCoreCoordinatorOptions {
   sessionAdapter: CoreSessionPort;
@@ -61,10 +62,10 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         sessionKey,
         withTools,
         newSession,
-        cwd,
         debug,
         onAgentEvent,
       } = options;
+      const workspace = resolveRuntimePaths().workspace;
 
       const ctx: RunCtx = {
         requestId,
@@ -76,7 +77,7 @@ export function createCoreCoordinator(options: CreateCoreCoordinatorOptions): Co
         continueReason,
         withTools,
         memoryEnabled,
-        cwd: typeof cwd === "string" ? cwd : undefined,
+        cwd: workspace,
         debug: debug === true,
         onAgentEvent,
         emitEvent,

@@ -1,11 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveAuthDirectory } from "../auth/configStore.js";
 import type { SessionHistoryMessage } from "../shared/types.js";
+import { resolveRuntimePaths } from "../paths/index.js";
 
-const SESSION_DIR_NAME = "sessions";
 const SESSION_INDEX_FILE = "sessions.json";
-const MEMORY_DIR_NAME = "memory";
 const MEMORY_FILE_EXTENSION = ".md";
 const CONTEXT_MESSAGE_LIMIT = 12;
 const MEMORY_SNIPPET_MAX_CHARS = 2000;
@@ -42,7 +40,7 @@ function nowIso() {
 }
 
 function resolveSessionDirectory() {
-  return path.join(resolveAuthDirectory(), SESSION_DIR_NAME);
+  return resolveRuntimePaths().sessions;
 }
 
 function resolveSessionIndexPath() {
@@ -58,7 +56,7 @@ export function getSessionTranscriptPath(sessionId: string): string {
 }
 
 function resolveMemoryDirectory() {
-  return path.join(resolveAuthDirectory(), MEMORY_DIR_NAME);
+  return resolveRuntimePaths().memory;
 }
 
 function resolveSessionMemoryPath(sessionKey: string) {

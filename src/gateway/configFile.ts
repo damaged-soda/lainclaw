@@ -1,9 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveAuthDirectory } from "../auth/configStore.js";
+import { resolvePaths, resolveRuntimePaths } from "../paths/index.js";
 
 const CURRENT_VERSION = 1 as const;
-const GATEWAY_CONFIG_FILE = "gateway.json";
 const DEFAULT_CHANNEL = "default";
 
 export interface GatewayDefaultConfigScope {
@@ -36,11 +35,11 @@ export function isDefaultGatewayChannel(rawChannel: string | undefined): boolean
   return normalizeGatewayChannel(rawChannel) === DEFAULT_CHANNEL;
 }
 
-export function resolveGatewayConfigPath(homeDir = process.env.HOME): string {
-  const authDirectory = typeof homeDir === "string" && homeDir.trim().length > 0
-    ? resolveAuthDirectory(homeDir)
-    : resolveAuthDirectory();
-  return path.join(authDirectory, GATEWAY_CONFIG_FILE);
+export function resolveGatewayConfigPath(homeDir?: string): string {
+  if (typeof homeDir === "string") {
+    return resolvePaths(homeDir).gatewayConfig;
+  }
+  return resolveRuntimePaths().gatewayConfig;
 }
 
 function normalizeDefaultScope(raw: unknown): GatewayDefaultConfigScope | undefined {
@@ -82,7 +81,7 @@ export function normalizeGatewayConfigFile(raw: unknown): GatewayConfigFile {
   };
 }
 
-export async function loadGatewayConfigFile(homeDir = process.env.HOME): Promise<GatewayConfigFile | null> {
+export async function loadGatewayConfigFile(homeDir?: string): Promise<GatewayConfigFile | null> {
   try {
     const file = await fs.readFile(resolveGatewayConfigPath(homeDir), "utf-8");
     return normalizeGatewayConfigFile(JSON.parse(file));
@@ -103,7 +102,7 @@ function hasPersistedConfig(store: GatewayConfigFile): boolean {
 
 export async function saveGatewayConfigFile(
   store: GatewayConfigFile,
-  homeDir = process.env.HOME,
+  homeDir?: string,
 ): Promise<void> {
   const normalized = normalizeGatewayConfigFile(store);
   const filePath = resolveGatewayConfigPath(homeDir);

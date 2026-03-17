@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { ToolContext, ToolSpec } from "../types.js";
 import { resolveToolWriteRoots } from "../allowedRoots.js";
-import { resolveWorkspacePath } from "../pathGuards.js";
+import { resolveAllowedPath } from "../pathGuards.js";
 
 export const writeTool: ToolSpec = {
   name: "write",
@@ -59,11 +59,7 @@ export const writeTool: ToolSpec = {
     }
 
     try {
-      const targetPath = await resolveWorkspacePath(
-        context.cwd || process.cwd(),
-        rawPath,
-        resolveToolWriteRoots(),
-      );
+      const targetPath = await resolveAllowedPath(context.cwd, rawPath, resolveToolWriteRoots());
       if (args.createDir === true) {
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
       }

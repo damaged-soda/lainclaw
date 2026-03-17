@@ -1,11 +1,9 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import { runAgent } from "../agent/invoke.js";
-import { resolveAuthDirectory } from "../auth/configStore.js";
+import { resolvePaths, resolveRuntimePaths } from "../paths/index.js";
 import type { GatewayAgentRuntimeContext } from "./runtimeConfig.js";
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 60 * 1000;
-const HEARTBEAT_FILE_NAME = "HEARTBEAT.md";
 const HEARTBEAT_SESSION_KEY = "heartbeat";
 const HEARTBEAT_OK_TOKEN = "HEARTBEAT_OK";
 const EMPTY_CHECKBOX_LINES = new Set(["- [ ]", "* [ ]", "- [x]", "* [x]"]);
@@ -78,11 +76,11 @@ function buildHeartbeatPrompt(content: string, now = new Date()): string {
   ].join("\n");
 }
 
-export function resolveHeartbeatFilePath(homeDir = process.env.HOME): string {
-  const authDirectory = typeof homeDir === "string" && homeDir.trim().length > 0
-    ? resolveAuthDirectory(homeDir)
-    : resolveAuthDirectory();
-  return path.join(authDirectory, HEARTBEAT_FILE_NAME);
+export function resolveHeartbeatFilePath(homeDir?: string): string {
+  if (typeof homeDir === "string") {
+    return resolvePaths(homeDir).heartbeat;
+  }
+  return resolveRuntimePaths().heartbeat;
 }
 
 async function readHeartbeatPrompt(): Promise<string | null> {

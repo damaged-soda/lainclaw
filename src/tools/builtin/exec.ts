@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import fs from "node:fs/promises";
 import { ToolContext, ToolSpec } from "../types.js";
 import {
   appendProcessOutput,
@@ -10,6 +11,8 @@ import {
   type ProcessSession,
   waitForProcessUpdate,
 } from "../processRegistry.js";
+import { resolveToolExecRoots } from "../allowedRoots.js";
+import { resolveAllowedPath } from "../pathGuards.js";
 
 const DEFAULT_YIELD_MS = 10_000;
 const DEFAULT_TIMEOUT_SEC = 1_800;
@@ -104,7 +107,7 @@ export const execTool: ToolSpec = {
       },
       workdir: {
         type: "string",
-        description: "工作目录，默认当前 cwd。",
+        description: "工作目录，默认 workspace。",
       },
       env: {
         type: "object",
@@ -140,8 +143,6 @@ export const execTool: ToolSpec = {
       };
     }
 
-    const workdir =
-      typeof args.workdir === "string" && args.workdir.trim() ? args.workdir : context.cwd || process.cwd();
     const env = {
       ...process.env,
       ...normalizeEnv(args.env),
@@ -156,6 +157,15 @@ export const execTool: ToolSpec = {
         : DEFAULT_TIMEOUT_SEC;
 
     try {
+      const workdir = await resolveAllowedPath(
+        context.cwd,
+        typeof args.workdir === "string" && args.workdir.trim() ? args.workdir : ".",
+        resolveToolExecRoots(),
+      );
+      const stats = await fs.stat(workdir);
+      if (!stats.isDirectory()) {
+        throw new Error("workdir is not a directory");
+      }
       const shell = resolveShell(args.command);
       const child = spawn(shell.shell, shell.args, {
         cwd: workdir,

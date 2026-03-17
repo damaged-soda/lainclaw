@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveToolWriteRoots } from "./allowedRoots.js";
-import { resolveWorkspacePath } from "./pathGuards.js";
+import { resolveToolApplyPatchRoots } from "./allowedRoots.js";
+import { resolveAllowedPath } from "./pathGuards.js";
 
 const BEGIN_PATCH_MARKER = "*** Begin Patch";
 const END_PATCH_MARKER = "*** End Patch";
@@ -48,7 +48,7 @@ export interface ApplyPatchSummary {
 
 export async function applyPatchInWorkspace(
   input: string,
-  cwd: string,
+  workspace: string,
 ): Promise<{ summary: ApplyPatchSummary; text: string }> {
   const { hunks } = parsePatchText(input);
   if (hunks.length === 0) {
@@ -63,34 +63,34 @@ export async function applyPatchInWorkspace(
 
   for (const hunk of hunks) {
     if (hunk.kind === "add") {
-      const targetPath = await resolvePatchPath(cwd, hunk.path);
+      const targetPath = await resolvePatchPath(workspace, hunk.path);
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
       await fs.writeFile(targetPath, hunk.contents, "utf8");
-      summary.added.push(path.relative(cwd, targetPath) || path.basename(targetPath));
+      summary.added.push(path.relative(workspace, targetPath) || path.basename(targetPath));
       continue;
     }
 
     if (hunk.kind === "delete") {
-      const targetPath = await resolvePatchPath(cwd, hunk.path);
+      const targetPath = await resolvePatchPath(workspace, hunk.path);
       await fs.rm(targetPath);
-      summary.deleted.push(path.relative(cwd, targetPath) || path.basename(targetPath));
+      summary.deleted.push(path.relative(workspace, targetPath) || path.basename(targetPath));
       continue;
     }
 
-    const targetPath = await resolvePatchPath(cwd, hunk.path);
+    const targetPath = await resolvePatchPath(workspace, hunk.path);
     const updatedContent = await applyUpdateHunk(targetPath, hunk.chunks);
 
     if (hunk.movePath) {
-      const moveTargetPath = await resolvePatchPath(cwd, hunk.movePath);
+      const moveTargetPath = await resolvePatchPath(workspace, hunk.movePath);
       await fs.mkdir(path.dirname(moveTargetPath), { recursive: true });
       await fs.writeFile(moveTargetPath, updatedContent, "utf8");
       await fs.rm(targetPath);
-      summary.modified.push(path.relative(cwd, moveTargetPath) || path.basename(moveTargetPath));
+      summary.modified.push(path.relative(workspace, moveTargetPath) || path.basename(moveTargetPath));
       continue;
     }
 
     await fs.writeFile(targetPath, updatedContent, "utf8");
-    summary.modified.push(path.relative(cwd, targetPath) || path.basename(targetPath));
+    summary.modified.push(path.relative(workspace, targetPath) || path.basename(targetPath));
   }
 
   return {
@@ -99,8 +99,8 @@ export async function applyPatchInWorkspace(
   };
 }
 
-async function resolvePatchPath(cwd: string, inputPath: string): Promise<string> {
-  return resolveWorkspacePath(cwd, inputPath, resolveToolWriteRoots());
+async function resolvePatchPath(workspace: string, inputPath: string): Promise<string> {
+  return resolveAllowedPath(workspace, inputPath, resolveToolApplyPatchRoots());
 }
 
 function formatSummary(summary: ApplyPatchSummary): string {

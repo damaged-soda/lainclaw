@@ -12,6 +12,7 @@ import { createSessionAdapter } from "../sessions/adapter.js";
 import { createAgentStateStore } from "../sessions/agentSnapshotStore.js";
 import { withTempHome } from "./helpers.js";
 import { resolveBuiltinSkillsDir } from "../skills/index.js";
+import { resolvePaths } from "../paths/index.js";
 
 function makeUsageZero() {
   return {
@@ -186,10 +187,11 @@ test("core turn ignores invalid snapshots and falls back to transcript history",
   });
 });
 
-test("core turn injects available skills into the system prompt", async () => {
-  await withTempHome(async () => {
+test("core turn injects runtime paths and available skills into the system prompt", async () => {
+  await withTempHome(async (home) => {
     const sessionPort = createSessionAdapter();
     const stateStore = createAgentStateStore();
+    const paths = resolvePaths(home);
 
     const prepared = await prepareCoreTurn(
       {
@@ -208,6 +210,12 @@ test("core turn injects available skills into the system prompt", async () => {
     );
 
     const systemPrompt = prepared.providerInput.requestContext.systemPrompt ?? "";
+    assert.match(systemPrompt, /## Runtime Paths/);
+    assert.match(systemPrompt, new RegExp(paths.workspace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(systemPrompt, new RegExp(paths.memory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(systemPrompt, /list_dir/);
+    assert.match(systemPrompt, /glob/);
+    assert.match(systemPrompt, /path_describe/);
     assert.match(systemPrompt, /## Skills/);
     assert.match(systemPrompt, /<available_skills>/);
     assert.match(systemPrompt, /alpha123-airdrop-digest/);

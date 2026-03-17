@@ -1,18 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
 import type { AuthProfile, AuthStore } from "./types.js";
+import { resolvePaths, resolveRuntimePaths } from "../paths/index.js";
 
-const AUTH_DIRECTORY_NAME = ".lainclaw";
 const AUTH_FILE_NAME = "auth-profiles.json";
 const CURRENT_VERSION = 1 as const;
 
-export function resolveAuthDirectory(homeDir = os.homedir()): string {
-  return path.join(homeDir, AUTH_DIRECTORY_NAME);
-}
-
-export function resolveAuthFilePath(homeDir = os.homedir()): string {
-  return path.join(resolveAuthDirectory(homeDir), AUTH_FILE_NAME);
+export function resolveAuthFilePath(homeDir?: string): string {
+  if (typeof homeDir === "string") {
+    return resolvePaths(homeDir).authProfiles;
+  }
+  return resolveRuntimePaths().authProfiles;
 }
 
 function toAuthStore(raw: unknown): AuthStore {
@@ -98,8 +96,8 @@ function formatJsonWithSafeKeys(store: AuthStore): string {
 }
 
 export async function saveAuthStore(store: AuthStore): Promise<void> {
-  const authDir = resolveAuthDirectory();
   const authFile = resolveAuthFilePath();
+  const authDir = path.dirname(authFile);
   await fs.mkdir(authDir, { recursive: true, mode: 0o700 });
   const tempFile = `${authFile}.tmp`;
   await fs.writeFile(tempFile, formatJsonWithSafeKeys(store), {

@@ -4,6 +4,7 @@ import { buildGatewayCommand } from './commands/gateway.js';
 import { buildPairingCommand } from './commands/pairing.js';
 import { buildToolsCommand } from './commands/tools.js';
 import { buildAgentCommand } from './commands/agent.js';
+import { buildPathsCommand } from './commands/paths.js';
 import { setExitCode } from './shared/exitCode.js';
 import { VERSION } from './version.js';
 
@@ -40,6 +41,7 @@ export function buildProgram(): Command {
 
   buildAgentCommand(program);
   buildAuthCommand(program);
+  buildPathsCommand(program);
   buildToolsCommand(program);
   buildPairingCommand(program);
   buildGatewayCommand(program);

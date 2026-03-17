@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 function isSubpath(rootPath: string, candidatePath: string): boolean {
@@ -26,31 +25,24 @@ async function resolveExistingPath(targetPath: string): Promise<string> {
   }
 }
 
-function expandHomePath(inputPath: string): string {
-  if (inputPath === "~") {
-    return os.homedir();
+export function resolvePathFromWorkspace(workspace: string, inputPath: string): string {
+  const value = inputPath.trim();
+  if (!value) {
+    return path.resolve(workspace);
   }
-  if (inputPath.startsWith("~/")) {
-    return path.join(os.homedir(), inputPath.slice(2));
-  }
-  return inputPath;
+  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(workspace, value);
 }
 
-export function resolvePathFromCwd(cwd: string, inputPath: string): string {
-  const value = expandHomePath(inputPath.trim());
-  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(cwd, value);
-}
-
-export async function resolveWorkspacePath(
-  cwd: string,
+export async function resolveAllowedPath(
+  workspace: string,
   inputPath: string,
   allowedRoots: string[] = [],
 ): Promise<string> {
-  const rootPath = await fs.realpath(cwd).catch(() => path.resolve(cwd));
+  const rootPath = await fs.realpath(workspace).catch(() => path.resolve(workspace));
   const normalizedAllowedRoots = await Promise.all(
     allowedRoots.map(async (root) => fs.realpath(root).catch(() => path.resolve(root))),
   );
-  const candidatePath = resolvePathFromCwd(rootPath, inputPath);
+  const candidatePath = resolvePathFromWorkspace(rootPath, inputPath);
   const resolvedPath = await resolveExistingPath(candidatePath).catch(() => candidatePath);
 
   if (

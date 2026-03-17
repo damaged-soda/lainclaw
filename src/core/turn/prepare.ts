@@ -10,6 +10,7 @@ import {
 } from "../../sessions/agentSnapshotStore.js";
 import type { CoreTurnDependencies, PreparedTurn, PrepareTurnInput } from "./contracts.js";
 import { resolveCoreTurnRunMode } from "./runMode.js";
+import { resolveRuntimePaths } from "../../paths/index.js";
 
 function matchesSnapshot(
   snapshot: AgentStateSnapshot | undefined,
@@ -64,9 +65,9 @@ export async function prepareCoreTurn(
     source,
     initialMessages,
   });
-  const resolvedCwd = input.cwd ?? process.cwd();
+  const resolvedCwd = resolveRuntimePaths().workspace;
   const systemPrompt = await buildSystemPrompt({
-    cwd: resolvedCwd,
+    workspace: resolvedCwd,
     ...(typeof input.systemPrompt === "string" ? { basePrompt: input.systemPrompt } : {}),
   });
 

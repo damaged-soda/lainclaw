@@ -7,6 +7,7 @@ import { executeTool } from "../tools/executor.js";
 import { listTools } from "../tools/registry.js";
 import { resolveBuiltinSkillsDir } from "../skills/index.js";
 import { clearOutboundChannels, registerOutboundChannel } from "../tools/outboundRegistry.js";
+import { resolvePaths } from "../paths/index.js";
 import { withTempHome } from "./helpers.js";
 
 async function withTempWorkspace<T>(fn: (cwd: string) => Promise<T>): Promise<T> {
@@ -30,12 +31,13 @@ function createContext(cwd: string, sessionKey = "test-session") {
 test("tool registry only exposes the new built-in tool set", () => {
   assert.deepEqual(
     listTools().map((tool) => tool.name),
-    ["apply_patch", "edit", "exec", "process", "read", "send_message", "write"],
+    ["apply_patch", "edit", "exec", "glob", "list_dir", "path_describe", "process", "read", "send_message", "write"],
   );
 });
 
 test("file tools support write, edit aliases, read, and apply_patch", async () => {
-  await withTempWorkspace(async (cwd) => {
+  await withTempHome(async (home) => {
+    const cwd = resolvePaths(home).workspace;
     const context = createContext(cwd);
 
     const writeResult = await executeTool(
@@ -97,7 +99,9 @@ test("file tools support write, edit aliases, read, and apply_patch", async () =
 });
 
 test("exec and process manage background sessions within the same session scope", async () => {
-  await withTempWorkspace(async (cwd) => {
+  await withTempHome(async (home) => {
+    const cwd = resolvePaths(home).workspace;
+    await fs.mkdir(cwd, { recursive: true });
     const context = createContext(cwd);
 
     const execResult = await executeTool(
@@ -149,7 +153,8 @@ test("exec and process manage background sessions within the same session scope"
 });
 
 test("read can access built-in skill files outside the current workspace", async () => {
-  await withTempWorkspace(async (cwd) => {
+  await withTempHome(async (home) => {
+    const cwd = resolvePaths(home).workspace;
     const context = createContext(cwd);
     const builtInSkillPath = path.join(
       resolveBuiltinSkillsDir(),
@@ -172,53 +177,135 @@ test("read can access built-in skill files outside the current workspace", async
   });
 });
 
-test("file tools can read and write under ~/.lainclaw", async () => {
+test("file tools can read and write inside the visible memory path", async () => {
   await withTempHome(async (home) => {
-    await withTempWorkspace(async (cwd) => {
-      const context = createContext(cwd);
-      const authFile = path.join(home, ".lainclaw", "skills", "alpha123-airdrop-digest", "memory.md");
+    const paths = resolvePaths(home);
+    const context = createContext(paths.workspace);
+    const memoryFile = path.join(paths.memory, "notes.md");
 
-      const writeResult = await executeTool(
-        {
-          id: "write-home-1",
-          name: "write",
-          args: {
-            path: "~/.lainclaw/skills/alpha123-airdrop-digest/memory.md",
-            content: "first",
-            createDir: true,
-          },
+    const writeResult = await executeTool(
+      {
+        id: "write-memory-1",
+        name: "write",
+        args: {
+          path: memoryFile,
+          content: "first",
+          createDir: true,
         },
-        context,
-      );
-      assert.equal(writeResult.result.ok, true);
-      assert.equal(await fs.readFile(authFile, "utf8"), "first");
+      },
+      context,
+    );
+    assert.equal(writeResult.result.ok, true);
+    assert.equal(await fs.readFile(memoryFile, "utf8"), "first");
 
-      const editResult = await executeTool(
-        {
-          id: "edit-home-1",
-          name: "edit",
-          args: {
-            path: "~/.lainclaw/skills/alpha123-airdrop-digest/memory.md",
-            oldText: "first",
-            newText: "second",
-          },
+    const editResult = await executeTool(
+      {
+        id: "edit-memory-1",
+        name: "edit",
+        args: {
+          path: memoryFile,
+          oldText: "first",
+          newText: "second",
         },
-        context,
-      );
-      assert.equal(editResult.result.ok, true);
+      },
+      context,
+    );
+    assert.equal(editResult.result.ok, true);
 
-      const readResult = await executeTool(
-        {
-          id: "read-home-1",
-          name: "read",
-          args: {
-            path: "~/.lainclaw/skills/alpha123-airdrop-digest/memory.md",
-          },
+    const readResult = await executeTool(
+      {
+        id: "read-memory-1",
+        name: "read",
+        args: {
+          path: memoryFile,
         },
-        context,
-      );
-      assert.equal(readResult.result.ok, true);
-      assert.equal(readResult.result.content, "second");
+      },
+      context,
+    );
+    assert.equal(readResult.result.ok, true);
+    assert.equal(readResult.result.content, "second");
+  });
+});
+
+test("file tools cannot escape to the legacy HOME directory", async () => {
+  await withTempHome(async (home) => {
+    const context = createContext(resolvePaths(home).workspace);
+    const legacyHome = process.env.HOME;
+    assert.ok(legacyHome);
+
+    const writeResult = await executeTool(
+      {
+        id: "write-legacy-home-1",
+        name: "write",
+        args: {
+          path: path.join(legacyHome, "escape.txt"),
+          content: "forbidden",
+          createDir: true,
+        },
+      },
+      context,
+    );
+
+    assert.equal(writeResult.result.ok, false);
+    assert.match(writeResult.result.error?.message ?? "", /path escapes workspace root/);
+  });
+});
+
+test("list_dir, glob, and path_describe expose visible runtime paths", async () => {
+  await withTempHome(async (home) => {
+    const paths = resolvePaths(home);
+    await fs.mkdir(path.join(paths.workspace, "sub"), { recursive: true });
+    await fs.writeFile(path.join(paths.workspace, "a.md"), "alpha", "utf8");
+    await fs.writeFile(path.join(paths.workspace, "sub", "b.md"), "beta", "utf8");
+
+    const context = createContext(paths.workspace);
+    const listResult = await executeTool(
+      {
+        id: "list-dir-1",
+        name: "list_dir",
+        args: {
+          root: "workspace",
+        },
+      },
+      context,
+    );
+    assert.equal(listResult.result.ok, true);
+    assert.match(listResult.result.content ?? "", /\[file\] a\.md/);
+    assert.match(listResult.result.content ?? "", /\[directory\] sub/);
+
+    const globResult = await executeTool(
+      {
+        id: "glob-1",
+        name: "glob",
+        args: {
+          root: "workspace",
+          pattern: "**/*.md",
+        },
+      },
+      context,
+    );
+    assert.equal(globResult.result.ok, true);
+    assert.match(globResult.result.content ?? "", /a\.md/);
+    assert.match(globResult.result.content ?? "", /sub\/b\.md/);
+
+    const describeResult = await executeTool(
+      {
+        id: "path-describe-1",
+        name: "path_describe",
+        args: {
+          key: "memory",
+        },
+      },
+      context,
+    );
+    assert.equal(describeResult.result.ok, true);
+    assert.deepEqual(describeResult.result.data, {
+      key: "memory",
+      path: paths.memory,
+      kind: "directory",
+      visibility: "visible",
+      ops: ["read", "write", "edit", "list_dir", "glob"],
+      purpose: "长期记忆和人工沉淀",
     });
   });
 });

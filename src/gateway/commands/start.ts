@@ -29,6 +29,7 @@ import {
 } from '../channelBindings.js';
 import { clearOutboundChannels, registerOutboundChannel } from '../../tools/outboundRegistry.js';
 import { startHeartbeatRunner } from '../heartbeatRunner.js';
+import { resolveRuntimePaths } from '../../paths/index.js';
 
 function formatDisplaySection(
   values: Record<string, unknown>,
@@ -310,8 +311,9 @@ async function runGatewayRuntimesWithHeartbeat(
 
   const shouldPreflightInProcess = !serviceContext.daemon;
   registerGatewayOutbounds(channels);
+  const workspace = resolveRuntimePaths().workspace;
   const heartbeat = startHeartbeatRunner({
-    cwd: process.cwd(),
+    cwd: workspace,
     runtime: {
       ...channels[0].binding.runtimeConfig,
       ...(serviceContext.debug === true ? { debug: true } : {}),

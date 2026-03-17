@@ -12,6 +12,7 @@ import {
   type SessionAgentFactoryInput,
   type SessionManagedAgent,
 } from "../runtime/sessionAgentManager.js";
+import { resolvePaths } from "../paths/index.js";
 import { withTempHome } from "./helpers.js";
 import type { RequestContext } from "../shared/types.js";
 
@@ -203,9 +204,10 @@ function makePreparedState() {
 }
 
 test("codex adapter keeps tool execution working with session-managed agents", async () => {
-  await withTempHome(async () => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "lainclaw-codex-tool-"));
+  await withTempHome(async (home) => {
+    const cwd = resolvePaths(home).workspace;
     try {
+      await fs.mkdir(cwd, { recursive: true });
       let createdAgentCount = 0;
       const manager = createSessionAgentManager({
         agentFactory: (input) => {

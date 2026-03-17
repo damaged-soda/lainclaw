@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { buildSkillsPrompt, loadSkills } from "../skills/index.js";
+import { buildSkillsPrompt, loadSkills, resolveBuiltinSkillsDir } from "../skills/index.js";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lainclaw-skills-test-"));
@@ -78,4 +78,14 @@ test("skills prompt renders compact available_skills xml", async () => {
   assert.match(prompt, /<available_skills>/);
   assert.match(prompt, /<name>alpha123-airdrop-digest<\/name>/);
   assert.match(prompt, /<location>\/tmp\/skills\/alpha123-airdrop-digest\/SKILL\.md<\/location>/);
+});
+
+test("built-in alpha123 skill uses the runtime memory root instead of a hardcoded home path", async () => {
+  const skillPath = path.join(resolveBuiltinSkillsDir(), "alpha123-airdrop-digest", "SKILL.md");
+  const content = await fs.readFile(skillPath, "utf8");
+
+  assert.match(content, /path_describe/);
+  assert.match(content, /<memory>\/skills\/alpha123-airdrop-digest\/memory\.md/);
+  assert.match(content, /调用 `exec` 时，不要把 `memory` 当作 `workdir`/);
+  assert.doesNotMatch(content, /\/home\/leavan\/\.lainclaw-dev\/memory/);
 });

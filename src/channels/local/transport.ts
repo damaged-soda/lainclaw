@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { resolveRuntimePaths } from '../../paths/index.js';
 
 import {
   type InboundHandler,
@@ -14,8 +14,8 @@ const LOCAL_OUTBOX_FILE = 'local-gateway-outbox.jsonl';
 const LOCAL_POLL_MS_DEFAULT = 1000;
 
 // 本地传输层只做事件监听与输出落盘，不承担模型调用/策略判断。
-function resolveLocalGatewayDirectory(home = os.homedir()): string {
-  return path.join(home, '.lainclaw', 'local-gateway');
+function resolveLocalGatewayDirectory(): string {
+  return resolveRuntimePaths().localGateway;
 }
 
 interface LocalMessage {
